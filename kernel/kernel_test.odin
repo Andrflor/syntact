@@ -364,32 +364,44 @@ SIZE_CASES := []Size_Case {
 	{`x -> 5`, "0"},
 	{`x -> u8`, "0"},
 	{`x -> {u8: u8:}`, "0"},
-	// an unknown takes what its layout admits
+	// an unknown: ⌈log₂⌉ of the count of its layout
 	{`x -> ??::u8`, "8"},
 	{`x -> ??::i8`, "8"},
 	{`x -> ??::bool`, "1"},
 	{`x -> ??::char`, "21"},
 	{`x -> ??::('a'..'z')`, "5"},
-	{`x -> ??::(0..3 | 10..12)`, "4"},
-	{`x -> ??::("ab" | "c")`, "1"},
-	{`x -> ??::int`, "1.."},
-	{`x -> ??::string`, "(0..) * 21"},
-	// a term over unknowns takes what the set of its values takes
-	{"a -> ??::u8\nx -> a + a", "9"},
-	{"a -> ??::u8\nx -> a ? {<10 -> a  -> 1000}", "0 | 4"},
-	// a scope: its fields; a hole takes nothing
+	{`x -> ??::(100..103)`, "2"},
+	{`x -> ??::(0..3 | 10..12)`, "3"},
+	{`x -> ??::(u8 | bool)`, "9"},
+	{`x -> ??::("ab" | "c" | "de")`, "2"},
+	{`x -> ??::('a'..'z' * 3)`, "15"},
+	{`x -> ??::('a'..'z' * (0..2))`, "10"},
+	{"n -> ??::u8\nx -> ??::('a'..'z' * n)", "⌈log₂ (26 ** ?0)⌉"}, // depends on n
+	{`x -> ??::int`, "unbounded"},
+	{`x -> ??::string`, "unbounded"},
+	// a term over unknowns: the values it may take, no more than its unknowns take
+	{"a -> ??::u8\nx -> a + 1", "8"},
+	{"a -> ??::u8\nx -> a + a", "8"},
+	{"a -> ??::u8\nx -> a * a", "8"},
+	{"a -> ??::u8\nb -> ??::u8\nx -> a * b", "16"},
+	{"a -> ??::u8\nx -> a ? {<10 -> a  -> 1000}", "4"},
+	{"x -> !?::u8", "8"},
+	// a scope: its bindings; a hole and a production take nothing, a handler what it gives back
 	{"a -> ??::u8\nx -> {u8:f -> a  bool:g  u8:h -> 7}", "8"},
 	{"a -> ??::u8\nx -> {u8:n <- 3  t -> a}", "8"},
-	// a shape as a layout: its places; a run, what its color admits as a scope
+	{"a -> ??::u8\nx -> {u8:f -> a  -> f + 1}", "8"},
+	{"E -> {u8:v}\nx -> {E -< e { -> e.v }}", "8"},
+	// a shape as a layout: what it admits; a run of any length, no bound
 	{`x -> ??::{u8: u8:}`, "16"},
-	{ARRAY + "x -> ??::{u8: ...Array{u8}:}", "8 + (0..) * 8"},
-	{ARRAY + "x -> ??::(Array{u8})", "(0..) * 8"},
-	{ARRAY + "Pair -> {u8:a  string:b}\nx -> ??::(Array{Pair})", "(0..) * (8 + (0..) * 21)"},
-	// a format: its width, a rounding included; every real: no bound
+	{`x -> ??::{u8: bool:}`, "9"},
+	{ARRAY + "x -> ??::{u8: ...Array{u8}:}", "unbounded"},
+	{ARRAY + "x -> ??::(Array{u8})", "unbounded"},
+	// a format: the count of its values; every real: no bound
 	{`x -> ??::f16`, "16"},
 	{`x -> ??::f32`, "32"},
 	{`x -> ??::f64`, "64"},
-	{`x -> ??::float`, "1.."},
+	{`x -> ??::(f16 & 0.0..1.0)`, "14"},
+	{`x -> ??::float`, "unbounded"},
 	{"a -> ??::f32\nx -> a + 0.1", "32"},
 }
 
@@ -434,7 +446,7 @@ test_sizes :: proc(t: ^testing.T) {
 		k, parsed := run(c.source)
 		if !testing.expectf(t, parsed, "%s: does not parse", c.source) do continue
 		last := k.root.bindings[len(k.root.bindings) - 1]
-		got := print_type(size(&k, binding_type(&k, last)))
+		got := print_size(size(&k, binding_type(&k, last)))
 		testing.expectf(t, got == c.size, "%s: the size is %s, expected %s", c.source, got, c.size)
 	}
 }

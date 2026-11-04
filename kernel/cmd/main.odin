@@ -25,7 +25,7 @@ main :: proc() {
 	for b in k.root.bindings {
 		name := b.name == "" ? "_" : b.name
 		t := kernel.binding_type(&k, b)
-		fmt.printfln("%s: %s  (%s bits)", name, kernel.print_type(t), kernel.print_type(kernel.size(&k, t)))
+		fmt.printfln("%s: %s  (%s bits)", name, kernel.print_type(t), kernel.print_size(kernel.size(&k, t)))
 	}
 	for e in k.errors {
 		pos := syn.span_to_position(k.ast, e.span.start)
