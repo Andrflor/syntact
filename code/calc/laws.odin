@@ -169,6 +169,8 @@ strength :: proc(g: ^Graph, c: Class, n: Node) {
 //                                    m' = ⌊2ᴺ (2ˡ - c) / c⌋ + 1, X · m' < 2⁶³
 //   mulhi(x, m) >> (s - 64)          m = ⌈2ˢ / c⌉ < 2⁶⁴, X · (m·c - 2ˢ) < 2ˢ
 //
+//   (x >> k) / c'                   c = 2ᵏ · c', x ≥ 0: fewer bits to divide
+//
 // — and a remainder, x - c · (x / c).
 divided :: proc(g: ^Graph, c: Class, n: Node) {
 	x, d, ok := operands(g, n)
@@ -179,6 +181,10 @@ divided :: proc(g: ^Graph, c: Class, n: Node) {
 	top, divisor := b.hi, d
 	constant :: proc(g: ^Graph, v: i128) -> Class {return add(g, int_node(v))}
 	quotients := make([dynamic]Class)
+	if k := uint(0); d & 1 == 0 {
+		for d >> k & 1 == 0 do k += 1
+		append(&quotients, add(g, binary(g, .Div, add(g, binary(g, .Shr, x, constant(g, i128(k)))), constant(g, d >> k))))
+	}
 	// a product and a shift
 	for s in uint(1) ..< 63 {
 		m := (i128(1) << s + divisor - 1) / divisor
