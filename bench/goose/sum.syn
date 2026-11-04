@@ -1,7 +1,7 @@
 // sum (Goose bench/goose/sum.goose): N values from xorshift64, each mod 1000, then
 // eight passes, total += x ^ p. Prints the length and the total.
 io -> <libc.so.6>{
-  printf -> {string:format, u64:n, -> !?::i32}
+  printf -> {string:format, i64:n, -> !?::i32}
 }
 Array -> {T -> {}  -> {}  -> {T: ...Array{T}:}}
 xs -> {
@@ -19,28 +19,28 @@ build -> {
 scan -> {
   Array{u16}:data -> {}
   u8:p -> 0
-  u64:acc -> 0
+  acc -> 0
   -> data ? {
-    {u16(h) ...Array{u16}:(t)} -> scan{data -> t  p -> p  acc -> (acc + (h ^ p)) [&] 0xffffffffffffffff}!
+    {u16(h) ...Array{u16}:(t)} -> scan{data -> t  p -> p  acc -> acc + (h ^ p)}!
     -> acc
   }
 }
 count -> {
   Array{u16}:data -> {}
-  u64:acc -> 0
+  acc -> 0
   -> data ? {
-    {u16(h) ...Array{u16}:(t)} -> count{data -> t  acc -> (acc + 1) [&] 0xffffffffffffffff}!
+    {u16(h) ...Array{u16}:(t)} -> count{data -> t  acc -> acc + 1}!
     -> acc
   }
 }
 passes -> {
   Array{u16}:data -> {}
   u8:p -> 0
-  u64:acc -> 0
-  -> p ? {>=8 -> acc  -> passes{data -> data  p -> p + 1  acc -> (acc + scan{data -> data  p -> p}!) [&] 0xffffffffffffffff}!}
+  acc -> 0
+  -> p ? {>=8 -> acc  -> passes{data -> data  p -> p + 1  acc -> acc + scan{data -> data  p -> p}!}!}
 }
 -> {
   data -> build{n -> ??::u32}!
-  a -> io.printf{format -> "%llu\n"  n -> count{data -> data}!}!
-  -> io.printf{format -> "%llu\n"  n -> passes{data -> data}!}!
+  a -> io.printf{format -> "%lld\n"  n -> count{data -> data}!}!
+  -> io.printf{format -> "%lld\n"  n -> passes{data -> data}!}!
 }!

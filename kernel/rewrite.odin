@@ -300,14 +300,59 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Collapse:
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Fold:
+		// a sum along the fold: its init, and as many terms as steps
+		if image, known := sum_image(k, v); known do return image, true
 		// its value, over the layouts of its states
 		if image, known := layout_image(k, v.value); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Least:
 		return COUNTS, true
-	case ^Series, ^Recurrent:
+	case ^Series:
+		if v.op == .Add {
+			term := rewrite(k, v.term, rewriting(nil, v.index, narrowing(v.index, range_law(k, v.lo, v.hi, .Int, v.span))))
+			if image, known := hull_times(k, op(k, .Add, op(k, .Sub, v.hi, v.lo), Int(1)), term); known do return image, true
+		}
+		if f, known := family_of(k, t); known do return family_term(f), true
+	case ^Recurrent:
 		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Effect, ^Pattern, ^Scope, ^Name, ^Access, ^Carve, ^Default:
 	}
 	return nil, false
+}
+
+// sum_image: the values of a fold whose value is a state x: c ↦ x + g, g not
+// reading x: c, and n terms of g, n its steps.
+sum_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
+	lo, hi := counter_range(k, f) or_return
+	for z, i in f.states {
+		if !same(k, f.value, z) do continue
+		sum := f.updates[i].(^Operation) or_return
+		if sum.op != .Add || len(sum.args) != 2 do return
+		g: Type
+		for a, j in sum.args do if u, is_x := a.(^Unknown); is_x && same_unknown(u, z) do g = sum.args[1 - j]
+		if g == nil || reads(k, g, z) do return
+		steps := op(k, .Add, op(k, .Sub, hi, lo), Int(1))
+		terms := hull_times(k, steps, rewrite(k, g, rewriting(nil, f.index, narrowing(f.index, range_law(k, lo, hi, .Int, f.span))))) or_return
+		start := layout_image(k, f.inits[i]) or_return
+		return exact_law(k, .Add, {start, terms}, f.span), true
+	}
+	return
+}
+
+// hull_times: the integers from n·a to n·b, n ≥ 0 the counts of steps, a..b the
+// bounds of the values of g: what n terms of g sum to.
+hull_times :: proc(k: ^Kernel, n, g: Type) -> (image: Type, ok: bool) {
+	steps := layout_image(k, n) or_return
+	terms := layout_image(k, g) or_return
+	slo, shi := int_bounds(k, steps) or_return
+	glo, ghi := int_bounds(k, terms) or_return
+	nl := max(slo.? or_return, 0)
+	nh := shi.? or_return
+	a := glo.? or_return
+	b := ghi.? or_return
+	la := mul_checked(nl, a) or_return
+	ha := mul_checked(nh, a) or_return
+	lb := mul_checked(nl, b) or_return
+	hb := mul_checked(nh, b) or_return
+	return range_law(k, Int(min(la, ha)), Int(max(lb, hb)), .Int, {}), true
 }

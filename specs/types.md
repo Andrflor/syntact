@@ -995,6 +995,7 @@ d = 2, the roots of x² - c₁·x - c₂ integers, by the discriminant c₁² + 
 
 ```text
 Σ(i: lo..hi, t), t a polynomial in i       G(hi) - G(lo - 1)     G(m) = t(0) + … + t(m), by the sums of powers
+Σ(j: lo..hi, ⟳(…; x: 0 ↦ x + g; x))        ⟳(…; x: 0 ↦ x + Σ(j: lo..hi, g); x)     nothing else in the fold reads j
 Π(i: lo..hi, t), t not reading i           t ** n
 Π(i: lo..hi, c·t), c the content of t      c ** n * Π(i: lo..hi, t)
 Π(i: lo..hi, uᵃ·iᵖ)                        u ** (a·n) * Π(i: lo..hi, i) ** p

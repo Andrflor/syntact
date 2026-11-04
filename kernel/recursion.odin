@@ -198,12 +198,16 @@ carved_by_calls :: proc(k: ^Kernel, e: Type, root: ^Scope) -> map[^Binding]Type 
 }
 
 // generic_equation: root where each binding of carved is an unknown of its color,
-// root{n -> ?::C}; carved maps each one to its unknown.
+// root{n -> ?::C}; carved maps each one to its unknown. Without a color, a binding
+// is in the family of its value (§5.4).
 generic_equation :: proc(k: ^Kernel, root: ^Scope, carved: ^map[^Binding]Type) -> (^Scope, bool) {
 	for b in carved {
 		u := new_unknown(k, nil)
 		u.layout = binding_color(k, b)
-		if u.layout == nil do u.layout = everything()
+		if u.layout == nil {
+			f, known := family_of(k, binding_type(k, b))
+			u.layout = known ? family_term(f) : everything()
+		}
 		carved[b] = u
 	}
 	return derive(k, root, carved^, root.span).(^Scope)
@@ -1234,6 +1238,7 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 	if proven_in(k, n, NONPOSITIVE) do return identity
 	if s.op == .Add {
 		if sum, closed := faulhaber(k, s); closed do return sum
+		if f, summed := summed_fold(k, s); summed do return f
 		return s
 	}
 	if !reads(k, s.term, s.index) do return op(k, .Pow, s.term, n)
@@ -1439,4 +1444,34 @@ find_read :: proc(k: ^Kernel, ts: []Type, i: ^Unknown) -> ^Operation {
 		}
 	}
 	return nil
+}
+
+// summed_fold: Σ(j: lo..hi, ⟳(…; x: 0 ↦ x + g; x)) = ⟳(…; x: 0 ↦ x + Σ(j: lo..hi, g); x),
+// when nothing else in the fold reads j: a sum of sums is the sum of their terms.
+summed_fold :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
+	f := s.term.(^Fold) or_return
+	if !is_none(f.effects) do return
+	x := -1
+	for z, i in f.states do if same(k, f.value, z) do x = i
+	if x < 0 || !is_int(f.inits[x], 0) do return
+	sum := f.updates[x].(^Operation) or_return
+	if sum.op != .Add do return
+	rest := make([dynamic]Type)
+	held := false
+	for a in sum.args {
+		if z, is_state := a.(^Unknown); is_state && !held && same_unknown(z, f.states[x]) do held = true
+		else do append(&rest, a)
+	}
+	if !held || len(rest) == 0 do return
+	g := len(rest) == 1 ? rest[0] : op(k, .Add, ..rest[:])
+	if reads(k, g, f.states[x]) do return
+	for t, i in fold_parts(f) do if t != nil && i != 4 + len(f.states) + x && reads(k, t, s.index) do return
+	inner := new(Series)
+	inner^ = s^
+	inner.term = g
+	g2 := new(Fold)
+	g2^ = f^
+	g2.updates = slice.clone(f.updates)
+	g2.updates[x] = op(k, .Add, f.states[x], series_law(k, inner))
+	return fold_law(k, g2), true
 }

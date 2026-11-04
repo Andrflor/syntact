@@ -47,7 +47,7 @@ test_tail_call_is_a_loop :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
-	k, parsed := kernel.run("f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> acc + 2}!}}\n-> f{n -> ??::u32}!")
+	k, parsed := kernel.run("f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  1 -> acc  -> f{n -> n - 1  acc -> acc + 2}!}}\n-> f{n -> ??::u32}!")
 	if !testing.expect(t, parsed, "does not parse") do return
 	prog, err := lower_program(&k)
 	if !testing.expectf(t, err == "", "%s", err) do return
