@@ -287,11 +287,24 @@ generic_solution :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> 
 	// solved once for the bindings given: then at their values, its bound unknowns
 	// its own
 	// the bindings given, and those the calls carve, at the values root holds
-	eq := keyed_equation(k, root, given) or_return
-	for g in k.generics do if g.equation == eq do return substituted(k, g.solved, at_values(k, eq, given)), true
-	solved := iteration(k, eq.generic, eq.equation) or_return
-	append(&k.generics, Generic{eq, solved})
+	// a carve of the solved equation substitutes its arguments into the solution
+	// (§5.6); unsolved, the equation read through the calls of others it is given
+	key, through := call_key(k, root, given)
+	if eq, read := call_equation(k, root, key); read {
+		if solved, ok := solved_once(k, eq); ok do return substituted(k, solved, at_values(k, eq, given)), true
+	}
+	if len(through) == 0 do return
+	eq := call_equation(k, root, key, through) or_return
+	solved := solved_once(k, eq) or_return
 	return substituted(k, solved, at_values(k, eq, given)), true
+}
+
+// solved_once: the solution of an equation, by iteration (§5.6), once.
+solved_once :: proc(k: ^Kernel, eq: ^Call_Equation) -> (solution: Type, ok: bool) {
+	for g in k.generics do if g.equation == eq do return g.solved, true
+	solution = iteration(k, eq.generic, eq.equation) or_return
+	append(&k.generics, Generic{eq, solution})
+	return solution, true
 }
 
 // substituted: a solution at the values r gives (§5.6), its bound unknowns its own —
@@ -1763,9 +1776,25 @@ summed_fold :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
 // the solving only proposes it. Its length likewise: an operator on a pattern is the
 // pattern of the operator on its products (§6), |{...x r}| = |x| + 1 (§5.3), each
 // call's length taken in lo..hi.
-Measure :: enum u8 {
+Measure_Kind :: enum u8 {
 	Value,
 	Length,
+	Sum,
+}
+
+// Measure: what is bounded of what a call gives: its value; its length; or the sum
+// over its bindings Σ(x: 0..|X| - 1, g(X.#x)), g a term over the unknown at.
+Measure :: struct {
+	kind: Measure_Kind,
+	g:    Type,
+	at:   ^Unknown,
+}
+
+LENGTH :: Measure{kind = .Length}
+
+same_measure :: proc(k: ^Kernel, a, b: Measure) -> bool {
+	if a.kind != b.kind do return false
+	return a.kind != .Sum || same(k, rewrite(k, a.g, rewriting(nil, a.at, b.at)), b.g)
 }
 
 Image :: struct {
@@ -1812,7 +1841,7 @@ bounds_at :: proc(k: ^Kernel, b: Bounds, steps: Type) -> (image: Type, ok: bool)
 	return range_law(k, Int(least.? or_return), Int(top.? or_return), .Int, {}), true
 }
 
-call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure.Value) -> (image: Type, ok: bool) {
+call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure{}) -> (image: Type, ok: bool) {
 	s := call.target.(^Scope) or_return
 	if !call.recursive do return
 	root := origin(s)
@@ -1824,23 +1853,27 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure.Value) -> (im
 	// the bounds depend on the equation the call reads, and on what the fields its
 	// calls keep hold: given once; while they are given, its calls are the
 	// hypothesis
-	for x in k.images do if x.equation == eq && x.measure == measure && !x.given do return
+	for x in k.images do if x.equation == eq && same_measure(k, x.measure, measure) && !x.given do return
 	at := len(k.images)
 	append(&k.images, Image{equation = eq, measure = measure})
 	e, values, kept := kept_fields(k, call, eq)
 	next: for &x in k.images[:at] {
-		if x.equation != eq || x.measure != measure || len(x.kept) != len(kept) do continue
+		if x.equation != eq || !same_measure(k, x.measure, measure) || len(x.kept) != len(kept) do continue
 		for t, i in kept do if !same(k, t, x.kept[i]) do continue next
 		ordered_remove(&k.images, at)
 		if !x.ok do return
 		return images_at(k, &x, values)
 	}
-	if measure == .Length do e = run_law(k, .Length, {e}, eq.root.span)
 	// an equation holding a term of no type bounds nothing
 	bounds: Bounds
 	if !holds_invalid(e) {
-		bounds, ok = counter_bounds(k, eq, e, measure)
-		if !ok do bounds, ok = least_bounds(k, eq, e, measure)
+		if measure.kind != .Sum {
+			measured := measure.kind == .Length ? run_law(k, .Length, {e}, eq.root.span) : e
+			bounds, ok = counter_bounds(k, eq, measured, measure)
+			if !ok do bounds, ok = least_bounds(k, eq, measured, measure)
+		}
+		// as functions of what the call carves
+		if !ok do bounds, ok = linear_bounds(k, eq, e, measure)
 	}
 	k.images[at] = Image{eq, measure, kept, bounds, ok, true, nil}
 	if !ok do return
@@ -1849,10 +1882,14 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure.Value) -> (im
 
 // images_at: the bounds of the entry at the values a call gives, read once for them.
 images_at :: proc(k: ^Kernel, x: ^Image, values: Rewrite) -> (image: Type, ok: bool) {
-	if x.bounds.count == nil do return bounds_at(k, x.bounds, nil)
-	// what the count of steps reads of the values
+	// what the bounds read of the values: the count of steps, or the fields they are
+	// functions of
 	key := make([dynamic]Type)
-	for v in values do if v.unknown != nil && reads(k, x.bounds.steps, v.unknown) do append(&key, v.term)
+	for v in values {
+		if v.unknown == nil do continue
+		read := x.bounds.count != nil ? reads(k, x.bounds.steps, v.unknown) : x.bounds.lo != nil && reads(k, x.bounds.lo, v.unknown) || x.bounds.hi != nil && reads(k, x.bounds.hi, v.unknown)
+		if read do append(&key, v.term)
+	}
 	// the very terms first; terms equal to those of an entry are read as its terms
 	// from then on
 	identical: for a in x.at {
@@ -1864,7 +1901,8 @@ images_at :: proc(k: ^Kernel, x: ^Image, values: Rewrite) -> (image: Type, ok: b
 		append(&x.at, Image_At{key[:], a.image, a.ok})
 		return a.image, a.ok
 	}
-	image, ok = bounds_at(k, x.bounds, rewrite(k, x.bounds.steps, values))
+	if x.bounds.count == nil do image, ok = linear_at(k, x.bounds, values)
+	else do image, ok = bounds_at(k, x.bounds, rewrite(k, x.bounds.steps, values))
 	append(&x.at, Image_At{key[:], image, ok})
 	return
 }
@@ -1939,7 +1977,7 @@ bound_product :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (p: Bound_Product, ok
 measured :: proc(k: ^Kernel, t: Type, root: ^Scope, measure: Measure, to: Type) -> (out: Type, ok: bool) {
 	at: Rewrite
 	for x in calls_in(k, t, root) {
-		if measure == .Value do at = rewriting_call(at, x, to)
+		if measure.kind == .Value do at = rewriting_call(at, x, to)
 		else do at = append_read(at, new_operation(.Length, x), to)
 	}
 	out = rewrite(k, t, at)
@@ -2013,6 +2051,289 @@ least_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure) 
 		if holds_in(k, measured(k, e, eq.root, measure, taken) or_return, set, {}) do return {lo = lo_t, hi = hi_t}, true
 	}
 	return
+}
+
+// linear_at: the bounds at the values the call gives: functions of what it carves,
+// each read on its image there.
+linear_at :: proc(k: ^Kernel, b: Bounds, values: Rewrite) -> (image: Type, ok: bool) {
+	lo, hi: Type
+	if b.lo != nil {
+		least, _ := int_bounds(k, layout_image(k, rewrite(k, b.lo, values)) or_return) or_return
+		lo = Int(least.? or_return)
+	}
+	if b.hi != nil {
+		_, top := int_bounds(k, layout_image(k, rewrite(k, b.hi, values)) or_return) or_return
+		hi = Int(top.? or_return)
+	}
+	if lo == nil && hi == nil do return
+	return range_law(k, lo, hi, .Int, {}), true
+}
+
+// measure_of: the measure of t, each call of root in it an unknown of its own: what
+// the call gives, its length, or its sum Σ(x: 0..|X| - 1, g(X.#x)) — split over the
+// bindings of a scope, an expansion by the sum of what it expands, a pattern by its
+// products (§5.3, §6).
+measure_of :: proc(k: ^Kernel, t: Type, root: ^Scope, m: Measure, calls: ^[dynamic]^Collapse, ys: ^[dynamic]^Unknown) -> (out: Type, ok: bool) {
+	taken :: proc(k: ^Kernel, x: ^Collapse, calls: ^[dynamic]^Collapse, ys: ^[dynamic]^Unknown) -> ^Unknown {
+		for c, i in calls do if c == x do return ys[i]
+		y := new_unknown(k, nil)
+		y.layout = family_term(.Int)
+		append(calls, x)
+		append(ys, y)
+		return y
+	}
+	switch m.kind {
+	case .Value, .Length:
+		v := m.kind == .Length ? run_law(k, .Length, {t}, root.span) : t
+		r: Rewrite
+		for x in calls_in(k, t, root) {
+			y := taken(k, x, calls, ys)
+			if m.kind == .Value do r = rewriting_call(r, x, y)
+			else do r = append_read(r, new_operation(.Length, x), y)
+		}
+		out = rewrite(k, v, r)
+		return out, solved(out, root)
+	case .Sum:
+		if c, is_call := as_call(t); is_call && is_call_of(c, root) do return taken(k, c, calls, ys), true
+		#partial switch v in t {
+		case ^Pattern:
+			if has_effect(v) do return
+			branches := make([]Branch, len(v.branches))
+			for b, i in v.branches do branches[i] = with_product(b, is_none(b.product) ? b.product : measure_of(k, b.product, root, m, calls, ys) or_return)
+			return pattern_law(k, branching(v, branches)), true
+		case ^Scope:
+			out = Int(0)
+			for b in run_data(k, v) {
+				x := binding_value(k, b)
+				part := b.kind == .Expand ? measure_of(k, x, root, m, calls, ys) or_return : rewrite(k, m.g, rewriting(nil, m.at, x))
+				out = op(k, .Add, out, part)
+			}
+			return out, solved(out, root)
+		}
+	}
+	return
+}
+
+// Linear: Σ coefs[j]·uⱼ + constant ≥ 0, over the coefficients u of a bound.
+Linear :: struct {
+	coefs:    []i128,
+	constant: i128,
+}
+
+// linear_bounds: the bounds of a call that stays as functions of what it carves
+// (§5.6): hi = c + Σ aⱼ·mⱼ, mⱼ the measure of a field the call carves — an integer,
+// or the length of a run —, aⱼ ≥ 0; lo likewise from below. Each product of the
+// equation, its calls taken at the bound of what they carve and every other term at
+// its own image, lies within the bound at the product's fields, for every value its
+// branch lets them take: linear constraints on c and the aⱼ — the induction, each
+// product within the bound, its calls within it. Their least solution, the aⱼ first
+// then c, solved in closed form by elimination.
+linear_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, m: Measure) -> (bounds: Bounds, ok: bool) {
+	Field :: struct {
+		binding: ^Binding,
+		unknown: ^Unknown,
+		measure: Type,
+		z:       ^Unknown,
+	}
+	fields := make([dynamic]Field)
+	for b, u in eq.params {
+		x := u.(^Unknown) or_continue
+		measure: Type
+		if proven_in(k, x, family_term(.Int)) do measure = x
+		else if gives_scope(k, x) do measure = run_law(k, .Length, {x}, eq.root.span)
+		else do continue
+		z := new_unknown(k, nil)
+		z.layout = family_term(.Int)
+		append(&fields, Field{b, x, measure, z})
+	}
+	n := len(fields)
+	// the measures of the fields read as the unknowns z
+	as_z: Rewrite
+	for f in fields {
+		if f.measure == Type(f.unknown) do as_z = rewriting(as_z, f.unknown, f.z)
+		else do as_z = append_read(as_z, f.measure, f.z)
+	}
+	// t, over the z, as Σ coefs·z + rest
+	split_z :: proc(k: ^Kernel, t: Type, zs: []^Unknown) -> (coefs: []i128, rest: Type, ok: bool) {
+		coefs = make([]i128, len(zs))
+		rest = t
+		for z, j in zs {
+			alpha, beta := affine_in(k, rest, z) or_return
+			a := alpha.(Int) or_return
+			coefs[j], rest = i128(a), beta
+		}
+		for z in zs do if reads(k, rest, z) do return
+		return coefs, rest, true
+	}
+	zs := make([]^Unknown, n)
+	for f, j in fields do zs[j] = f.z
+	leaves := make([dynamic]Product)
+	products(k, given(k, e), &leaves)
+	side :: proc(k: ^Kernel, leaves: []Product, eq: ^Call_Equation, m: Measure, fields: []Field, zs: []^Unknown, as_z: Rewrite, upper: bool) -> (solution: []i128, ok: bool) {
+		n := len(fields)
+		rows := make([dynamic]Linear)
+		// aⱼ ≥ 0
+		for j in 0 ..< n {
+			row := Linear{make([]i128, n + 1), 0}
+			row.coefs[j] = 1
+			append(&rows, row)
+		}
+		for leaf in leaves {
+			if is_none(leaf.term) do continue
+			calls, ys := make([dynamic]^Collapse), make([dynamic]^Unknown)
+			measured := measure_of(k, leaf.term, eq.root, m, &calls, &ys) or_return
+			t := rewrite(k, measured, as_z)
+			// K = bound(z) - measure(z) on the upper side, measure - bound below: K_j the
+			// coefficient of zⱼ, K0 the constant, linear in (a, c)
+			ks := make([]Linear, n + 1)
+			for &x in ks do x = Linear{make([]i128, n + 1), 0}
+			sign: i128 = upper ? 1 : -1
+			for j in 0 ..< n do ks[j + 1].coefs[j] += sign
+			ks[0].coefs[n] += sign
+			for x, i in calls {
+				alpha, beta := affine_in(k, t, ys[i]) or_return
+				a := i128(alpha.(Int) or_return)
+				if a < 0 do return
+				t = beta
+				// the call at the bound of what it carves
+				changes := x.target.(^Scope).changes
+				for f, j in fields {
+					arg := changes[f.binding] or_else Type(f.unknown)
+					at := f.measure == Type(f.unknown) ? arg : run_law(k, .Length, {arg}, eq.root.span)
+					q, p := split_z(k, rewrite(k, at, as_z), zs) or_return
+					constant := p.(Int) or_return
+					for qi, i in q do ks[i + 1].coefs[j] -= sign * a * qi
+					ks[0].coefs[j] -= sign * a * i128(constant)
+				}
+				ks[0].coefs[n] -= sign * a
+			}
+			es, rest := split_z(k, t, zs) or_return
+			for ys_i in ys do if reads(k, rest, ys_i) do return
+			for x, j in es do ks[j + 1].constant -= sign * x
+			// every other term at its own image
+			lo, hi := int_bounds(k, layout_image(k, read_in(k, leaf, rest)) or_return) or_return
+			d := upper ? hi : lo
+			ks[0].constant -= sign * (d.? or_return)
+			// the region of the fields in the branch
+			constants := make([dynamic]Linear)
+			append(&constants, ks[0])
+			for f, j in fields {
+				l, h := int_bounds(k, layout_image(k, read_in(k, leaf, f.measure)) or_return) or_return
+				kj := ks[j + 1]
+				added := make([dynamic]Linear)
+				for c in constants {
+					switch {
+					case l != nil && h != nil && l.? == h.?:
+						append(&added, linear_add(c, kj, l.?) or_return)
+					case h == nil && l != nil:
+						append(&added, linear_add(c, kj, l.?) or_return)
+					case l == nil && h != nil:
+						append(&added, linear_add(c, kj, h.?) or_return)
+					case l != nil && h != nil:
+						append(&added, linear_add(c, kj, l.?) or_return)
+						append(&added, linear_add(c, kj, h.?) or_return)
+					}
+				}
+				switch {
+				case h == nil && l == nil:
+					append(&rows, kj, linear_scaled(kj, -1))
+				case h == nil:
+					append(&rows, kj)
+				case l == nil:
+					append(&rows, linear_scaled(kj, -1))
+				}
+				if len(added) > 16 do return
+				constants = added
+			}
+			append(&rows, ..constants[:])
+		}
+		return least_solution(rows[:], n + 1, upper)
+	}
+	term :: proc(k: ^Kernel, u: []i128, fields: []Field) -> Type {
+		out: Type = Int(u[len(fields)])
+		for f, j in fields do if u[j] != 0 do out = op(k, .Add, out, op(k, .Mul, Int(u[j]), f.measure))
+		return out
+	}
+	if u, solved := side(k, leaves[:], eq, m, fields[:], zs, as_z, true); solved do bounds.hi = term(k, u, fields[:])
+	if u, solved := side(k, leaves[:], eq, m, fields[:], zs, as_z, false); solved do bounds.lo = term(k, u, fields[:])
+	if m.kind == .Length && bounds.lo == nil do bounds.lo = Int(0)
+	return bounds, bounds.hi != nil || bounds.lo != nil
+}
+
+linear_add :: proc(a, b: Linear, by: i128) -> (out: Linear, ok: bool) {
+	out = Linear{make([]i128, len(a.coefs)), a.constant}
+	for x, i in a.coefs {
+		y := mul_checked(b.coefs[i], by) or_return
+		out.coefs[i] = add_checked(x, y) or_return
+	}
+	c := mul_checked(b.constant, by) or_return
+	out.constant = add_checked(out.constant, c) or_return
+	return out, true
+}
+
+linear_scaled :: proc(a: Linear, by: i128) -> Linear {
+	out := Linear{make([]i128, len(a.coefs)), a.constant * by}
+	for x, i in a.coefs do out.coefs[i] = x * by
+	return out
+}
+
+// least_solution: the integers u satisfying every row, each the least in turn (the
+// greatest when not upper, the bound from below), the others free: the rows over
+// u₀ … uᵥ, the later eliminated (Fourier–Motzkin), give uᵥ its range.
+least_solution :: proc(rows: []Linear, n: int, upper: bool) -> (u: []i128, ok: bool) {
+	u = make([]i128, n)
+	current := slice.clone(rows)
+	for v in 0 ..< n {
+		system := slice.clone(current)
+		for w := n - 1; w > v; w -= 1 do system = eliminate(system, w) or_return
+		lo, hi: Maybe(i128)
+		for r in system {
+			a := r.coefs[v]
+			switch {
+			case a > 0:
+				l := ceil_div(-r.constant, a)
+				if lo == nil || l > lo.? do lo = l
+			case a < 0:
+				h := floor_div(r.constant, -a)
+				if hi == nil || h < hi.? do hi = h
+			case r.constant < 0:
+				return
+			}
+		}
+		value := (upper ? lo : hi).? or_return
+		if upper && hi != nil && value > hi.? || !upper && lo != nil && value < lo.? do return
+		u[v] = value
+		// the rows with uᵥ given
+		for &r in current {
+			r.constant = add_checked(r.constant, mul_checked(r.coefs[v], value) or_return) or_return
+			coefs := slice.clone(r.coefs)
+			coefs[v] = 0
+			r.coefs = coefs
+		}
+	}
+	return u, true
+}
+
+// eliminate: the rows without uₓ: each pair of opposite signs on it combined.
+eliminate :: proc(rows: []Linear, x: int) -> (out: []Linear, ok: bool) {
+	kept := make([dynamic]Linear)
+	for r in rows do if r.coefs[x] == 0 do append(&kept, r)
+	for p in rows {
+		if p.coefs[x] <= 0 do continue
+		for q in rows {
+			if q.coefs[x] >= 0 do continue
+			r := linear_add(linear_scaled(p, -q.coefs[x]), q, p.coefs[x]) or_return
+			g := abs(r.constant)
+			for c in r.coefs do g = gcd(g, abs(c))
+			if g > 1 {
+				for &c in r.coefs do c /= g
+				r.constant = floor_div(r.constant, g)
+			}
+			append(&kept, r)
+		}
+	}
+	if len(kept) > 512 do return
+	return kept[:], true
 }
 
 // counter_bounds: f = m ? {B -> c  -> g + f{s(m)}! + …}, each call moving the

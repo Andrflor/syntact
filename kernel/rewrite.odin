@@ -463,6 +463,22 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return COUNTS, true
 	case ^Series:
 		if v.op == .Add {
+			// Σ(a + b) = Σa + Σb
+			if o, sums := v.term.(^Operation); sums && o.op == .Add {
+				total: Type = Int(0)
+				split := true
+				for part in o.args {
+					image, known := layout_image(k, series(k, .Add, v.index, v.lo, v.hi, part))
+					if !known {
+						split = false
+						break
+					}
+					total = exact_law(k, .Add, {total, image}, v.span)
+				}
+				if split do return total, true
+			}
+			// Σ(x: 0..|X| - 1, g(X.#x)), X a call: what bounds that sum of the call (§5.6)
+			if image, known := summed_image(k, v); known do return image, true
 			term := rewrite(k, v.term, rewriting(nil, v.index, narrowing(v.index, range_law(k, v.lo, v.hi, .Int, v.span))))
 			if image, known := hull_times(k, op(k, .Add, op(k, .Sub, v.hi, v.lo), Int(1)), term); known do return image, true
 		}
@@ -767,4 +783,30 @@ is_call_of :: proc(t: Type, s: ^Scope) -> bool {
 	c := as_call(t) or_return
 	target := c.target.(^Scope) or_return
 	return origin(target) == origin(s)
+}
+
+// summed_image: Σ(x: 0..|X| - 1, g(X.#x)), X a recursive call, its terms reading X
+// only at x: the bounds of that sum of what the call gives (§5.6).
+summed_image :: proc(k: ^Kernel, v: ^Series) -> (image: Type, ok: bool) {
+	if !is_int(v.lo, 0) do return
+	reads_at :: proc(t: Type, i: ^Unknown, out: ^[dynamic]^Collapse) {
+		if o, is_op := t.(^Operation); is_op && o.op == .Item {
+			if c, is_call := as_call(o.args[0]); is_call do if u, at := o.args[1].(^Unknown); at && same_unknown(u, i) do append(out, c)
+		}
+		for p in parts(t) do reads_at(p, i, out)
+	}
+	calls := make([dynamic]^Collapse)
+	reads_at(v.term, v.index, &calls)
+	for c in calls {
+		if !same(k, v.hi, op(k, .Sub, run_law(k, .Length, {c}, v.span), Int(1))) do continue
+		// at: a binding of X, what X holds at a place
+		item := new_operation(.Item, c, v.index)
+		at := new_unknown(k, nil)
+		at.layout = layout_image(k, item) or_continue
+		g := rewrite(k, v.term, append_read(nil, item, at))
+		if holds_invalid(g) do continue
+		if reads(k, g, v.index) do continue
+		return call_image(k, c, Measure{.Sum, g, at})
+	}
+	return
 }

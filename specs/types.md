@@ -1180,11 +1180,18 @@ in c. While the equation is read, where what is carved is unknown or at the valu
 of a call, its calls are the hypothesis: they stay calls, and nothing is proven of
 them yet.
 
-The values of a call that stays are bounded by the recursion of its bounds. The
-bounds lo, hi of what it gives are unknowns: its equation, each call in it taken in
-lo..hi and every other term at its own image, gives `hi = max(…)` and `lo = min(…)`
-over its products, solved in closed form. A product reading no call is a constant
-bound; `x % m`, m > 0 constant, lies in -(m - 1)..m - 1, and in 0..m - 1 when x ≥ 0;
+The values of a call that stays are bounded by the recursion of its bounds. What is
+bounded is a measure of what the call gives: its value, its length, or a sum over its
+bindings `Σ(x: 0..|X| - 1, g(X.#x))` — split over the bindings of a scope, an
+expansion by the sum of what it expands, a pattern by its products; a sum over the
+bindings of a call is that measure of the call. The bounds lo, hi are unknowns, and
+functions of the measures mⱼ of the fields the call carves — an integer, the length
+of a run —: `hi = c + Σ aⱼ·mⱼ`, aⱼ ≥ 0, lo likewise. Its equation, each call in it
+taken at the bound of what it carves and every other term at its own image, gives
+`hi ≥ …` and `lo ≤ …` over its products, for every value their branches let the
+fields take: linear in c and the aⱼ, their least solution, the aⱼ first, in closed
+form. With no field read, `hi = max(…)` and `lo = min(…)`. A product reading no
+call is a constant bound; `x % m`, m > 0 constant, lies in -(m - 1)..m - 1, and in 0..m - 1 when x ≥ 0;
 a step `α·y + g`, α ≥ 0, keeps hi when `α·hi + max(g) ≤ hi`, lo likewise, and
 otherwise leaves that side without bound. The least solution, the narrowest range,
 is proven by induction: the solving only proposes it. A field every call keeps holds
@@ -1200,6 +1207,7 @@ A step that is a pattern gives one of its products, `αᵢ·y + gᵢ`: when no v
 negative, the greatest follows the greatest αᵢ and gᵢ, the least the least:
 
 ```text
+Σ(x: 0..|split{t -> s  w -> {}}!| - 1, |split{…}!.#x|)  in 0..|s|      hi = |t| + |w|
 sum{t -> build{depth -> d}!}!   in 0..1022 * 2 ** d - 511      y ↦ 2·y + 511, from 511
 count{e -> build{depth -> d}!}! in d + 1..2 ** (d + 1) - 1      y ↦ 2·y + 1 above, y + 1 below
 eval{e -> build{depth -> d}!  p -> q}! in 0..m - 1               every product x % m, x ≥ 0 in 0..m - 1

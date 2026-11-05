@@ -1697,7 +1697,7 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 	}
 	if o.op == .Length {
 		// the length of a call that stays: bounded by the recursion of its bounds (§5.6)
-		if call, is_call := as_call(o.args[0]); is_call do if n, read := call_image(k, call, .Length); read do return n, true
+		if call, is_call := as_call(o.args[0]); is_call do if n, read := call_image(k, call, LENGTH); read do return n, true
 		if set, known := values(k, o.args[0]); known do if n, read := length_image(k, set); read do return n, true
 		// otherwise a count of bindings: 0..
 		if _, _, pieces := run_pieces(k, o.args[0]); !pieces do return COUNTS, true
