@@ -824,8 +824,8 @@ summed_image :: proc(k: ^Kernel, v: ^Series) -> (image: Type, ok: bool) {
 	return
 }
 
-// least_image: μ(i: m / c ** i in B), B holding 0, m ≥ 0: the orbit reaches 0, the
-// later the greater m — at most the count of the digits of m in base c, at its bound.
+// least_image: μ(i: m / c ** i in B), B holding 0: the orbit reaches 0, the later the
+// greater |m| — at most the count of the digits of |m| in base c, at its bound.
 least_image :: proc(k: ^Kernel, l: ^Least) -> (image: Type, ok: bool) {
 	holds := l.holds.(^Operation) or_return
 	if holds.op != .In || !is_bool(in_law(k, Int(0), holds.args[1]), true) do return
@@ -837,8 +837,10 @@ least_image :: proc(k: ^Kernel, l: ^Least) -> (image: Type, ok: bool) {
 	at, by_index := power.args[1].(^Unknown)
 	if !by_index || !same_unknown(at, l.index) || c < 2 || reads(k, div.args[0], l.index) do return
 	lo, hi := int_bounds(k, layout_image(k, div.args[0]) or_return) or_return
-	if (lo.? or_return) < 0 do return
-	top := hi.? or_return
+	// / rounds toward 0 (§4.5): |m / c ** i| = |m| / c ** i
+	least, top := lo.? or_return, hi.? or_return
+	if least == min(i128) do return
+	top = max(top, -least)
 	digits: i128 = 0
 	for x := top; x > 0; x /= i128(c) do digits += 1
 	return range_law(k, Int(0), Int(digits), .Int, l.span), true

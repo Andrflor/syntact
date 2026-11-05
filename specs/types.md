@@ -983,7 +983,7 @@ The orbit has a closed form when s moves by a constant, or halves: its i-th poin
 ```text
 s(k) = k + c           kᵢ = m + c·i                          n = m - b, or 0, when B = ..b or the point b
 s(k) = α·k + c         kᵢ = α ** i * m + c * (α ** i - 1) / (α - 1)
-s(k) = k / c, k ≥ 0    kᵢ = m / c ** i                       n = μ(i: m / c ** i in B)
+s(k) = k / c           kᵢ = m / c ** i                       n = μ(i: m / c ** i in B)     / rounds toward 0
 s(k) = k >> c          kᵢ = m >> c·i
 s(k) = k from c        kᵢ = m from c·i                       n = |m| / c, when B is the runs of fewer than c pieces
 ```

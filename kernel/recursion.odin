@@ -746,7 +746,7 @@ continues :: proc(k: ^Kernel, stop: Type, ki: Type, i: ^Unknown) -> bool {
 
 // orbit: kᵢ = sⁱ(m), the i-th point of the orbit of m by s(x), when it has a closed
 // form: s(x) = α·x + β gives m + β·i when α = 1, αⁱ·m + β·(αⁱ - 1)/(α - 1)
-// otherwise; s(x) = x / c, for x ≥ 0, gives m / cⁱ; s(x) = x >> c gives m >> c·i.
+// otherwise; s(x) = x / c gives m / cⁱ; s(x) = x >> c gives m >> c·i.
 orbit :: proc(k: ^Kernel, s: Type, x: ^Unknown, m: Type, i: ^Unknown) -> (Type, bool) {
 	if alpha, beta, affine := affine_in(k, s, x); affine {
 		a, is_int := alpha.(Int)
@@ -769,8 +769,7 @@ orbit :: proc(k: ^Kernel, s: Type, x: ^Unknown, m: Type, i: ^Unknown) -> (Type, 
 	case .Shr:
 		shift = i128(c)
 	case .Div:
-		// ⌊⌊m / c⌋ / c⌋ = ⌊m / c²⌋ for m ≥ 0
-		if !included(k, layout_of(k, x), COUNTS) do return nil, false
+		// (m / c) / c = m / c², / rounding toward 0 (§4.5), whatever the sign of m
 		return op(k, .Div, m, op(k, .Pow, c, i)), true
 	case:
 		return nil, false
@@ -1872,8 +1871,16 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure{}) -> (image:
 			bounds, ok = counter_bounds(k, eq, measured, measure)
 			if !ok do bounds, ok = least_bounds(k, eq, measured, measure)
 		}
-		// as functions of what the call carves
-		if !ok do bounds, ok = linear_bounds(k, eq, e, measure)
+		// as functions of what the call carves: a side left open taken from them, both
+		// bounds holding
+		if !ok || bounds.count == nil && (bounds.lo == nil || bounds.hi == nil) {
+			if linear, read := linear_bounds(k, eq, e, measure); read {
+				if !ok do bounds = linear
+				if bounds.lo == nil do bounds.lo = linear.lo
+				if bounds.hi == nil do bounds.hi = linear.hi
+				ok = true
+			}
+		}
 	}
 	k.images[at] = Image{eq, measure, kept, bounds, ok, true, nil}
 	if !ok do return
