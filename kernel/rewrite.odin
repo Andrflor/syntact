@@ -316,7 +316,11 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Recurrent:
 		if f, known := family_of(k, t); known do return family_term(f), true
-	case ^Effect, ^Pattern, ^Scope, ^Name, ^Access, ^Carve, ^Default:
+	case ^Access:
+		// x.a, x of a shape: the color of a in it
+		set := values(k, v.target) or_return
+		return field_color(k, set, v.name)
+	case ^Effect, ^Pattern, ^Scope, ^Name, ^Carve, ^Default:
 	}
 	return nil, false
 }
@@ -354,4 +358,26 @@ hull_times :: proc(k: ^Kernel, n, g: Type) -> (image: Type, ok: bool) {
 	lb := mul_checked(nl, b) or_return
 	hb := mul_checked(nh, b) or_return
 	return range_law(k, Int(min(la, ha)), Int(max(lb, hb)), .Int, {}), true
+}
+
+// field_color: the color of the field `name` in the shape a layout holds — in a
+// term of it, when it is narrowed (L & S).
+field_color :: proc(k: ^Kernel, layout: Type, name: string) -> (color: Type, ok: bool) {
+	if both, narrowed := layout.(^And); narrowed {
+		for t in both.terms do if color, ok = field_color(k, t, name); ok do return
+		return
+	}
+	s := layout.(^Scope) or_return
+	if !is_shape(k, s) {
+		// a scope with productions: the field in those that have it, of one color
+		for p in placed(k, s, .Shape) {
+			if p.kind != .Product || p.value == nil do continue
+			c := field_color(k, binding_type(k, p), name) or_continue
+			if color != nil && !same(k, color, c) do return nil, false
+			color = c
+		}
+		return color, color != nil
+	}
+	for b in placed(k, s, .Shape) do if b.name == name && b.color != nil do return binding_color(k, b), true
+	return
 }
