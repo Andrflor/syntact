@@ -16,8 +16,9 @@ import enc "asm"
 // keeps, then the slots, 16-aligned.
 //
 // A function gives its values back as words: the first two in rax and rdx, the
-// others in slots the caller reserves above the arguments it passes on the stack,
-// 16-aligned, which the function writes above its return address, in order.
+// others in slots the caller reserves above the arguments it passes on the stack —
+// at the bottom of its frame, 16-aligned —, which the function writes above its
+// return address, in order.
 
 KEPT := []enc.Register64{.RBX, .R12, .R13, .R14, .R15}
 SPENT := []enc.Register64{.RSI, .RDI, .R8, .R9, .R10}
@@ -56,8 +57,13 @@ function :: proc(e: ^Emitter, f: ^mir.Func) -> string {
 	enc.push_r64(.RBP)
 	enc.mov_r64_r64(.RBP, .RSP)
 	for r in fr.alloc.used do enc.push_r64(enc.Register64(r))
+	// the slots, then, at the bottom of the frame, where the calls it makes give
+	// back the values beyond the registers
 	size := 8 * fr.alloc.slots
+	results := 0
+	for b in f.blocks do for inst in b.insts do if c, is_call := inst.(mir.Call); is_call do results = max(results, result_slots(len(c.dst)))
 	if (8 * len(fr.alloc.used) + size) % 16 != 0 do size += 8
+	size += results
 	if size > 0 do enc.sub_r64_imm32(.RSP, u32(size))
 	// the parameters, from the registers the System V ABI gives them
 	assignment, msg := assign(f.source.params)
@@ -406,8 +412,6 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		callee := e.prog.funcs[i.func]
 		assignment, msg := assign(callee.params)
 		if msg != "" do return msg
-		slots := result_slots(len(i.dst))
-		if slots > 0 do enc.sub_r64_imm32(.RSP, u32(slots))
 		pass(fr, i.args, assignment)
 		enc.call_rel32(0)
 		append(&e.calls, Fixup{here(e) - 4, i.func})
@@ -418,10 +422,14 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 				put(fr, place_of(fr, x), enc.SYSV_INT_RET[k])
 				continue
 			}
-			enc.mov_r64_m64(.RAX, enc.AddressComponents{base = .RSP, displacement = i32(8 * (k - len(enc.SYSV_INT_RET)))})
+			at := enc.AddressComponents{base = .RSP, displacement = i32(8 * (k - len(enc.SYSV_INT_RET)))}
+			if r, is_reg := place_of(fr, x).(enc.Register64); is_reg {
+				enc.mov_r64_m64(r, at)
+				continue
+			}
+			enc.mov_r64_m64(.RAX, at)
 			put(fr, place_of(fr, x), .RAX)
 		}
-		if slots > 0 do enc.add_r64_imm32(.RSP, u32(slots))
 	}
 	return ""
 }
