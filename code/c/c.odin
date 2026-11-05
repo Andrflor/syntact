@@ -575,6 +575,9 @@ lanes :: proc(w: ^Writer, x: code.Binary, kind: code.Kind, a, b: string) -> (str
 		bits := code.lane_bits(kind)
 		unsigned := w.f.kinds[x.b].lanes > 0 ? unsigned_of(kind) : fmt.tprintf("uint%d_t", bits)
 		if kind.machine == .Int do return fmt.tprintf("(%s)((%s)%s %s (%s)%s)", type_of(kind), unsigned_of(kind), a, C_OPS[x.op], unsigned, b), ""
+	case .Shr:
+		// lanes not negative shift zeros in: of a word read as unsigned, its bits
+		if kind.machine == .Int && kind.bounds.lo >= 0 do return fmt.tprintf("(%s)((%s)%s >> %s)", type_of(kind), unsigned_of(kind), a, b), ""
 	}
 	return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
 }

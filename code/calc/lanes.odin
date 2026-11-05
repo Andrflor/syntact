@@ -26,16 +26,22 @@ import code ".."
 //
 // Which runs, the loop or its lanes and the turns they leave, is the cost's to say.
 
-// laned: the law of lanes on each loop of the code, once.
+// laned: the law of lanes on each loop of the code, once: interleaved and blocked
+// orbits in lanes of words; interleaved in lanes of fewer bits.
 laned :: proc(g: ^Graph) {
 	if g.costs.lanes < 2 do return
 	for l in 0 ..< len(g.loops) {
 		if g.loops[l].origin != .Code do continue
 		g.loops[l].origin = .Laned
-		lanes_of(g, l, g.costs.lanes, 0)
+		if f, is := fold_of(g, l, 0); is {
+			interleaved(g, &f, g.costs.lanes, 0)
+			blocked(g, &f, g.costs.lanes)
+		}
 		// ℤ → ℤ/2ʷ is a homomorphism of rings: where each lane and what it reads
 		// stays within w bits, the lanes are of w bits, and more of them
-		if g.costs.lanes32 > 0 do lanes_of(g, l, g.costs.lanes32, 32)
+		if g.costs.lanes32 > 0 {
+			if f, is := fold_of(g, l, 32); is do interleaved(g, &f, g.costs.lanes32, 32)
+		}
 	}
 }
 
@@ -45,136 +51,203 @@ Stepped :: struct {
 	step:  Affine,
 }
 
-// Reduction: a parameter x ↦ x ⊕ g.
+// Reduction: a parameter x ↦ x ⊕ g₁ ⊕ g₂ ⊕ …
 Reduction :: struct {
 	param: int,
 	op:    code.Op,
-	term:  Class,
+	terms: []Class,
 }
 
-lanes_of :: proc(g: ^Graph, l: int, lanes, bits: int) -> bool {
-	info := g.loops[l]
-	if info.state >= 0 do return false
-	loop := g.nodes[info.node]
-	own := own_params(info)
-	turn := turn_of(g, loop.args[len(loop.args) - 1], l) or_return
+// Fold: a loop whose turns fold monoids: the counter its test reads, by delta,
+// where it stops; its steps that compose, the counter first; its reductions; what
+// no turn changes.
+Fold :: struct {
+	l:          int,
+	info:       Loop_Info,
+	loop:       Node,
+	own:        int,
+	turn:       Turn,
+	counter:    int,
+	delta:      i64,
+	stop:       Stop,
+	steps:      [dynamic]Stepped,
+	reductions: [dynamic]Reduction,
+	invariants: map[int]Class,
+}
+
+// fold_of: the loop l as a fold of monoids, in lanes of bits bits — 0: 64.
+fold_of :: proc(g: ^Graph, l: int, bits: int) -> (f: Fold, ok: bool) {
+	f.l, f.info = l, g.loops[l]
+	if f.info.state >= 0 do return
+	f.loop = g.nodes[f.info.node]
+	f.own = own_params(f.info)
+	f.turn = turn_of(g, f.loop.args[len(f.loop.args) - 1], l) or_return
 	// the counter the test reads: where the lanes stop
-	counter := -1
-	delta: i64
-	stop: Stop
+	f.counter = -1
 	for i, d in counters(g, l) {
-		if x, crossed := stop_of(g, turn, l, i, d); crossed {
-			counter, delta, stop = i, d, x
+		if x, crossed := stop_of(g, f.turn, l, i, d); crossed {
+			f.counter, f.delta, f.stop = i, d, x
 		}
 	}
-	if counter < 0 do return false
-	// the others: steps that compose, reductions, or what no turn changes; the
-	// counter first
-	steps := make([dynamic]Stepped)
-	append(&steps, Stepped{counter, Affine{a = 1, b = transmute(u64)delta}})
-	reductions := make([dynamic]Reduction)
-	invariants := make(map[int]Class)
-	for j in 0 ..< own {
-		if j == counter do continue
-		next := turn.again.args[j]
+	if f.counter < 0 do return
+	// the others: steps that compose, reductions, or what no turn changes
+	append(&f.steps, Stepped{f.counter, Affine{a = 1, b = transmute(u64)f.delta}})
+	for j in 0 ..< f.own {
+		if j == f.counter do continue
+		next := f.turn.again.args[j]
 		if param, is := lookup(g, Node{kind = .Param, owner = l, index = j}); is && find(g, next) == find(g, g.home[param]) {
-			invariants[j] = loop.args[j]
+			f.invariants[j] = f.loop.args[j]
 			continue
 		}
 		if r, is := reduction(g, next, l, j); is {
-			append(&reductions, r)
+			append(&f.reductions, r)
 			continue
 		}
 		step := affine_step(g, next, l, j) or_return
 		// a lane of fewer bits than a word holds no orbit of a word
-		if bits > 0 do return false
-		append(&steps, Stepped{j, step})
+		if bits > 0 do return
+		append(&f.steps, Stepped{j, step})
 	}
-	for r in reductions do for other in reductions do if reads_param(g, r.term, l, other.param) do return false
+	for r in f.reductions do for t in r.terms do for other in f.reductions do if reads_param(g, t, l, other.param) do return
 	if bits > 0 {
 		// what each lane gathers stays within its bits: its turns, times its terms
-		turns := turns_of(g, g.costs, l) / f64(lanes)
-		for r in reductions {
-			if r.op == .Mul do return false
-			b := g.facts[find(g, r.term)].bounds
-			if !fits(b, bits) || r.op == .Add && turns * f64(max(abs(b.lo), abs(b.hi))) >= f64(i128(1) << uint(bits - 1)) do return false
+		turns := turns_of(g, g.costs, l) / f64(g.costs.lanes32)
+		for r in f.reductions {
+			if r.op == .Mul do return
+			b := g.facts[find(g, r.terms[0])].bounds
+			for t in r.terms[1:] do b = binary_bounds(r.op, b, g.facts[find(g, t)].bounds)
+			if !fits(b, bits) || r.op == .Add && turns * f64(max(abs(b.lo), abs(b.hi))) >= f64(i128(1) << uint(bits - 1)) do return
 		}
 	}
-	// the lanes: the counter; a vector for each other step that composes, lane k
-	// at the k-th point of its orbit; a vector for each reduction
-	v := len(g.loops)
-	vector_info := Loop_Info{parent = info.parent, state = -1, origin = .Lanes}
-	for _, k in steps {
-		append(&vector_info.params, code.Kind{.Int, code.EVERY, k == 0 ? 0 : lanes, k == 0 ? 0 : bits})
-		append(&vector_info.carried, nil)
-		append(&vector_info.finals, k)
+	return f, true
+}
+
+// Built: a loop a law builds, in the region parent: its parameters, the arm its
+// turns go on in, and its match.
+Built :: struct {
+	v, m:   int,
+	params: []Class,
+	step:   Class,
+}
+
+// new_loop: a loop of parameters of these kinds, in parent, each of which it gives
+// at its end; it ends where its test is in the cover exit.
+new_loop :: proc(g: ^Graph, parent: Region, kinds: []code.Kind, exit: code.Cover, origin: Origin, turns: f64 = 0) -> Built {
+	b := Built{v = len(g.loops), m = len(g.matches)}
+	info := Loop_Info{parent = parent, state = -1, origin = origin, turns = turns}
+	for k, j in kinds {
+		append(&info.params, k)
+		append(&info.carried, nil)
+		append(&info.finals, j)
 	}
-	for r, k in reductions {
-		append(&vector_info.params, code.Kind{info.params[r.param].machine, code.EVERY, lanes, bits})
-		append(&vector_info.carried, nil)
-		append(&vector_info.finals, len(steps) + k)
-	}
-	append(&g.loops, vector_info)
-	m := len(g.matches)
+	append(&g.loops, info)
+	covers := make([]code.Cover, 2)
+	covers[0] = exit
+	append(&g.matches, Match_Info{parent = Region{.Body, b.v, 0}, covers = covers, tail = true})
+	b.params = make([]Class, len(kinds))
+	for &p, j in b.params do p = add(g, Node{kind = .Param, owner = b.v, index = j})
+	b.step = add(g, Node{kind = .Arm, owner = b.m, index = 1})
+	return b
+}
+
+// close_loop: the loop b, from inits, its parameters taking nexts at each turn
+// its test leaves the exit; its node.
+close_loop :: proc(g: ^Graph, b: Built, test: Class, inits, nexts: []Class) -> Class {
+	tail := add(g, Node{kind = .Match, owner = b.m, args = three(test, add(g, Node{kind = .Exit, owner = b.v}), add(g, Node{kind = .Again, owner = b.v, args = nexts}))})
+	args := make([dynamic]Class)
+	append(&args, ..inits)
+	append(&args, tail)
+	out := add(g, Node{kind = .Loop, owner = b.v, args = args[:]})
+	g.loops[b.v].node = len(g.nodes) - 1
+	return out
+}
+
+// given: what the loop of the node at gives at its end, the parameter k.
+given :: proc(g: ^Graph, at: Class, k: int) -> Class {
+	return add(g, Node{kind = .Get, index = k, args = one(at)})
+}
+
+// lane_of: lane k of a vector of lanes words: π_k = ρ| ∘ (· & e_k).
+lane_of :: proc(g: ^Graph, x: Class, k, lanes, bits: int) -> Class {
+	e := make([]i64, lanes)
+	e[k] = -1
+	only := add(g, binary(g, .And, x, add(g, Node{kind = .Lanes, index = vector(g, e), value = i128(bits)})))
+	return add(g, Node{kind = .Reduce, op = .Or, args = one(only)})
+}
+
+// interleaved: the turns of the fold f, L at a time, each lane one of L
+// interleaved orbits: the counter, scalar, by L·d; each other step that composes,
+// a vector whose lane k is its k-th point, by its L-th power; each reduction, a
+// vector; until the last lane would stop.
+interleaved :: proc(g: ^Graph, f: ^Fold, lanes, bits: int) -> bool {
+	kinds := make([dynamic]code.Kind)
+	append(&kinds, code.Kind{.Int, code.EVERY, 0, 0})
+	for _ in f.steps[1:] do append(&kinds, code.Kind{.Int, code.EVERY, lanes, bits})
+	for r in f.reductions do append(&kinds, code.Kind{f.info.params[r.param].machine, code.EVERY, lanes, bits})
 	stops := make([]code.Bounds, 1)
 	stops[0] = {1, 1}
-	covers := make([]code.Cover, 2)
-	covers[0] = code.Cover{ints = stops}
-	append(&g.matches, Match_Info{parent = Region{.Body, v, 0}, covers = covers, tail = true})
-	t := Lift{g = g, from = l, to = v, counter = counter, delta = delta, lanes = lanes, bits = bits, invariants = invariants, steps = steps[:]}
-	t.step_match, t.step_arm = turn.match.owner, turn.step
-	t.step_to = add(g, Node{kind = .Arm, owner = m, index = 1})
-	i := add(g, Node{kind = .Param, owner = v, index = 0})
+	b := new_loop(g, f.info.parent, kinds[:], code.Cover{ints = stops}, .Lanes)
+	i := b.params[0]
 	// the counter of the lanes takes points of the orbit of the loop's
-	if param, is := lookup(g, Node{kind = .Param, owner = l, index = counter}); is {
+	if param, is := lookup(g, Node{kind = .Param, owner = f.l, index = f.counter}); is {
 		g.facts[find(g, i)].bounds = code.meet(g.facts[find(g, i)].bounds, g.facts[find(g, g.home[param])].bounds)
 	}
+	vectors := make(map[int]Class)
+	vectors[f.counter] = orbit(g, f.steps[0].step, i, lanes, bits)
+	for x, k in f.steps[1:] do vectors[x.param] = b.params[k + 1]
 	// each step, L turns at once: its power
 	nexts := make([dynamic]Class)
-	append(&nexts, advanced(g, steps[0].step, i, 0, 0, lanes))
-	for x, k in steps[1:] do append(&nexts, advanced(g, x.step, add(g, Node{kind = .Param, owner = v, index = k + 1}), lanes, bits, lanes))
-	for r, k in reductions {
-		x := add(g, Node{kind = .Param, owner = v, index = len(steps) + k})
-		term := lift(&t, r.term) or_return
-		append(&nexts, add(g, binary(g, r.op, x, term)))
-	}
+	append(&nexts, advanced(g, f.steps[0].step, i, 0, 0, lanes))
+	for x, k in f.steps[1:] do append(&nexts, advanced(g, x.step, b.params[k + 1], lanes, bits, lanes))
+	reduced_in_lanes(g, f, b, vectors, lanes, bits, &nexts) or_return
 	// the lanes stop where the last would
-	last := plus(g, i, add(g, int_node(i128(lanes - 1) * i128(delta))))
-	test := add(g, binary(g, stop.op, last, stop.bound))
-	tail := add(g, Node{kind = .Match, owner = m, args = three(test, add(g, Node{kind = .Exit, owner = v}), add(g, Node{kind = .Again, owner = v, args = nexts[:]}))})
+	last := plus(g, i, add(g, int_node(i128(lanes - 1) * i128(f.delta))))
+	test := add(g, binary(g, f.stop.op, last, f.stop.bound))
 	inits := make([dynamic]Class)
-	append(&inits, loop.args[counter])
-	for x in steps[1:] do append(&inits, orbit(g, x.step, loop.args[x.param], lanes, bits))
-	for r in reductions do append(&inits, splat(g, neutral_of(g, r.op, info.params[r.param].machine), lanes, bits))
-	append(&inits, tail)
-	laned := add(g, Node{kind = .Loop, owner = v, args = inits[:]})
-	g.loops[v].node = len(g.nodes) - 1
-	// the turns the lanes leave: the loop again, from where they stopped
-	rest := copy_loop(g, l) or_return
-	g.loops[rest].turns = f64(lanes) / 2
-	rest_inits := make([dynamic]Class)
-	for j in 0 ..< own {
-		if j in invariants do append(&rest_inits, loop.args[j])
-		for x, k in steps do if x.param == j {
-			got := add(g, Node{kind = .Get, index = k, args = one(laned)})
-			// lane 0 of a vector: π₀ = ρ| ∘ (· & e₀)
-			if k > 0 {
-				e := make([]i64, lanes)
-				e[0] = -1
-				first := add(g, binary(g, .And, got, add(g, Node{kind = .Lanes, index = vector(g, e), value = i128(bits)})))
-				got = add(g, Node{kind = .Reduce, op = .Or, args = one(first)})
-			}
-			append(&rest_inits, got)
-		}
-		for r, k in reductions do if r.param == j {
-			reduced := add(g, Node{kind = .Reduce, op = r.op, args = one(add(g, Node{kind = .Get, index = len(steps) + k, args = one(laned)}))})
-			append(&rest_inits, add(g, binary(g, r.op, loop.args[j], reduced)))
+	append(&inits, f.loop.args[f.counter])
+	for x in f.steps[1:] do append(&inits, orbit(g, x.step, f.loop.args[x.param], lanes, bits))
+	for r in f.reductions do append(&inits, splat(g, neutral_of(g, r.op, f.info.params[r.param].machine), lanes, bits))
+	laned := close_loop(g, b, test, inits[:], nexts[:])
+	// the turns the lanes leave: each step from lane 0
+	starts := make(map[int]Class)
+	starts[f.counter] = given(g, laned, 0)
+	for x, k in f.steps[1:] do starts[x.param] = lane_of(g, given(g, laned, k + 1), 0, lanes, bits)
+	return rest(g, f, laned, starts, len(f.steps), lanes)
+}
+
+// reduced_in_lanes: what each reduction gathers at a turn of the lanes b, its term in each
+// lane, the parameters of the fold in their lanes.
+reduced_in_lanes :: proc(g: ^Graph, f: ^Fold, b: Built, vectors: map[int]Class, lanes, bits: int, nexts: ^[dynamic]Class) -> bool {
+	t := Lift{g = g, from = f.l, to = b.v, counter = f.counter, delta = f.delta, lanes = lanes, bits = bits, invariants = f.invariants, vectors = vectors}
+	t.step_match, t.step_arm, t.step_to = f.turn.match.owner, f.turn.step, b.step
+	first := len(b.params) - len(f.reductions)
+	for r, k in f.reductions {
+		x := b.params[first + k]
+		for term in r.terms do x = add(g, binary(g, r.op, x, lift(&t, term) or_return))
+		append(nexts, x)
+	}
+	return true
+}
+
+// rest: the turns the lanes leave: the loop again, from starts — each step where
+// the lanes stopped, each reduction from what it held and the lanes gathered,
+// from the first after the steps on —; the same value as the loop.
+rest :: proc(g: ^Graph, f: ^Fold, laned: Class, starts: map[int]Class, first, lanes: int) -> bool {
+	copy := copy_loop(g, f.l) or_return
+	g.loops[copy].turns = f64(lanes) / 2
+	inits := make([dynamic]Class)
+	for j in 0 ..< f.own {
+		if x, is := f.invariants[j]; is do append(&inits, x)
+		if x, is := starts[j]; is do append(&inits, x)
+		for r, k in f.reductions do if r.param == j {
+			reduced := add(g, Node{kind = .Reduce, op = r.op, args = one(given(g, laned, first + k))})
+			append(&inits, add(g, binary(g, r.op, f.loop.args[j], reduced)))
 		}
 	}
-	rest_node := &g.nodes[g.loops[rest].node]
-	append(&rest_inits, rest_node.args[0])
-	rest_node.args = rest_inits[:]
-	merge(g, g.home[info.node], g.home[g.loops[rest].node])
+	node := &g.nodes[g.loops[copy].node]
+	append(&inits, node.args[0])
+	node.args = inits[:]
+	merge(g, g.home[f.info.node], g.home[g.loops[copy].node])
 	return true
 }
 
@@ -286,17 +359,37 @@ CONTRARY_OP := #partial [code.Op]code.Op {
 }
 
 // reduction: next, x ⊕ g with x the parameter j of l, ⊕ associative and
-// commutative.
+// commutative: (x ⊕ g) ⊕ h is x ⊕ (g ⊕ h) — on integers; floats round at each ⊕.
 reduction :: proc(g: ^Graph, next: Class, l, j: int) -> (Reduction, bool) {
-	for id in g.members[find(g, next)] {
+	busy := make(map[Class]bool)
+	defer delete(busy)
+	return reduced(g, next, l, j, &busy)
+}
+
+reduced :: proc(g: ^Graph, next: Class, l, j: int, busy: ^map[Class]bool) -> (Reduction, bool) {
+	next := find(g, next)
+	if busy[next] do return {}, false
+	busy[next] = true
+	defer busy[next] = false
+	real := g.facts[next].machine == .Real
+	for id in g.members[next] {
 		n := g.nodes[id]
 		if n.kind != .Binary do continue
 		#partial switch n.op {
 		case .Add, .Mul, .And, .Or, .Xor:
-			if g.facts[find(g, next)].machine == .Real && n.op != .Add && n.op != .Mul do continue
+			if real && n.op != .Add && n.op != .Mul do continue
 			for k in 0 ..< 2 {
 				if param, is := lookup(g, Node{kind = .Param, owner = l, index = j}); is && find(g, n.args[k]) == find(g, g.home[param]) {
-					return Reduction{j, n.op, find(g, n.args[1 - k])}, true
+					terms := make([]Class, 1)
+					terms[0] = find(g, n.args[1 - k])
+					return Reduction{j, n.op, terms}, true
+				}
+				if real do continue
+				if inner, is := reduced(g, n.args[k], l, j, busy); is && inner.op == n.op {
+					terms := make([]Class, len(inner.terms) + 1)
+					copy(terms, inner.terms)
+					terms[len(inner.terms)] = find(g, n.args[1 - k])
+					return Reduction{j, n.op, terms}, true
 				}
 			}
 		}
@@ -344,7 +437,7 @@ Lift :: struct {
 	lanes:             int,
 	bits:              int, // of each lane; 0: 64
 	invariants:        map[int]Class,
-	steps:             []Stepped,
+	vectors:           map[int]Class, // the lanes of each parameter that is not invariant
 	step_match:        int,
 	step_arm:          int,
 	step_to:           Class,
@@ -395,12 +488,7 @@ lift_node :: proc(t: ^Lift, n: Node, exact: bool) -> (out: Class, ok: bool) {
 	#partial switch n.kind {
 	case .Param:
 		if n.owner != t.from do return NO_CLASS, false
-		// the lanes of a step that composes: of the counter, its orbit; another, its
-		// vector
-		for x, k in t.steps do if x.param == n.index {
-			p := add(g, Node{kind = .Param, owner = t.to, index = k})
-			return k == 0 ? orbit(g, x.step, p, t.lanes, t.bits) : p, true
-		}
+		if x, is := t.vectors[n.index]; is do return x, true
 		if init, is := t.invariants[n.index]; is do return splat(g, init, t.lanes, t.bits), true
 	case .Arm:
 		if n.owner == t.step_match && n.index == t.step_arm do return t.step_to, true
@@ -429,6 +517,19 @@ lift_node :: proc(t: ^Lift, n: Node, exact: bool) -> (out: Class, ok: bool) {
 			residue = true
 		}
 		a := lift(t, n.args[0], !residue) or_return
+		shift := n.op == .Shl || n.op == .Shr
+		// a shift by what no turn changes: by the same count in each lane
+		if shift && invariant(g, n.args[1], t.from) {
+			out := add(g, binary(g, n.op, a, n.args[1]))
+			// shifted in as zeros, read as unsigned: x >> k & (2⁶⁴⁻ᵏ - 1), whatever
+			// the reading of the lanes
+			k, constant := g.facts[find(g, n.args[1])].constant.?
+			reads := g.facts[find(g, n.args[0])].bounds
+			if n.op == .Shr && reads.lo >= 0 && constant && k > 0 && k < 64 && t.bits == 0 {
+				out = add(g, binary(g, .And, out, splat(g, add(g, int_node(i128(max(u64) >> uint(k)))), t.lanes, t.bits)))
+			}
+			return out, true
+		}
 		b := lift(t, n.args[1], !residue || n.op == .Shl) or_return
 		return add(g, binary(g, n.op, a, b)), true
 	}

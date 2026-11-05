@@ -328,10 +328,20 @@ turns_of :: proc(g: ^Graph, costs: ^Costs, l: int) -> f64 {
 		param, read := lookup(g, Node{kind = .Param, owner = l, index = j})
 		if !read do continue
 		c := find(g, g.home[param])
-		width := g.facts[c].bounds.hi - g.facts[c].bounds.lo
+		// the integers between the bounds, none known when they are not
+		span :: proc(b: code.Bounds) -> i128 {return code.in_word(b) ? b.hi - b.lo : max(i128)}
+		width := span(g.facts[c].bounds)
 		for x, id in g.nodes do if x.kind == .Narrow && find(g, x.args[0]) == c {
 			b := g.facts[find(g, g.home[id])].bounds
-			width = min(width, b.hi - b.lo)
+			if b.lo <= b.hi do width = min(width, span(b))
+		}
+		// from where it starts to the bound its test stops it at
+		if turn, has := turn_of(g, g.nodes[info.node].args[len(g.nodes[info.node].args) - 1], l); has {
+			if stop, crossed := stop_of(g, turn, l, j, d); crossed {
+				start := g.facts[find(g, g.nodes[info.node].args[j])].bounds
+				end := g.facts[find(g, stop.bound)].bounds
+				if code.in_word(start) && code.in_word(end) do width = min(width, d > 0 ? end.hi - start.lo : start.hi - end.lo)
+			}
 		}
 		if width >= 0 && width < 1 << 62 do out = max(out, f64(width) / f64(abs(d)) + 1)
 	}
