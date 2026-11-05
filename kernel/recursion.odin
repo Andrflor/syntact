@@ -1846,8 +1846,15 @@ images_at :: proc(k: ^Kernel, x: ^Image, values: Rewrite) -> (image: Type, ok: b
 	// what the count of steps reads of the values
 	key := make([dynamic]Type)
 	for v in values do if v.unknown != nil && reads(k, x.bounds.steps, v.unknown) do append(&key, v.term)
-	next: for a in x.at {
-		for t, i in key do if t != a.key[i] && !same(k, t, a.key[i]) do continue next
+	// the very terms first; terms equal to those of an entry are read as its terms
+	// from then on
+	identical: for a in x.at {
+		for t, i in key do if t != a.key[i] do continue identical
+		return a.image, a.ok
+	}
+	equal: for a in x.at {
+		for t, i in key do if !same(k, t, a.key[i]) do continue equal
+		append(&x.at, Image_At{key[:], a.image, a.ok})
 		return a.image, a.ok
 	}
 	image, ok = bounds_at(k, x.bounds, rewrite(k, x.bounds.steps, values))
