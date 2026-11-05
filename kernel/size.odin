@@ -183,6 +183,20 @@ unknown_value :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 // pattern, what its branches give; a rounding, values of its format; another term
 // over unknowns, its layout image.
 values :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
+	// a shared node is never changed: what it may hold, read once
+	#partial switch v in t {
+	case ^Operation, ^And:
+		node := t
+		key := (^rawptr)(&node)^
+		if known, found := k.valued[key]; found do return known, known != nil
+		set, ok = values_of(k, t)
+		k.valued[key] = ok ? set : nil
+		return
+	}
+	return values_of(k, t)
+}
+
+values_of :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
 	#partial switch v in t {
 	case ^Unknown:
 		return layout_of(k, v), true

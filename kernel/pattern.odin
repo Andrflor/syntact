@@ -35,7 +35,15 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 	if is_invalid(target) do return target
 	// a call of another equation: the pattern is read on its production
 	if c, is_call := target.(^Collapse); is_call {
-		if v, asked := call_production(k, c); asked do return pattern_on(k, v, p, outer)
+		// read once per equation: the calls in the production stay calls (§6)
+		if s, is_scope := c.target.(^Scope); is_scope && c.recursive && !asked(k, origin(s)) {
+			giving(k, origin(s))
+			v, read := call_production(k, c)
+			out: Type
+			if read do out = pattern_on(k, v, p, outer)
+			pop(&k.asking)
+			if read do return out
+		}
 	}
 	// a pattern gives one of its products: (t ? {c -> q  …}) ? B = t ? {c -> q ? B  …}
 	if q, is_pattern := target.(^Pattern); is_pattern && !has_effect(q) {
