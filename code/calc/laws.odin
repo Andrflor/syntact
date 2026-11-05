@@ -229,9 +229,12 @@ divided :: proc(g: ^Graph, c: Class, n: Node) {
 
 // halved: the high half of a product of two words, from the products of their
 // halves of 32 bits, each exact in a word: what a machine without the product of
-// two words computes it by.
+// two words computes it by. Where the machine's own costs no more than these
+// products and their sums, the cost would never keep them: they are not added.
 halved :: proc(g: ^Graph, c: Class, n: Node) {
 	if n.kind != .Binary || n.op != .Mul_High || g.facts[find(g, n.args[0])].machine != .Int do return
+	ops := table(g.costs, g.facts[find(g, n.args[0])])
+	if ops[.Mul_High] <= 4 * ops[.Mul] + 4 * ops[.Add] + 6 * ops[.And] + 6 * ops[.Shr] do return
 	constant :: proc(g: ^Graph, v: i128) -> Class {return add(g, int_node(v))}
 	low :: proc(g: ^Graph, x: Class) -> Class {return add(g, binary(g, .And, x, constant(g, 1 << 32 - 1)))}
 	high :: proc(g: ^Graph, x: Class) -> Class {return low(g, add(g, binary(g, .Shr, x, constant(g, 32))))}
