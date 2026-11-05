@@ -43,6 +43,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 				if apart(k, image, s) do return Bool(false)
 			}
 		}
+		if verdict, read := built_in(k, x, s); read do return verdict
 		return admits(k, x, s)
 	}
 	if o, ok := c.(^Operation); ok && o.op == .Mul && of_values(o.args[0]) do return repeated_in(k, x, o.args[0], o.args[1])
@@ -252,6 +253,55 @@ induced :: proc(k: ^Kernel, root: ^Scope, c: Type) -> bool {
 	}
 	verdict, _ := prove(k, in_law(k, rewrite(k, e, assumed), c))
 	return verdict == .Proven
+}
+
+// built_in: a run a fold builds, {e₀ … eₙ₋₁}, or what of it follows k, in a shape
+// of places then runs of pieces: the law of `in` on a concatenation (match_shape),
+// on its length and on the values its steps place — each in the color of every
+// place it may take. Not read when those values are not shown in those colors.
+built_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) {
+	f, is_fold := x.(^Fold)
+	if o, is_from := x.(^Operation); is_from && o.op == .From do f, is_fold = o.args[0].(^Fold)
+	if !is_fold do return
+	shape := s
+	if recursive(s) do shape = arden(k, s) or_return
+	if !is_shape(k, shape) do return
+	_, es, builds := built(k, f)
+	if !builds do return
+	images := make([]Type, len(es))
+	for e, i in es do images[i] = values(k, given(k, e)) or_return
+	placed_values := or_law(k, images)
+	places := placed(k, shape, .Shape)
+	fixed, runs := 0, false
+	colors := make([dynamic]Type)
+	for p in places {
+		if !is_run(p) {
+			if runs || p.name != "" do return // the bindings a fold places are unnamed
+			fixed += 1
+			if c := binding_color(k, p); c != nil do append(&colors, c)
+			continue
+		}
+		if p.color == nil {
+			runs = true
+			continue
+		}
+		color := binding_color(k, p)
+		// a run of the empty shape places nothing
+		if empty, is_scope := color.(^Scope); is_scope && is_shape(k, empty) && len(placed(k, empty, .Shape)) == 0 do continue
+		// a repetition A * n places pieces of A; a scope, the pieces of its runs
+		pieces: Type
+		if o, repeats := color.(^Operation); repeats && o.op == .Mul do pieces = o.args[0]
+		else do pieces, _ = layout_pieces(k, color) or_return
+		piece := pieces.(^Scope) or_return
+		inner := placed(k, piece, .Shape)
+		if len(inner) != 1 || is_run(inner[0]) do return
+		runs = true
+		if c := binding_color(k, inner[0]); c != nil do append(&colors, c)
+	}
+	for c in colors do if !included(k, placed_values, c) do return
+	length := run_law(k, .Length, {x}, f.span)
+	if !runs do return in_law(k, length, Int(i128(fixed))), true
+	return in_law(k, length, range_law(k, Int(i128(fixed)), nil, .Int, f.span)), true
 }
 
 // fold_induction: a fold is in c when the states its value reads start in c, stay

@@ -102,12 +102,10 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 		f.value = access_law(k, v.value, a)
 		return is_invalid(f.value) ? f.value : fold_law(k, f)
 	case ^Pattern:
-		// a pattern gives one of its products
+		// a pattern gives one of its products: the access is invalid only for the
+		// values that reach a product without the field
 		branches := make([]Branch, len(v.branches))
-		for b, i in v.branches {
-			branches[i] = with_product(b, access_law(k, b.product, a))
-			if is_invalid(branches[i].product) do return branches[i].product
-		}
+		for b, i in v.branches do branches[i] = with_product(b, access_law(k, b.product, a))
 		return pattern_law(k, branching(v, branches))
 	case Invalid:
 		return target
@@ -1172,6 +1170,7 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span) -> Type {
 	// (x from a).#b = x.#(a + b), (x from a) from b = x from (a + b)
 	if is_from do return run_law(k, o, {from.args[0], op(k, .Add, from.args[1], i)}, span)
 	if o == .From && is_int(i, 0) do return x
+	if f, is_fold := x.(^Fold); is_fold && o == .Item do if v, read := built_item(k, f, i); read do return v
 	s, known := x.(^Scope)
 	at, placed_at := i.(Int)
 	if !known || !placed_at do return new_operation(o, x, i)
@@ -1183,6 +1182,32 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span) -> Type {
 	}
 	if int(at) > len(xs) do return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %d", print_type(x), at))
 	return run_scope(k, xs[at:])
+}
+
+// built_item: x.#a, x a run the fold f builds c bindings a step, a constant and
+// x longer than a: the binding j = a % c that the step i = a / c places, its states
+// those of step i — the inits, each update applied i times.
+built_item :: proc(k: ^Kernel, f: ^Fold, a: Type) -> (value: Type, read: bool) {
+	at := a.(Int) or_return
+	_, es, builds := built(k, f)
+	if !builds || at < 0 do return nil, false
+	c := Int(len(es))
+	step, j := at / c, at % c
+	if step > 64 do return nil, false
+	verdict, _ := prove(k, in_law(k, run_law(k, .Length, {f}, f.span), range_law(k, Int(at + 1), nil, .Int, f.span)))
+	if verdict != .Proven do return nil, false
+	lo, _ := counter_range(k, f) or_return
+	states := slice.clone(f.inits)
+	for t in 0 ..< int(step) {
+		r := rewriting(nil, f.index, op(k, .Add, lo, Int(i128(t))))
+		for z, i in f.states do r = rewriting(r, z, states[i])
+		next := make([]Type, len(states))
+		for u, i in f.updates do next[i] = rewrite(k, u, r)
+		states = next
+	}
+	r := rewriting(nil, f.index, op(k, .Add, lo, step))
+	for z, i in f.states do r = rewriting(r, z, states[i])
+	return rewrite(k, es[j], r), true
 }
 
 // run_data: the bindings of a run: values, and runs not known yet.
@@ -1213,7 +1238,7 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 	if f, is_fold := o.args[0].(^Fold); is_fold && o.op == .Item {
 		if _, es, builds := built(k, f); builds {
 			images := make([]Type, len(es))
-			for e, i in es do images[i] = layout_image(k, e) or_return
+			for e, i in es do images[i] = values(k, given(k, e)) or_return
 			return or_law(k, images), true
 		}
 	}

@@ -186,6 +186,8 @@ values :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
 	#partial switch v in t {
 	case ^Unknown:
 		return layout_of(k, v), true
+	case ^Scope:
+		return v, true // a scope is one value
 	case ^Pattern:
 		products := make([]Type, len(v.branches))
 		for b, i in v.branches do products[i] = values(k, given(k, b.product)) or_return

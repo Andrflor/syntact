@@ -31,16 +31,24 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 //
 // so the effects of a cover are those of the first branch of a pattern: computed with
 // the target, before any test.
-pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern) -> Type {
+pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) -> Type {
 	if is_invalid(target) do return target
 	// a call of another equation: the pattern is read on its production
 	if c, is_call := target.(^Collapse); is_call {
-		if v, asked := call_production(k, c); asked do return pattern_on(k, v, p)
+		if v, asked := call_production(k, c); asked do return pattern_on(k, v, p, outer)
 	}
 	// a pattern gives one of its products: (t ? {c -> q  …}) ? B = t ? {c -> q ? B  …}
 	if q, is_pattern := target.(^Pattern); is_pattern && !has_effect(q) {
+		// each in its branch of q, where the reach of that branch holds
+		reached, _, _ := reaches(k, q.target, q.branches)
 		branches := make([]Branch, len(q.branches))
-		for b, i in q.branches do branches[i] = with_product(b, pattern_on(k, b.product, p))
+		for b, i in q.branches {
+			said: Type = Bool(true)
+			for r in reached do if r.branch == i do said = r.unsaid
+			append(&k.reached, said)
+			branches[i] = with_product(b, pattern_on(k, b.product, p, outer))
+			pop(&k.reached)
+		}
 		return pattern_law(k, branching(q, branches))
 	}
 	for b, i in p.branches {
@@ -49,14 +57,17 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern) -> Type {
 		branches := make([dynamic]Branch)
 		append(&branches, ..p.branches[:i])
 		append(&branches, Branch{product = branching(p, p.branches[i:]), span = b.span})
-		return pattern_on(k, target, branching(p, branches[:]))
+		return pattern_on(k, target, branching(p, branches[:]), outer)
 	}
 	reached, rest, invalid := reaches(k, target, p.branches)
 	if invalid != nil do return invalid
 	out := make([dynamic]Branch)
 	for r in reached {
 		b := p.branches[r.branch]
-		product := branch_product(k, b, r.rewrite, target)
+		// what the reach says beyond the rewrite holds in the product
+		append(&k.reached, r.unsaid)
+		product := branch_product(k, b, r.rewrite, target, outer)
+		pop(&k.reached)
 		if r.all && len(out) == 0 do return product
 		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
 	}
@@ -105,6 +116,7 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 			cond = in_law(k, target, cover)
 			if is_invalid(cover) do return out, rest, cover
 			if is_invalid(cond) do return out, rest, cond
+			cond = within(k, cond)
 		}
 		reach := bool_and(k, rest, cond)
 		rest = bool_and(k, rest, bool_not(k, cond))
@@ -115,6 +127,18 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 		if all do return out, nil, nil
 	}
 	return out, rest, nil
+}
+
+// within: cond where the reaches of the branches being typed hold: false when
+// none of their values meets it, true when each does.
+within :: proc(k: ^Kernel, cond: Type) -> Type {
+	if _, decided := cond.(Bool); decided do return cond
+	for g in k.reached {
+		if is_bool(g, true) do continue
+		if is_bool(bool_and(k, g, cond), false) do return Bool(false)
+		if is_bool(bool_and(k, g, bool_not(k, cond)), false) do return Bool(true)
+	}
+	return cond
 }
 
 // narrow: the rewrite a reach makes: through [&], `u in S` rewrites ?ₖ::L into
@@ -190,7 +214,10 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 // it where each reference from outside is its type — computed once — with the
 // unknowns the reach narrows rewritten, ?ₖ::(L & S). The scopes written in it are
 // copied likewise: they are the scopes of that branch.
-branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite, target: Type) -> Type {
+branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite, target: Type, outer: Rewrite = nil) -> Type {
+	b := b
+	// a product rewritten with its target: in its branch, where its reach holds
+	if outer != nil do b.product = rewrite(k, normal(k, b.product), outer)
 	pieces := cover_pieces(k, b, target)
 	if b.scope == nil || len(r) == 0 && len(pieces) == 0 do return rewrite(k, normal(k, b.product), r)
 	m := Copier{outer = r, substitute = true, pieces = pieces}
@@ -314,9 +341,10 @@ outer_set :: proc(k: ^Kernel, s: Type) -> (out: Type, ok: bool) {
 	if is_constant(s) do return s, true
 	#partial switch v in s {
 	case ^Range:
+		// a bound without extremity leaves the range open on that side
 		lo, hi: Type
-		if v.lo != nil do lo = term_bound(k, v.lo, true) or_return
-		if v.hi != nil do hi = term_bound(k, v.hi, false) or_return
+		if v.lo != nil do lo, _ = term_bound(k, v.lo, true)
+		if v.hi != nil do hi, _ = term_bound(k, v.hi, false)
 		return range_law(k, lo, hi, .Int, v.span), true
 	case ^And:
 		terms := make([]Type, len(v.terms))

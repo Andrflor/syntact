@@ -52,7 +52,6 @@ rewriting_call :: proc(r: Rewrite, c: ^Collapse, t: Type) -> Rewrite {
 reads :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
 	return !same(k, rewrite(k, t, rewriting(nil, u, new_unknown(k, nil))), t)
 }
-
 // rewrite: t with its unknowns rewritten, in normal form. A term none of whose parts
 // a rewrite changes is the term itself: in normal form, its parts the same, its law
 // gives it back — only what holds a rewritten unknown is computed again.
@@ -159,15 +158,16 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		if lo == v.lo && hi == v.hi do return t
 		return as_normal(range_law(k, lo, hi, v.family, v.span))
 	case ^Pattern:
+		// a new target: the pattern on it, each product rewritten in its branch (§6)
+		if target := rewrite(k, v.target, r); target != v.target do return as_normal(pattern_on(k, target, v, r))
 		p := new(Pattern)
-		p.target, p.span = rewrite(k, v.target, r), v.span
+		p.target, p.span = v.target, v.span
 		p.branches = make([]Branch, len(v.branches))
 		moved := false
 		for b, i in v.branches {
 			p.branches[i] = with_product(b, rewrite(k, b.product, r))
 			moved ||= p.branches[i].product != b.product
 		}
-		if p.target != v.target do return as_normal(pattern_law(k, p))
 		if !moved do return t
 		// the target the same, so are its unknowns, and the reach of each branch: only
 		// its product is rewritten; t ? {c -> p  -> p} = p, where every value is taken
@@ -301,10 +301,9 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Is:
 		return is_law(layout_image(k, v.term) or_return), true
 	case ^Range:
-		lo, hi: Type
-		if v.lo != nil do lo = layout_image(k, v.lo) or_return
-		if v.hi != nil do hi = layout_image(k, v.hi) or_return
-		return range_law(k, lo, hi, v.family, v.span), true
+		if is_constant(t) do return t, true
+		// what it may hold: from the least of its lower bound to the greatest of its upper
+		return outer_set(k, t)
 	case ^Collapse:
 		if image, known := call_image(k, v); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
@@ -406,6 +405,14 @@ field_color :: proc(k: ^Kernel, layout: Type, name: string) -> (color: Type, ok:
 		for t in both.terms do if color, ok = field_color(k, t, name); ok do return
 		return
 	}
+	if any, either := layout.(^Or); either {
+		// one of these scopes: the field in those that have it, its values in any
+		for t in any.terms {
+			c := field_color(k, t, name) or_continue
+			color = color == nil ? c : or_law(k, {color, c})
+		}
+		return color, color != nil
+	}
 	s := layout.(^Scope) or_return
 	if !is_shape(k, s) {
 		// a scope with productions: the field in those that have it, of one color
@@ -417,6 +424,11 @@ field_color :: proc(k: ^Kernel, layout: Type, name: string) -> (color: Type, ok:
 		}
 		return color, color != nil
 	}
-	for b in placed(k, s, .Shape) do if b.name == name && b.color != nil do return binding_color(k, b), true
+	for b in placed(k, s, .Shape) {
+		if b.name != name do continue
+		if b.color != nil do return binding_color(k, b), true
+		// a value written without color: its values
+		if b.value != nil do return values(k, binding_value(k, b))
+	}
 	return
 }

@@ -1394,8 +1394,9 @@ is_ring :: proc(t: Type) -> bool {
 series :: proc(k: ^Kernel, o: Operator, i: ^Unknown, lo, hi, t: Type) -> Type {
 	s := new(Series)
 	s.op, s.lo, s.hi = o, lo, hi
+	// the index takes the values lo..hi
 	s.index = new_unknown(k, nil)
-	s.index.layout = family_term(.Int)
+	s.index.layout = range_law(k, lo, hi, .Int, {})
 	s.term = rewrite(k, t, rewriting(nil, i, s.index))
 	return series_law(k, s)
 }
@@ -1420,6 +1421,9 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 		if x, bitwise := bitwise_sum(k, s); bitwise do return x
 		if f, summed := summed_fold(k, s); summed do return f
 		if f, summed := summed_call(k, s); summed do return f
+		// a Σ that reads, along its index, a run a fold builds is the fold that
+		// carries it: the run is never built
+		if f, carried := carried_sum(k, s); carried do return f
 		return s
 	}
 	if !reads(k, s.term, s.index) do return op(k, .Pow, s.term, n)
@@ -1504,10 +1508,10 @@ faulhaber :: proc(k: ^Kernel, s: ^Series) -> (sum: Type, ok: bool) {
 counter_range :: proc(k: ^Kernel, f: ^Fold) -> (lo, hi: Type, ok: bool) {
 	r := f.stop.(^Range) or_return
 	if same(k, f.next, op(k, .Add, f.index, Int(1))) && r.lo != nil && r.hi == nil {
-		return f.start, ring_law(.Sub, {r.lo, Int(1)}) or_return, true
+		return f.start, op(k, .Sub, r.lo, Int(1)), true
 	}
 	if same(k, f.next, op(k, .Sub, f.index, Int(1))) && r.hi != nil && r.lo == nil {
-		return ring_law(.Add, {r.hi, Int(1)}) or_return, f.start, true
+		return op(k, .Add, r.hi, Int(1)), f.start, true
 	}
 	return
 }
@@ -1590,6 +1594,20 @@ built :: proc(k: ^Kernel, f: ^Fold) -> (y: int, es: []Type, ok: bool) {
 		return i, out, true
 	}
 	return
+}
+
+// carried_sum: Σ(i: lo..hi, t) as the fold ⟳(i: lo ↦ i + 1 until (hi + 1)..;
+// x: 0 ↦ x + t; x), when t reads a run a fold builds along i: that fold carries it.
+carried_sum :: proc(k: ^Kernel, s: ^Series) -> (Type, bool) {
+	f := new(Fold)
+	f.index, f.span = s.index, s.span
+	f.start, f.next, f.stop = s.lo, op(k, .Add, s.index, Int(1)), new_range(op(k, .Add, s.hi, Int(1)), nil, .Int)
+	x := new_unknown(k, nil)
+	x.layout = family_term(.Int)
+	f.states, f.inits, f.updates = slice.clone([]^Unknown{x}), slice.clone([]Type{Int(0)}), slice.clone([]Type{op(k, .Add, x, s.term)})
+	f.value, f.effects = x, None{}
+	if b, _ := run_reads(k, f); b == nil do return nil, false
+	return folded(k, f), true
 }
 
 // carrying: f reads, at its step i counted from 0, the bindings c·i + j of a run a
