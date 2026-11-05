@@ -278,30 +278,28 @@ generic_solution :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> 
 		return rewrite(k, renamed(k, g.solved), rewrites), true
 	}
 	// the bindings given, and those the calls carve, at the values root holds
-	params := make(map[^Binding]Type)
-	for b in given do params[b] = nil
-	generic, equation := closed_equation(k, root, &params) or_return
-	solved := iteration(k, generic, equation) or_return
-	append(&k.generics, Generic{root, key[:], params, solved})
-	rewrites: Rewrite
-	for b, u in params do rewrites = rewriting(rewrites, u.(^Unknown), b in given ? given[b] : binding_type(k, b))
-	return rewrite(k, solved, rewrites), true
-}
-
-// closed_equation: the equation of root where the bindings of params, and those its
-// calls carve, are unknowns; params maps each to its unknown.
-closed_equation :: proc(k: ^Kernel, root: ^Scope, params: ^map[^Binding]Type) -> (generic: ^Scope, equation: Type, ok: bool) {
+	values := make(map[^Binding]Type)
+	for b, v in given do values[b] = v
+	generic: ^Scope
+	equation: Type
 	for {
-		for b in params do params[b] = nil
-		generic = generic_equation(k, root, params) or_return
+		params := make(map[^Binding]Type)
+		for b in values do params[b] = nil
+		generic = generic_equation(k, root, &params) or_return
 		p := first_production(k, generic) or_return
 		equation = binding_type(k, p)
 		more := false
-		for b in carved_by_calls(k, equation, root) do if b not_in params {
-			params[b] = nil
+		for b in carved_by_calls(k, equation, root) do if b not_in values {
+			values[b] = binding_type(k, b)
 			more = true
 		}
-		if !more do return generic, equation, true
+		if !more {
+			solved := iteration(k, generic, equation) or_return
+			append(&k.generics, Generic{root, key[:], params, solved})
+			rewrites: Rewrite
+			for b, u in params do rewrites = rewriting(rewrites, u.(^Unknown), values[b])
+			return rewrite(k, solved, rewrites), true
+		}
 	}
 }
 
@@ -346,64 +344,6 @@ base_cases :: proc(e: Type, root: ^Scope) -> []Type {
 	return out[:]
 }
 
-// tail_image: a call each of whose products is a base case or a call of its
-// equation gives what a base case gives, the bindings the calls carve unknowns of
-// their colors (§5.6): the image of its bases.
-// Read once per equation and bindings given; each read has its own unknowns.
-Tail :: struct {
-	root:   ^Scope,
-	given:  []^Binding,
-	params: map[^Binding]Type,
-	image:  Type,
-}
-
-tail_image :: proc(k: ^Kernel, call: ^Collapse) -> (image: Type, ok: bool) {
-	if !call.recursive do return
-	s := call.target.(^Scope) or_return
-	root := origin(s)
-	key := make([dynamic]^Binding)
-	for b in s.changes do append(&key, b)
-	slice.sort_by(key[:], proc(a, b: ^Binding) -> bool {return uintptr(a) < uintptr(b)})
-	for x in k.tails do if x.root == root && slice.equal(x.given, key[:]) {
-		if x.image == nil do return
-		fresh: Rewrite
-		for _, u in x.params {
-			v := new_unknown(k, nil)
-			v.layout = u.(^Unknown).layout
-			fresh = rewriting(fresh, u.(^Unknown), v)
-		}
-		return rewrite(k, x.image, fresh), true
-	}
-	if being_given(k, root) do return
-	giving(k, root)
-	defer pop(&k.asking)
-	params := make(map[^Binding]Type)
-	for b in key do params[b] = nil
-	defer append(&k.tails, Tail{root, key[:], params, image})
-	_, e := closed_equation(k, root, &params) or_return
-	if !tail_calls(e, root) do return
-	bases := base_cases(e, root)
-	if len(bases) == 0 do return
-	images := make([]Type, len(bases))
-	for b, i in bases do images[i] = values(k, given(k, b)) or_return
-	image = or_law(k, images)
-	return image, true
-}
-
-// tail_calls: each product of e is a base case, or a call of root.
-tail_calls :: proc(e: Type, root: ^Scope) -> bool {
-	#partial switch v in e {
-	case ^Effect:
-		if v.call == nil || !v.call.recursive do return tail_calls(v.then, root)
-	case ^Pattern:
-		for b in v.branches do if !tail_calls(b.product, root) do return false
-		return true
-	case ^Collapse:
-		if s, is_scope := v.target.(^Scope); is_scope && v.recursive && origin(s) == root do return true
-	}
-	return solved(e, root)
-}
-
 // gives_scopes: a recursive call whose equation has scopes for base cases: by
 // induction, it gives a scope, and `...` places it (§5.6).
 gives_scopes :: proc(k: ^Kernel, c: ^Collapse) -> bool {
@@ -413,11 +353,7 @@ gives_scopes :: proc(k: ^Kernel, c: ^Collapse) -> bool {
 	p, found := first_production(k, root)
 	if !found do return false
 	bases := base_cases(binding_type(k, p), root)
-	// a base case that is a scope, or whose values are scopes
-	for b in bases {
-		if _, is_scope := b.(^Scope); is_scope do continue
-		if f, known := family_of(k, b); !known || f != .Scope do return false
-	}
+	for b in bases do if _, is_scope := b.(^Scope); !is_scope do return false
 	return len(bases) > 0
 }
 

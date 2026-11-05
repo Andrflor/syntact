@@ -37,27 +37,12 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	// what a call with effects gives back: in c by the same induction (§5.6, §4.8)
 	if u, ok := x.(^Unknown); ok && u.call != nil && u.call.recursive && induction(k, u.call, c) do return Bool(true)
 	if f, ok := x.(^Fold); ok && fold_induction(k, f, c) do return Bool(true)
-	// a field of a recursive call: in c by the same induction, read on that field
-	if a, ok := x.(^Access); ok {
-		if call, is_call := a.target.(^Collapse); is_call && call.recursive && induction(k, call, c, a) do return Bool(true)
-	}
 	if s, ok := c.(^Scope); ok {
 		// (t::L) in S: true when S holds L, false when they are apart
 		if !is_constant(x) {
 			if image, known := values(k, x); known {
 				if included(k, image, s) || shape_in(k, image, s) do return Bool(true)
 				if apart(k, image, s) do return Bool(false)
-			}
-		}
-		// x{#k -> v} in P * m: x in it and v in P (§5.3)
-		if put, is_put := x.(^Operation); is_put && put.op == .Put {
-			if pieces, _, repeats := layout_pieces(k, s); repeats {
-				if piece, is_scope := pieces.(^Scope); is_scope {
-					inner := placed(k, piece, .Shape)
-					if len(inner) == 1 && !is_run(inner[0]) && inner[0].color != nil {
-						return bool_and(k, in_law(k, put.args[0], s), in_law(k, put.args[2], binding_color(k, inner[0])))
-					}
-				}
 			}
 		}
 		if verdict, read := built_in(k, x, s); read do return verdict
@@ -244,86 +229,68 @@ ceil_div :: proc(x, y: i128) -> i128 {
 }
 
 // induction: a recursive call is in c when its equation is, each call it makes
-// taken in c (§5.6). Read on a field a: the call's a is in c when its equation's
-// is, each call it makes taken with its a in c.
-// The bindings the call carves are unknowns of the equation, as those its calls carve.
+// taken in c (§5.6).
 Induced :: struct {
 	root:   ^Scope,
-	given:  []^Binding,
 	set:    Type,
-	field:  string,
 	proven: bool,
 }
 
-induction :: proc(k: ^Kernel, call: ^Collapse, c: Type, field: ^Access = nil) -> bool {
+induction :: proc(k: ^Kernel, call: ^Collapse, c: Type) -> bool {
 	s := call.target.(^Scope) or_return
 	root := origin(s)
-	name := field == nil ? "" : field.name
-	given := make([dynamic]^Binding)
-	for b in s.changes do append(&given, b)
-	slice.sort_by(given[:], proc(a, b: ^Binding) -> bool {return uintptr(a) < uintptr(b)})
-	for x in k.induced do if x.root == root && x.field == name && slice.equal(x.given, given[:]) && same(k, x.set, c) do return x.proven
+	for x in k.induced do if x.root == root && same(k, x.set, c) do return x.proven
 	if being_given(k, root) do return false
 	giving(k, root)
-	proven := induced(k, root, given[:], c, field)
+	proven := induced(k, root, c)
 	pop(&k.asking)
-	append(&k.induced, Induced{root, given[:], c, name, proven})
+	append(&k.induced, Induced{root, c, proven})
 	return proven
 }
 
-induced :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, c: Type, field: ^Access) -> bool {
-	params := make(map[^Binding]Type)
-	for b in given do params[b] = nil
-	_, e := closed_equation(k, root, &params) or_return
-	// what each call is taken in: c, or, read on a field, the scopes whose field is in c
-	taken := c
-	if field != nil {
-		shape := new_scope(nil, field.span)
-		shape.source, shape.complete, shape.reached = shape, true, true
-		b := new_binding(shape, .Push, field.span)
-		b.name, b.color, b.typed_color = field.name, c, c
-		taken = shape
-	}
+induced :: proc(k: ^Kernel, root: ^Scope, c: Type) -> bool {
+	p := first_production(k, root) or_return
+	carved := carved_by_calls(k, binding_type(k, p), root)
+	generic := generic_equation(k, root, &carved) or_return
+	q := first_production(k, generic) or_return
+	e := binding_type(k, q)
 	assumed: Rewrite
 	for inner in calls_in(k, e, root) {
 		u := new_unknown(k, nil)
-		u.layout = taken
+		u.layout = c
 		assumed = rewriting_call(assumed, inner, u)
 	}
 	// a call with effects: what it gives back, its answer, is taken in c likewise
-	for x in call_answers(k, e, root) {
+	for x in call_answers(e, root) {
 		u := new_unknown(k, nil)
-		u.layout = taken
+		u.layout = c
 		assumed = rewriting(assumed, x, u)
 	}
-	e = rewrite(k, e, assumed)
-	if field != nil do e = access_law(k, e, field)
-	verdict, _ := prove(k, in_law(k, e, c))
+	verdict, _ := prove(k, in_law(k, rewrite(k, e, assumed), c))
 	return verdict == .Proven
 }
 
 // call_answers: what the effects calling root in t give back.
-call_answers :: proc(k: ^Kernel, t: Type, root: ^Scope) -> []^Unknown {
+call_answers :: proc(t: Type, root: ^Scope) -> []^Unknown {
 	out := make([dynamic]^Unknown)
-	visit :: proc(k: ^Kernel, t: Type, root: ^Scope, out: ^[dynamic]^Unknown) {
+	visit :: proc(t: Type, root: ^Scope, out: ^[dynamic]^Unknown) {
 		#partial switch v in t {
 		case ^Effect:
 			if v.call != nil && v.answer != nil {
 				if s, is_scope := v.call.target.(^Scope); is_scope && origin(s) == root do append(out, v.answer)
 			}
-			if v.choice != nil do visit(k, v.choice, root, out)
-			visit(k, v.then, root, out)
+			if v.choice != nil do visit(v.choice, root, out)
+			visit(v.then, root, out)
 		case ^Pattern:
-			visit(k, v.target, root, out)
-			for b in v.branches do visit(k, b.product, root, out)
+			visit(v.target, root, out)
+			for b in v.branches do visit(b.product, root, out)
 		case ^Scope:
-			// what the scope places, as calls_in reads it
-			for b in placed(k, v, .Value) do if b.kind != .Product && b.kind != .Handler do visit(k, binding_type(k, b), root, out)
+			for b in v.bindings do if b.value != nil do visit(b.value, root, out)
 		case:
-			for p in parts(t) do visit(k, p, root, out)
+			for p in parts(t) do visit(p, root, out)
 		}
 	}
-	visit(k, t, root, &out)
+	visit(t, root, &out)
 	return out[:]
 }
 
@@ -335,69 +302,60 @@ built_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) 
 	f, is_fold := x.(^Fold)
 	if o, is_from := x.(^Operation); is_from && o.op == .From do f, is_fold = o.args[0].(^Fold)
 	if !is_fold do return
-	fixed, colors, counts := run_form(k, s) or_return
+	shape := s
+	if recursive(s) do shape = arden(k, s) or_return
+	if !is_shape(k, shape) do return
 	_, es, builds := built(k, f)
 	if !builds do return
 	images := make([]Type, len(es))
 	for e, i in es do images[i] = values(k, given(k, e)) or_return
 	placed_values := or_law(k, images)
-	for c in colors do if !included(k, placed_values, c) do return
-	length := run_law(k, .Length, {x}, f.span)
-	if counts == nil do return in_law(k, length, range_law(k, Int(i128(fixed)), nil, .Int, f.span)), true
-	return in_law(k, op(k, .Sub, length, Int(i128(fixed))), counts), true
-}
-
-// run_form: a shape of unnamed places then runs of pieces, read as a run: how many
-// places it has, the colors its bindings may take, and how many bindings its runs
-// take, each a set or a term — nil when a run takes any number (§5.3).
-run_form :: proc(k: ^Kernel, s: ^Scope) -> (fixed: int, colors: []Type, counts: Type, ok: bool) {
-	shape := s
-	if recursive(s) do shape = arden(k, s) or_return
-	if !is_shape(k, shape) do return
-	runs := false
-	found := make([dynamic]Type)
-	counts = Int(0)
-	for p in placed(k, shape, .Shape) {
+	places := placed(k, shape, .Shape)
+	fixed, runs := 0, false
+	colors := make([dynamic]Type)
+	for p in places {
 		if !is_run(p) {
-			if runs || p.name != "" do return // the bindings of a run are unnamed
+			if runs || p.name != "" do return // the bindings a fold places are unnamed
 			fixed += 1
-			if c := binding_color(k, p); c != nil do append(&found, c)
+			if c := binding_color(k, p); c != nil do append(&colors, c)
 			continue
 		}
 		if p.color == nil {
 			runs = true
-			counts = nil
 			continue
 		}
 		color := binding_color(k, p)
 		// a run of the empty shape places nothing
 		if empty, is_scope := color.(^Scope); is_scope && is_shape(k, empty) && len(placed(k, empty, .Shape)) == 0 do continue
 		// a repetition A * n places pieces of A; a scope, the pieces of its runs
-		pieces, m: Type
-		if o, repeats := color.(^Operation); repeats && o.op == .Mul do pieces, m = o.args[0], o.args[1]
-		else do pieces, m = layout_pieces(k, color) or_return
+		pieces: Type
+		if o, repeats := color.(^Operation); repeats && o.op == .Mul do pieces = o.args[0]
+		else do pieces, _ = layout_pieces(k, color) or_return
 		piece := pieces.(^Scope) or_return
 		inner := placed(k, piece, .Shape)
 		if len(inner) != 1 || is_run(inner[0]) do return
 		runs = true
-		if counts != nil do counts = exact_law(k, .Add, {counts, m}, p.span)
-		if c := binding_color(k, inner[0]); c != nil do append(&found, c)
+		if c := binding_color(k, inner[0]); c != nil do append(&colors, c)
 	}
-	return fixed, found[:], counts, true
+	for c in colors do if !included(k, placed_values, c) do return
+	length := run_law(k, .Length, {x}, f.span)
+	if !runs do return in_law(k, length, Int(i128(fixed))), true
+	return in_law(k, length, range_law(k, Int(i128(fixed)), nil, .Int, f.span)), true
 }
 
-// runs_in: x, a run, in a shape of places then runs of pieces: true when each of
-// its bindings is in the colors of the shape and its length is one the shape
-// admits — read on what x may be (§5.3).
+// runs_in: x, a run, in a run of pieces P * m: true when each of its bindings is
+// in P and its length in m — read on what x may be (§5.3).
 runs_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> bool {
-	fixed, colors, counts := run_form(k, s) or_return
+	pieces, m := layout_pieces(k, s) or_return
+	piece := pieces.(^Scope) or_return
+	inner := placed(k, piece, .Shape)
+	if len(inner) != 1 || is_run(inner[0]) do return false
 	set := values(k, x) or_return
 	if _, same_scope := set.(^Scope); same_scope && set == Type(s) do return false
 	items := item_image(k, set) or_return
 	length := length_image(k, set) or_return
-	for c in colors do if !included(k, items, c) do return false
-	if counts == nil do return included(k, length, range_law(k, Int(i128(fixed)), nil, .Int, s.span))
-	return included(k, exact_law(k, .Sub, {length, Int(i128(fixed))}, s.span), layout_image(k, counts) or_return)
+	if c := binding_color(k, inner[0]); c != nil && !included(k, items, c) do return false
+	return included(k, length, layout_image(k, m) or_return)
 }
 
 // fold_induction: a fold is in c when the states its value reads start in c, stay

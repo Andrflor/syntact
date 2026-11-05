@@ -349,16 +349,6 @@ layout_of :: proc(k: ^Kernel, u: ^Unknown) -> Type {
 	return everything()
 }
 
-// held: what a layout may hold: itself, or, over unknowns, a set of constants — or
-// not given.
-held :: proc(k: ^Kernel, layout: Type) -> (image: Type, ok: bool) {
-	over := make([dynamic]^Unknown)
-	read_unknowns(layout, &over)
-	if len(over) == 0 do return layout, true
-	image = layout_image(k, layout) or_return
-	return image, is_constant(image)
-}
-
 // layout_image: a term over unknowns, each replaced by its layout: an operator
 // distributes over |, so the term is one value of this image (§4.5, §7). A
 // boolean whose value the layouts do not give is false | true. A pattern, the
@@ -369,12 +359,18 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return t, true
 	case ^Unknown:
 		// a layout over other unknowns: what it may hold
-		return held(k, layout_of(k, v))
+		layout := layout_of(k, v)
+		over := make([dynamic]^Unknown)
+		read_unknowns(layout, &over)
+		if len(over) == 0 do return layout, true
+		image, known := layout_image(k, layout)
+		// what a layout over unknowns may hold, a set of constants — or not given
+		if known && is_constant(image) do return image, true
+		return nil, false
 	case ^Operation:
 		if is_string_value(t) do return t, true
 		if v.op == .In do return family_term(.Bool), true
-		// a binding of a run: what its layout says it holds
-		if reads_run(v.op) do return held(k, run_image(k, v) or_return)
+		if reads_run(v.op) do return run_image(k, v)
 		// computed once
 		known, plain := plain_of(k, v)
 		if plain && known.imaged do return known.image, known.image != nil
@@ -421,7 +417,6 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return outer_set(k, t)
 	case ^Collapse:
 		if image, known := call_image(k, v); known do return image, true
-		if image, known := tail_image(k, v); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Fold:
 		// a sum along the fold: its init, and as many terms as steps
@@ -493,37 +488,36 @@ int_hull :: proc(k: ^Kernel, t: Type) -> Type {
 	return discrete_cell(.Int, lo, hi)
 }
 
-// euclid_image: n = m·(n / m) + n % m, for n ≥ 0 and m ≥ 1: a term that reads n / m
-// or n % m is read on q = n / m and r = n % m, unknowns of their own, r in
-// 0..(m - 1), n being m·q + r — the image keeps what relates n, m, n / m and n % m.
-// image is the image of the term as it is.
+// euclid_image: n = c·(n / c) + n % c, for n ≥ 0 and c > 0 constant: a term that reads
+// n / c is read on q = n / c and r = n % c, unknowns of their own, n being c·q + r —
+// the image keeps what relates n and n / c. image is the image of the term as it is.
 euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 	if !is_constant(image) do return image
-	divisions := make([dynamic]^Operation)
+	quotients := make([dynamic]^Operation)
 	visit :: proc(t: Type, out: ^[dynamic]^Operation) {
 		o, is_op := t.(^Operation)
 		if !is_op do return
-		if (o.op == .Div || o.op == .Mod) && len(o.args) == 2 do append(out, o)
+		if o.op == .Div && len(o.args) == 2 {
+			if c, constant := o.args[1].(Int); constant && c > 0 do append(out, o)
+		}
 		for a in o.args do visit(a, out)
 	}
-	visit(t, &divisions)
+	visit(t, &quotients)
 	out := image
-	for d in divisions {
-		if Type(d) == t do continue // n / m itself: nothing beside it to relate
-		n, m := d.args[0], d.args[1]
+	for d in quotients {
+		if Type(d) == t do continue // n / c itself: nothing beside it to relate
+		n := d.args[0]
+		c := d.args[1].(Int)
 		at_least, _ := term_bound(k, n, true)
 		if low, known := at_least.(Int); !known || low < 0 do continue
-		least_m, _ := term_bound(k, m, true)
-		if low, known := least_m.(Int); !known || low < 1 do continue
 		q, r := new_unknown(k, nil), new_unknown(k, nil)
-		q.layout = int_hull(k, layout_image(k, new_operation(.Div, n, m)) or_continue)
-		r.layout = range_law(k, Int(0), op(k, .Sub, m, Int(1)), .Int, {})
-		whole := op(k, .Add, op(k, .Mul, m, q), r)
-		reading := append_read(nil, new_operation(.Div, n, m), q)
-		reading = append_read(reading, new_operation(.Mod, n, m), r)
+		q.layout = layout_image(k, d) or_continue
+		r.layout = range_law(k, Int(0), Int(c - 1), .Int, {})
+		whole := op(k, .Add, op(k, .Mul, c, q), r)
+		reading := append_read(nil, d, q)
 		if u, is_unknown := n.(^Unknown); is_unknown do reading = rewriting(reading, u, whole)
 		else if o, is_op := n.(^Operation); is_op do reading = append_read(reading, o, whole)
-		else if _, constant := n.(Int); !constant do continue
+		else do continue
 		read := layout_image(k, rewrite(k, t, reading)) or_continue
 		if is_constant(read) do out = and_law(k, {int_hull(k, out), int_hull(k, read)})
 	}
@@ -534,9 +528,8 @@ euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 // bounds over other unknowns, u::(L & l..h): a·u + r lies between a·l + r and
 // a·h + r, each a term over the others — the image keeps what relates them.
 // image is the image of the term, each unknown replaced by its layout on its own.
-related_image :: proc(k: ^Kernel, term: Type, image: Type) -> Type {
+related_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 	if !is_constant(image) do return image
-	t, _ := runs_read(k, term)
 	read := make([dynamic]^Unknown)
 	read_unknowns(t, &read)
 	out := image
@@ -562,28 +555,6 @@ related_image :: proc(k: ^Kernel, term: Type, image: Type) -> Type {
 		}
 	}
 	return out
-}
-
-// runs_read: t, each binding of a run it reads, x.#k, an unknown of what the run's
-// layout says it holds, when that is over unknowns: the bindings relate as unknowns do.
-runs_read :: proc(k: ^Kernel, t: Type) -> (out: Type, changed: bool) {
-	o, is_operation := t.(^Operation)
-	if !is_operation do return t, false
-	if reads_run(o.op) {
-		image, known := run_image(k, o)
-		if !known || is_constant(image) do return t, false
-		u := new_unknown(k, nil)
-		u.layout = image
-		return u, true
-	}
-	args := make([]Type, len(o.args))
-	for a, i in o.args {
-		read: bool
-		args[i], read = runs_read(k, a)
-		changed ||= read
-	}
-	if !changed do return t, false
-	return operation_law(k, o.op, args, o.span), true
 }
 
 // built_image: the run a fold builds, {e₀ … eₙ₋₁}: the shape {...{E:} * 0..},
