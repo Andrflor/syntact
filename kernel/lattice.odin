@@ -478,6 +478,50 @@ product_shape :: proc(template: []^Binding, row: []Type) -> Type {
 	return s
 }
 
+// product_pair: two shapes of one structure whose places are all colored: products.
+product_pair :: proc(k: ^Kernel, x, y: Type) -> (a, b: ^Scope, ok: bool) {
+	a = x.(^Scope) or_return
+	b = y.(^Scope) or_return
+	if !joinable(k, a) || !joinable(k, b) || !same_structure(k, a, b) do return
+	return a, b, true
+}
+
+// shape_row: the colors of the places of a shape.
+shape_row :: proc(k: ^Kernel, s: ^Scope) -> []Type {
+	places := placed(k, s, .Shape)
+	row := make([]Type, len(places))
+	for p, i in places do row[i] = binding_color(k, p)
+	return row
+}
+
+// product_minus: the product x without the products ys, as rows of colors: each y
+// takes away, place i, the rows equal to y before i and out of it at i.
+product_minus :: proc(k: ^Kernel, x: Type, ys: []Type) -> (rows: [][]Type, ok: bool) {
+	current := make([dynamic][]Type)
+	for y in ys {
+		a, b := product_pair(k, x, y) or_return
+		_ = a
+		if len(current) == 0 do append(&current, shape_row(k, x.(^Scope)))
+		rb := shape_row(k, b)
+		next := make([dynamic][]Type)
+		for row in current {
+			kept := slice.clone(row)
+			for c, i in row {
+				out := and_law(k, {c, not_law(k, rb[i])})
+				if !is_none(out) {
+					piece := slice.clone(kept)
+					piece[i] = out
+					append(&next, piece)
+				}
+				kept[i] = and_law(k, {c, rb[i]})
+				if is_none(kept[i]) do break
+			}
+		}
+		current = next
+	}
+	return current[:], true
+}
+
 // --- & of cells ---
 
 meet_cells :: proc(k: ^Kernel, a, b: []Type) -> []Type {
@@ -506,6 +550,16 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 	case fx == fy && fx == .Value:
 		if same(k, x, y) do return cell(k, x)
 		if different_structures(k, x, y) do return nil
+		// shapes of one structure are products: (A × X) & (B × Y) = (A & B) × (X & Y)
+		if a, b, products := product_pair(k, x, y); products {
+			ra, rb := shape_row(k, a), shape_row(k, b)
+			row := make([]Type, len(ra))
+			for c, i in ra {
+				row[i] = and_law(k, {c, rb[i]})
+				if is_none(row[i]) do return nil
+			}
+			return cell(k, product_shape(placed(k, a, .Shape), row))
+		}
 		return cell(k, new_and(x, y))
 	case fx == .Other:
 		if same(k, x, y) do return cell(k, x)
@@ -589,6 +643,15 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 		for y in u do if cell_family(y) == .Value && !different_structures(k, x, y) do push(k, y)
 		ys := pushed(k, from)
 		if len(ys) == 0 do return cell(k, x)
+		// shapes of one structure are products: A × X & ~(B × Y) =
+		// ((A & ~B) × X) | ((A & B) × (X & ~Y)), place by place
+		if rows, products := product_minus(k, x, ys); products {
+			release(k, from)
+			out := mark(k)
+			template := placed(k, x.(^Scope), .Shape)
+			for row in rows do _ = cell(k, product_shape(template, row))
+			return pushed(k, out)
+		}
 		left := new_and(x, new_not(cells_term(k, ys)))
 		release(k, from)
 		return cell(k, left)

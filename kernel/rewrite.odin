@@ -567,7 +567,9 @@ built_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 	piece := new_scope(nil, f.span)
 	piece.source, piece.complete, piece.reached = piece, true, true
 	place := new_binding(piece, .Push, f.span)
+	// what a binding may hold: a set the laws keep written, by the range that bounds it
 	place.color = or_law(k, values_of)
+	if _, written := place.color.(^Operation); written do place.color = int_hull(k, place.color)
 	place.typed_color = place.color
 	return repeated(k, piece, COUNTS, f.span), true
 }
