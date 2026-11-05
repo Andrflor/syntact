@@ -38,6 +38,7 @@ Node_Kind :: enum u8 {
 	CompileTime,
 	Literal,
 	Property,
+	Index, // `x.#i`: the binding of the run x at the place i
 	Expand,
 	External,
 	// `<libm.so.6>{ … }` — a scope whose bindings live behind the external
@@ -464,6 +465,10 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 			fmt.printf("%s  Property:\n", indent_str)
 			print_ast(ast, n_data.binary.right, indent + 4)
 		}
+	case .Index:
+		fmt.printf("%sIndex (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		print_ast(ast, n_data.binary.left, indent + 4)
+		print_ast(ast, n_data.binary.right, indent + 4)
 	case .Expand:
 		fmt.printf("%sExpand (line %d, column %d)\n", indent_str, pos.line, pos.column)
 		if n_data.unary.operand != INVALID_NODE {

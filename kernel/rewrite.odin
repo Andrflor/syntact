@@ -62,6 +62,10 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		return t
 	case ^Unknown:
 		if x, found := rewritten(r, v); found do return x
+		// a layout over other unknowns follows them
+		if v.layout != nil && !is_constant(v.layout) {
+			if layout := rewrite(k, v.layout, r); layout != v.layout do return narrowing(v, layout)
+		}
 		return t
 	case ^Effect:
 		then := rewrite(k, v.then, r)
@@ -271,14 +275,27 @@ layout_of :: proc(k: ^Kernel, u: ^Unknown) -> Type {
 // boolean whose value the layouts do not give is false | true. A pattern, the
 // images of its products. False when the term holds what has no layout here: a scope.
 layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
+	out = layout_image_of(k, t) or_return
+	if len(k.reached) == 0 do return out, true
+	// what the reaches of the branches being typed say of t holds there (§6)
+	if _, is_unknown := t.(^Unknown); is_unknown || !is_constant(out) do return out, true
+	return reached_set(k, t, out), true
+}
+
+layout_image_of :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	switch v in t {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t, true
 	case ^Unknown:
 		// a layout over other unknowns: what it may hold
 		layout := layout_of(k, v)
-		if !is_constant(layout) do if image, known := layout_image(k, layout); known do return image, true
-		return layout, true
+		over := make([dynamic]^Unknown)
+		read_unknowns(layout, &over)
+		if len(over) == 0 do return layout, true
+		image, known := layout_image(k, layout)
+		// what a layout over unknowns may hold, a set of constants — or not given
+		if known && is_constant(image) do return image, true
+		return nil, false
 	case ^Operation:
 		if is_string_value(t) do return t, true
 		if v.op == .In do return family_term(.Bool), true
@@ -288,14 +305,16 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		args := make([]Type, len(v.args))
 		image: Type
 		computed := true
+		// the images of its operands: sets of constants, or not given
 		for a, i in v.args {
 			args[i], computed = layout_image(k, a)
+			computed &&= is_constant(args[i])
 			if !computed do break
 		}
 		if computed {
 			// the term computes exactly: only a rounding rounds (format.odin)
 			if v.op == .Round do image = round_law(k, args[0], bits_format(args[1]), v.span)
-			else do image = related_image(k, t, exact_law(k, v.op, args, v.span))
+			else do image = euclid_image(k, t, related_image(k, t, exact_law(k, v.op, args, v.span)))
 		}
 		if plain {
 			known, _ = plain_of(k, v)
@@ -384,6 +403,50 @@ plain_of :: proc(k: ^Kernel, o: ^Operation) -> (Plain, bool) {
 	return entry, entry.plain
 }
 
+// int_hull: the integers from the least to the greatest of a constant set of
+// integers, one range: what bounds it, as a set the laws compute on.
+int_hull :: proc(k: ^Kernel, t: Type) -> Type {
+	lo, hi, ok := int_bounds(k, t)
+	if !ok do return t
+	return discrete_cell(.Int, lo, hi)
+}
+
+// euclid_image: n = c·(n / c) + n % c, for n ≥ 0 and c > 0 constant: a term that reads
+// n / c is read on q = n / c and r = n % c, unknowns of their own, n being c·q + r —
+// the image keeps what relates n and n / c. image is the image of the term as it is.
+euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
+	if !is_constant(image) do return image
+	quotients := make([dynamic]^Operation)
+	visit :: proc(t: Type, out: ^[dynamic]^Operation) {
+		o, is_op := t.(^Operation)
+		if !is_op do return
+		if o.op == .Div && len(o.args) == 2 {
+			if c, constant := o.args[1].(Int); constant && c > 0 do append(out, o)
+		}
+		for a in o.args do visit(a, out)
+	}
+	visit(t, &quotients)
+	out := image
+	for d in quotients {
+		if Type(d) == t do continue // n / c itself: nothing beside it to relate
+		n := d.args[0]
+		c := d.args[1].(Int)
+		at_least, _ := term_bound(k, n, true)
+		if low, known := at_least.(Int); !known || low < 0 do continue
+		q, r := new_unknown(k, nil), new_unknown(k, nil)
+		q.layout = layout_image(k, d) or_continue
+		r.layout = range_law(k, Int(0), Int(c - 1), .Int, {})
+		whole := op(k, .Add, op(k, .Mul, c, q), r)
+		reading := append_read(nil, d, q)
+		if u, is_unknown := n.(^Unknown); is_unknown do reading = rewriting(reading, u, whole)
+		else if o, is_op := n.(^Operation); is_op do reading = append_read(reading, o, whole)
+		else do continue
+		read := layout_image(k, rewrite(k, t, reading)) or_continue
+		if is_constant(read) do out = and_law(k, {int_hull(k, out), int_hull(k, read)})
+	}
+	return out
+}
+
 // related_image: the image of a term of degree 1 in an unknown narrowed between
 // bounds over other unknowns, u::(L & l..h): a·u + r lies between a·l + r and
 // a·h + r, each a term over the others — the image keeps what relates them.
@@ -406,10 +469,12 @@ related_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 			if !is_range || is_constant(x) do continue
 			lo, hi := bounds.lo, bounds.hi
 			if a < 0 do lo, hi = hi, lo
+			// each side on its own: a side without extremity leaves it open
 			least, most: Type
-			if lo != nil do least = term_bound(k, op(k, .Add, op(k, .Mul, alpha, lo), r), true) or_continue
-			if hi != nil do most = term_bound(k, op(k, .Add, op(k, .Mul, alpha, hi), r), false) or_continue
-			out = and_law(k, {out, range_law(k, least, most, .Int, {})})
+			if lo != nil do least, _ = term_bound(k, op(k, .Add, op(k, .Mul, alpha, lo), r), true)
+			if hi != nil do most, _ = term_bound(k, op(k, .Add, op(k, .Mul, alpha, hi), r), false)
+			if least == nil && most == nil do continue
+			out = and_law(k, {int_hull(k, out), range_law(k, least, most, .Int, {})})
 		}
 	}
 	return out
@@ -427,12 +492,7 @@ built_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 	place := new_binding(piece, .Push, f.span)
 	place.color = or_law(k, values_of)
 	place.typed_color = place.color
-	run := new_scope(nil, f.span)
-	run.source, run.complete, run.reached = run, true, true
-	all := new_binding(run, .Expand, f.span)
-	all.color = new_operation(.Mul, piece, COUNTS)
-	all.typed_color = all.color
-	return run, true
+	return repeated(k, piece, COUNTS, f.span), true
 }
 
 // sum_image: the values of a fold whose value is a state x: c ↦ x + g, g not

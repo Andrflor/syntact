@@ -50,6 +50,7 @@ Token_Kind :: enum u8 {
 	DoubleQuestion,
 	Effect, // `!?`: an effect
 	Dot,
+	Hash, // `#` before a name or `(`: the place of a run, `x.#i`
 	DoubleDot,
 	Ellipsis,
 	EllipsisNone, // detached `...`: the expansion of any scope
@@ -575,7 +576,8 @@ lex_ident :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return Token{kind = .Identifier, span = Span{start, off}, flags = flags}
 }
 
-// A bare `#<digits>` is an anonymous ordinal selector (Identifier); a lone `#` is invalid.
+// A bare `#<digits>` is an anonymous ordinal selector (Identifier); `#` before a name
+// or `(` is Hash, the place of a run (`x.#i`); a lone `#` is invalid.
 lex_hash :: proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	src := l.src
 	slen := l.source_len
@@ -588,6 +590,8 @@ lex_hash :: proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 		return Token{kind = .Identifier, span = Span{start, off}, flags = flags}
 	}
 	l.offset = start + 1
+	// `#i`, `#(…)`: the place a term gives, after `.`
+	if off < slen && (IDENT_START[src[off]] || src[off] == '(') do return Token{kind = .Hash, span = Span{start, start + 1}, flags = flags}
 	return Token{kind = .Invalid, span = Span{start, start + 1}, flags = flags}
 }
 
@@ -1770,6 +1774,22 @@ parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 			right = INVALID_NODE,
 		}
 		return add_node(parser, .Property, data, Span{span_start, dot_span_end})
+	}
+
+	// `a.#i`, `a.#(…)`: the binding of the run a at the place the term gives
+	if parser.current_token.kind == .Hash {
+		advance_token(parser)
+		at := parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
+		if at == INVALID_NODE {
+			error_at_current(parser, "Expected a name or `(…)` after `.#`")
+			return INVALID_NODE
+		}
+		data: Node_Data
+		data.binary = Binary_Data {
+			left  = left,
+			right = at,
+		}
+		return add_node(parser, .Index, data, Span{span_start, parser.node_spans[at].end})
 	}
 
 	// `a.3` / `a.(…)`: a non-name glued to `.`. Parse it as the right node anyway so

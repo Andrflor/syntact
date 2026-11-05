@@ -160,6 +160,8 @@ ast_to_string :: proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> string {
 		return fmt.tprintf("Carve(%s,[%s])", ast_to_string(ast, ncarve_source(ast, idx)), strings.join(ov[:], ","))
 	case .Property:
 		return fmt.tprintf("Property(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
+	case .Index:
+		return fmt.tprintf("Index(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .Operator:
 		return fmt.tprintf(
 			"Operator(%v,%s,%s)",

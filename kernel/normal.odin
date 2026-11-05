@@ -496,6 +496,9 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 		return v
 	case ^Is:
 		return v.term
+	case ^Operation:
+		// a run of n pieces: none of them, {}, when n may be 0 (§5.5)
+		if _, pieces := v.args[0].(^Scope); pieces && v.op == .Mul && is_bool(in_law(k, Int(0), v.args[1]), true) do return run_scope(k, nil)
 	}
 	if is_primitive(c) do return c
 	if !is_constant(c) do return unsupported_at(k, span, fmt.tprintf("the default of %s, a type over unknowns", print_type(c)))

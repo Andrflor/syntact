@@ -183,6 +183,31 @@ unknown_value :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 // pattern, what its branches give; a rounding, values of its format; another term
 // over unknowns, its layout image.
 values :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
+	return reached_set(k, t, values_of(k, t) or_return), true
+}
+
+// reached_set: the set of the values of t, where the reaches of the branches being
+// typed hold: what they say of t narrows it (§6).
+reached_set :: proc(k: ^Kernel, t: Type, set: Type) -> Type {
+	set := set
+	for g in k.reached {
+		if is_bool(g, true) do continue
+		literals := make([dynamic]Type)
+		conjuncts(g, &literals)
+		for l in literals {
+			positive := true
+			atom := l
+			if n, negated := l.(^Operation); negated && n.op == .Bit_Not do positive, atom = false, n.args[0]
+			o, is_in := atom.(^Operation)
+			if !is_in || o.op != .In || !same(k, o.args[0], t) do continue
+			if _, is_scope := o.args[1].(^Scope); !is_scope && !is_constant(o.args[1]) do continue
+			set = and_law(k, {set, positive ? o.args[1] : not_law(k, o.args[1])})
+		}
+	}
+	return set
+}
+
+values_of :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
 	#partial switch v in t {
 	case ^Unknown:
 		return layout_of(k, v), true

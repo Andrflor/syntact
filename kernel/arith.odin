@@ -107,9 +107,9 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		return .Scope, true
 	case ^Unknown:
 		if v.call != nil do return call_family(k, v.call)
-		// its layout, or what it may hold when that layout reads other unknowns
-		image, _ := layout_image(k, v)
-		return layout_family(k, image)
+		// what its layout may hold, when that layout reads other unknowns; its layout
+		if image, known := layout_image(k, v); known do if f, one := layout_family(k, image); one do return f, true
+		return layout_family(k, layout_of(k, v))
 	case ^Operation:
 		if v.op == .In do return .Bool, true
 		known, plain := plain_of(k, v)

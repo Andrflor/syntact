@@ -1145,7 +1145,7 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 // --- runs (§5.3): |x|, x.#k, x from k ---
 
 // run_law: read on the bindings of x where they are known; otherwise it stays.
-run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span) -> Type {
+run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked := false) -> Type {
 	x := given(k, args[0])
 	if !gives_scope(k, x) && !is_pending_call(k, x) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a run, not %s", operator_text[o], print_type(x)))
 	from, is_from := x.(^Operation)
@@ -1167,12 +1167,21 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span) -> Type {
 	}
 	i := args[1]
 	if !proven_in(k, i, COUNTS) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a place of a run, and %s is not proven to be one", operator_text[o], print_type(i)))
-	// (x from a).#b = x.#(a + b), (x from a) from b = x from (a + b)
-	if is_from do return run_law(k, o, {from.args[0], op(k, .Add, from.args[1], i)}, span)
-	if o == .From && is_int(i, 0) do return x
-	if f, is_fold := x.(^Fold); is_fold && o == .Item do if v, read := built_item(k, f, i); read do return v
+	// x.#k, x not known: a binding of the run, k < |x| — proven on x as it is read
 	s, known := x.(^Scope)
 	at, placed_at := i.(Int)
+	if o == .Item && !checked && !(known && placed_at) && !is_pending_call(k, x) {
+		if _, is_fold := x.(^Fold); !is_fold || !placed_at {
+			past := op(k, .Sub, i, run_law(k, .Length, {x}, span))
+			if verdict, _ := prove(k, in_law(k, past, range_law(k, nil, Int(-1), .Int, span))); verdict != .Proven {
+				return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a place of %s, and %s is not proven to be one", operator_text[o], print_type(x), print_type(i)))
+			}
+		}
+	}
+	// (x from a).#b = x.#(a + b), (x from a) from b = x from (a + b)
+	if is_from do return run_law(k, o, {from.args[0], op(k, .Add, from.args[1], i)}, span, true)
+	if o == .From && is_int(i, 0) do return x
+	if f, is_fold := x.(^Fold); is_fold && o == .Item do if v, read := built_item(k, f, i); read do return v
 	if !known || !placed_at do return new_operation(o, x, i)
 	xs := run_data(k, s)
 	for b in xs[:min(int(at) + 1, len(xs))] do if b.kind == .Expand do return new_operation(o, x, i)
@@ -1210,6 +1219,134 @@ built_item :: proc(k: ^Kernel, f: ^Fold, a: Type) -> (value: Type, read: bool) {
 	return rewrite(k, es[j], r), true
 }
 
+// length_image: the lengths of the runs a layout admits: a place one binding, a
+// run `...A * m` m pieces of A, a run of a shape its lengths; L & S what both admit.
+length_image :: proc(k: ^Kernel, layout: Type) -> (n: Type, ok: bool) {
+	if both, narrowed := layout.(^And); narrowed {
+		for t in both.terms {
+			x := length_image(k, t) or_continue
+			n = n == nil ? x : and_law(k, {n, x})
+		}
+		return n, n != nil
+	}
+	// one of several layouts: the lengths of any
+	if any, either := layout.(^Or); either {
+		lengths := make([]Type, len(any.terms))
+		for t, i in any.terms do lengths[i] = length_image(k, t) or_return
+		return or_law(k, lengths), true
+	}
+	// out of the runs of length 0: there is one, {}, so the length is not 0
+	if out, negated := layout.(^Not); negated {
+		if zero, read := length_image(k, out.term); read && is_int(zero, 0) do return range_law(k, Int(1), nil, .Int, {}), true
+		return
+	}
+	s := layout.(^Scope) or_return
+	shape := s
+	if recursive(s) do shape = arden(k, s) or_return
+	if !is_shape(k, shape) do return
+	n = Int(0)
+	for p in placed(k, shape, .Shape) {
+		if !is_run(p) {
+			n = exact_law(k, .Add, {n, Int(1)}, p.span)
+			continue
+		}
+		if p.color == nil do return // `...` admits any run
+		c := binding_color(k, p)
+		part: Type
+		if o, repeats := c.(^Operation); repeats && o.op == .Mul {
+			piece := length_image(k, o.args[0]) or_return
+			if !is_int(piece, 1) do return
+			part = o.args[1]
+		} else {
+			part = length_image(k, c) or_return
+		}
+		n = exact_law(k, .Add, {n, part}, p.span)
+	}
+	return n, true
+}
+
+// call_length: the lengths of the runs a recursive call gives: those of the runs
+// each product of its equation places, through its patterns; a product that calls
+// the equation gives what the call gives.
+call_length :: proc(k: ^Kernel, c: ^Collapse) -> (n: Type, ok: bool) {
+	s := c.target.(^Scope) or_return
+	root := origin(s)
+	p := first_production(k, root) or_return
+	if p.state != .Done do return
+	lengths := make([dynamic]Type)
+	gather :: proc(k: ^Kernel, t: Type, root: ^Scope, out: ^[dynamic]Type) -> bool {
+		#partial switch v in t {
+		case ^Pattern:
+			for b in v.branches do if !gather(k, b.product, root, out) do return false
+			return true
+		case ^Scope:
+			n: Type = Int(0)
+			for b in run_data(k, v) {
+				if b.kind == .Expand do return false
+				n = op(k, .Add, n, Int(1))
+			}
+			append(out, n)
+			return true
+		}
+		// what the equation gives back: the lengths gathered from its other products
+		if call, is_call := as_call(t); is_call && origin(call.target.(^Scope) or_else nil) == root do return true
+		return false
+	}
+	if !gather(k, binding_type(k, p), root, &lengths) || len(lengths) == 0 do return
+	return or_law(k, lengths[:]), true
+}
+
+// item_image: the values a binding of the runs a layout admits may hold: the
+// colors of its places, of the pieces of its runs; L & S what both say, L | S what
+// either does.
+item_image :: proc(k: ^Kernel, layout: Type) -> (c: Type, ok: bool) {
+	#partial switch v in layout {
+	case ^And:
+		for t in v.terms {
+			x := item_image(k, t) or_continue
+			c = c == nil ? x : and_law(k, {c, x})
+		}
+		return c, c != nil
+	case ^Or:
+		items := make([]Type, len(v.terms))
+		for t, i in v.terms do items[i] = item_image(k, t) or_return
+		return or_law(k, items), true
+	case ^Operation:
+		// A * n: the bindings of A
+		if v.op == .Mul do return item_image(k, v.args[0])
+		return
+	case ^Scope:
+		shape := v
+		if recursive(v) do shape = arden(k, v) or_return
+		if !is_shape(k, shape) do return
+		items := make([dynamic]Type)
+		for p in placed(k, shape, .Shape) {
+			if p.color == nil do return // `...` or a place without color: any value
+			color := binding_color(k, p)
+			if !is_run(p) {
+				append(&items, color)
+				continue
+			}
+			// a run of the empty shape places nothing
+			if empty, is_scope := color.(^Scope); is_scope && is_shape(k, empty) && len(placed(k, empty, .Shape)) == 0 do continue
+			append(&items, item_image(k, color) or_return)
+		}
+		if len(items) == 0 do return
+		return or_law(k, items[:]), true
+	}
+	return
+}
+
+// repeated: the shape {...P * n} of the runs of n pieces P.
+repeated :: proc(k: ^Kernel, piece: ^Scope, n: Type, span: syn.Span) -> ^Scope {
+	run := new_scope(nil, span)
+	run.source, run.complete, run.reached = run, true, true
+	all := new_binding(run, .Expand, span)
+	all.color = new_operation(.Mul, piece, n)
+	all.typed_color = all.color
+	return run
+}
+
 // run_data: the bindings of a run: values, and runs not known yet.
 run_data :: proc(k: ^Kernel, s: ^Scope) -> []^Binding {
 	out := make([dynamic]^Binding)
@@ -1242,6 +1379,14 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 			return or_law(k, images), true
 		}
 	}
+	if o.op == .Length {
+		if set, known := values(k, o.args[0]); known do if n, read := length_image(k, set); read do return n, true
+		// a call: the lengths of the runs its productions give
+		if c, is_call := as_call(o.args[0]); is_call do if n, read := call_length(k, c); read do return n, true
+	}
+	if o.op == .Item {
+		if set, known := values(k, o.args[0]); known do if c, read := item_image(k, set); read do return c, true
+	}
 	pieces, m := run_pieces(k, o.args[0]) or_return
 	shape := pieces.(^Scope) or_return
 	places := placed(k, shape, .Shape)
@@ -1253,5 +1398,12 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		c := binding_color(k, places[0])
 		return c, c != nil
 	}
-	return values(k, o.args[0])
+	// x from k: what x is of runs of pieces only, which hold what follows k of them
+	set := values(k, o.args[0]) or_return
+	terms := []Type{set}
+	if both, narrowed := set.(^And); narrowed do terms = both.terms
+	kept := make([dynamic]Type)
+	for t in terms do if _, _, repeats := layout_pieces(k, t); repeats do append(&kept, t)
+	if len(kept) == 0 do return
+	return and_law(k, kept[:]), true
 }

@@ -275,6 +275,9 @@ build_term :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		a.ordinal = int(ast.node_data[prop].identifier.ordinal)
 		a.span = span
 		return a
+	case .Index:
+		// x.#i: the binding i of the run x (§5.3)
+		return new_operation(.Item, build_term(k, s, data.binary.left), build_term(k, s, data.binary.right))
 	case .Execute:
 		if len(syn.node_execute_wrappers(ast, idx)) > 0 do return unsupported(k, idx, "execution patterns")
 		c := new(Collapse)

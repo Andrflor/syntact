@@ -502,6 +502,10 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		j := new_unknown(k, nil)
 		j.layout = i.layout
 		n = least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), stop), p.span)
+		// along the orbit, before it stops: i in 0..n - 1
+		along := new_unknown(k, nil)
+		along.layout = range_law(k, Int(0), op(k, .Sub, n, Int(1)), .Int, p.span)
+		ki, i = rewrite(k, ki, rewriting(nil, i, along)), along
 	}
 	at := proc(k: ^Kernel, ki: Type, i: ^Unknown, t: Type) -> Type {return rewrite(k, ki, rewriting(nil, i, t))}
 	feeds := false

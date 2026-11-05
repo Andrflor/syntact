@@ -218,7 +218,8 @@ branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite, target: Type, outer: R
 	b := b
 	// a product rewritten with its target: in its branch, where its reach holds
 	if outer != nil do b.product = rewrite(k, normal(k, b.product), outer)
-	pieces := cover_pieces(k, b, target)
+	// the pieces of the value that reaches the branch: the target, narrowed
+	pieces := cover_pieces(k, b, rewrite(k, target, r))
 	if b.scope == nil || len(r) == 0 && len(pieces) == 0 do return rewrite(k, normal(k, b.product), r)
 	m := Copier{outer = r, substitute = true, pieces = pieces}
 	m.scopes[b.scope] = b.scope // the scopes written in the branch are copied
