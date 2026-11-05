@@ -1,7 +1,11 @@
-// graph (Goose bench/goose/graph.goose): V vertices, 8V edges u -> w drawn from
-// xorshift64 (u = xs_mod(r, V), w = xs_mod(r >> 24, V)); BFS from four sources
-// (seed 999), the total of the distances reached. Adjacency as one run per vertex,
-// pushed to at a computed vertex; distances as a run, carved at a computed vertex.
+// graph (Goose bench/goose/graph.goose): v vertices and 8v edges u -> w drawn from
+// xorshift64 (u = xs_mod(r, v), w = xs_mod(r >> 24, v)), each put at the front of
+// the list of u; then a breadth-first search from four sources (seed 999), the
+// total of the distances it reaches. Prints the length of the pool -- the v list
+// heads and the edges -- and the total.
+// The adjacency is a run of v runs, carved at a computed vertex; the distances a
+// run of v, carved at a computed vertex; the queue the run of the vertices still
+// to visit, taken from its front and pushed to at its end.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
@@ -17,23 +21,110 @@ xs -> {
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-// adj with w pushed to the list of u
-push -> {
-  Array{Array{u32}}:adj -> {}
-  u32:u -> 0
-  u32:w -> 0
-  -> adj{#u -> {...adj.#u  w}}
-}
-edges -> {
-  u32:v -> 1
-  u32:e -> ??
-  u64:r -> 12345
-  Array{Array{u32}}:adj -> {}
-  -> e ? {
-    0 -> adj
-    -> {
-      s -> xs{x -> r}!
-      -> edges{v -> v  e -> e - 1  r -> s  adj -> push{adj -> adj  u -> s % v  w -> (s >> 24) % v}!}!
-    }!
+DEG -> 8
+SOURCES -> 4
+graph -> {
+  // dist is an i32 per vertex in Goose: v fits it, and the total of the distances
+  // an i64
+  (1..2147483647):v -> ??
+  Vertex -> 0..(v - 1)
+  Edges -> Array{Vertex}
+  // the edges of each vertex, the last pushed first
+  Adj -> {...({Edges:} * v):}
+  // the distance of each vertex, -1 when it is not reached
+  Dist -> {...({i64:} * v):}
+  // n empty lists, n of -1
+  heads -> {
+    u32:n -> ??
+    u32:i -> 0
+    -> i ? {>=n -> {}  -> {{}  ...heads{n -> n  i -> i + 1}!}}
   }
+  unreached -> {
+    u32:n -> ??
+    u32:i -> 0
+    -> i ? {>=n -> {}  -> {-1  ...unreached{n -> n  i -> i + 1}!}}
+  }
+  // e more edges, each from the next state of the chain, w put first in the
+  // list of u
+  build -> {
+    u64:e -> 0
+    u64:r -> 12345
+    Adj:adj -> heads{n -> v}!
+    -> e ? {
+      0 -> adj
+      -> {
+        s -> xs{x -> r}!
+        Vertex:u -> s % v
+        Vertex:w -> (s >> 24) % v
+        -> build{e -> e - 1  r -> s  adj -> adj{#u -> {w  ...adj.#u}}}!
+      }!
+    }
+  }
+  // the edges es of a vertex at distance d: each w not reached yet is at d + 1,
+  // pushed to the queue
+  Visit -> {Dist:dist  Array{Vertex}:q}
+  visit -> {
+    Edges:es -> {}
+    i64:d -> 0
+    Dist:dist -> unreached{n -> v}!
+    Array{Vertex}:q -> {}
+    -> es ? {
+      {Vertex(w)  ...Edges:(t)} -> dist.#w ? {
+        <0 -> visit{es -> t  d -> d  dist -> dist{#w -> d + 1}  q -> {...q  w}}!
+        -> visit{es -> t  d -> d  dist -> dist  q -> q}!
+      }
+      -> Visit{dist -> dist  q -> q}
+    }
+  }
+  // the queue, each vertex taken from its front; total the distances taken
+  bfs -> {
+    Adj:adj -> heads{n -> v}!
+    Dist:dist -> unreached{n -> v}!
+    Array{Vertex}:q -> {}
+    i64:total -> 0
+    -> q ? {
+      {Vertex(u)  ...Array{Vertex}:(t)} -> {
+        d -> dist.#u
+        s -> visit{es -> adj.#u  d -> d  dist -> dist  q -> t}!
+        -> bfs{adj -> adj  dist -> s.dist  q -> s.q  total -> total + d}!
+      }!
+      -> total
+    }
+  }
+  // k more sources, each from the next state of the chain
+  sources -> {
+    Adj:adj -> heads{n -> v}!
+    (0..4):k -> SOURCES
+    u64:seed -> 999
+    i64:total -> 0
+    -> k ? {
+      0 -> total
+      -> {
+        s -> xs{x -> seed}!
+        Vertex:src -> s % v
+        fresh -> unreached{n -> v}!
+        b -> bfs{adj -> adj  dist -> fresh{#src -> 0}  q -> {src}}!
+        -> sources{adj -> adj  k -> k - 1  seed -> s  total -> total + b}!
+      }!
+    }
+  }
+  size -> {
+    Edges:es -> {}
+    -> es ? {
+      {Vertex(w)  ...Edges:(t)} -> 1 + size{es -> t}!
+      -> 0
+    }
+  }
+  // the edges of every list
+  pool -> {
+    Array{Edges}:ls -> {}
+    -> ls ? {
+      {Edges(l)  ...Array{Edges}:(t)} -> size{es -> l}! + pool{ls -> t}!
+      -> 0
+    }
+  }
+  Adj:adj -> build{e -> DEG * v}!
+  a -> io.printf{format -> "%lld\n"  n -> v + pool{ls -> adj}!}!
+  -> io.printf{format -> "%lld\n"  n -> sources{adj -> adj}!}!
 }
+-> graph{v -> ??::(1..2147483647)}!

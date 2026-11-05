@@ -1,9 +1,12 @@
-// particles (Goose bench/goose/particles.goose): N particles {pos, vel} of f32 from
-// xorshift64; 200 steps of vel.y += -0.0625, pos += vel, and a bounce on y < 0
-// (pos.y = -pos.y, vel.y = -(vel.y * 0.5)); then the total of the positions times
-// 16, each truncated to an integer. Prints N and the total.
-// The positions are integers drawn from xorshift64 read as reals: the spec has no
-// operator from an integer to a real (specs/language/02), written here as k * 1.0.
+// particles (Goose bench/goose/particles.goose): n particles {pos, vel} of float3
+// from xorshift64 -- positions integers in 0..1023, velocities (k - 128) / 16 --;
+// 200 steps of the elementwise update vel = vel + G, pos = pos + vel, and a bounce
+// on pos.y < 0 (pos.y = -pos.y, vel.y = -(vel.y * 0.5)); then the total of the
+// components of the positions times 16, each truncated to an integer. Prints n
+// and the total. Every value is exact in binary32.
+// The spec has no operator between integers and reals (specs/language/01, 02):
+// `as f32` and `as i64` are written as scopes, real_of and trunc, from the binary
+// digits of what they convert, and are exact.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
@@ -19,60 +22,124 @@ xs -> {
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
+STEPS -> 200
+
+// --- integers and reals --------------------------------------------------------
+
+// the real k, from its binary digits: k = 2 * (k >> 1) + (k [&] 1)
+real_of -> {
+  (0..4294967295):k -> 0
+  -> k ? {
+    0 -> 0.0
+    -> real_of{k -> k >> 1}! * 2.0 + ((k [&] 1) ? {0 -> 0.0  -> 1.0})
+  }
+}
+// the integer part of x >= 0, below 2 ** 63: k the integer found so far and rk
+// its real, bit the digit tried and rbit its real, from the highest down
+floor_of -> {
+  f64:x -> 0.0
+  i64:k -> 0
+  f64:rk -> 0.0
+  (0..4611686018427387904):bit -> 4611686018427387904
+  f64:rbit -> 4611686018427387904.0
+  -> bit ? {
+    0 -> k
+    -> (rbit <= x - rk) ? {
+      true -> floor_of{x -> x  k -> k + bit  rk -> rk + rbit  bit -> bit >> 1  rbit -> rbit * 0.5}!
+      -> floor_of{x -> x  k -> k  rk -> rk  bit -> bit >> 1  rbit -> rbit * 0.5}!
+    }
+  }
+}
+// x rounded toward 0, as C's (long long)x
+trunc -> {
+  f64:x -> 0.0
+  -> x ? {
+    <0.0 -> 0 - floor_of{x -> 0.0 - x}!
+    -> floor_of{x -> x}!
+  }
+}
+
+// --- the simulation ------------------------------------------------------------
+
 F3 -> {f32:x  f32:y  f32:z}
-Particle -> {F3:pos  F3:vel}
+// elementwise float3 math (spec 6.1 of Goose)
+add -> {
+  F3:a -> F3
+  F3:b -> F3
+  -> F3{x -> a.x + b.x  y -> a.y + b.y  z -> a.z + b.z}
+}
+G -> F3{x -> 0.0  y -> -0.0625  z -> 0.0}
+P -> {F3:pos  F3:vel}
+// a velocity component: (k - 128) / 16
+speed -> {
+  (0..255):k -> 128
+  -> k ? {
+    <128 -> (0.0 - real_of{k -> 128 - k}!) / 16.0
+    -> real_of{k -> k - 128}! / 16.0
+  }
+}
 spawn -> {
   u32:n -> ??
+  u32:i -> 0
   u64:r -> 12345
-  -> n ? {
-    0 -> {}
+  -> i ? {
+    >=n -> {}
     -> {
       s -> xs{x -> r}!
-      -> {
-        Particle{
-          pos -> F3{x -> s % 1024 * 1.0  y -> (s >> 12) % 1024 * 1.0  z -> (s >> 24) % 1024 * 1.0}
-          vel -> F3{x -> ((s >> 36) % 256 - 128) * 1.0 / 16.0  y -> ((s >> 44) % 256 - 128) * 1.0 / 16.0  z -> ((s >> 52) % 256 - 128) * 1.0 / 16.0}
-        }
-        ...spawn{n -> n - 1  r -> s}!
+      p -> P{
+        pos -> F3{x -> real_of{k -> s % 1024}!  y -> real_of{k -> (s >> 12) % 1024}!  z -> real_of{k -> (s >> 24) % 1024}!}
+        vel -> F3{x -> speed{k -> (s >> 36) % 256}!  y -> speed{k -> (s >> 44) % 256}!  z -> speed{k -> (s >> 52) % 256}!}
       }
+      -> {p  ...spawn{n -> n  i -> i + 1  r -> s}!}
     }!
   }
 }
 move -> {
-  Particle:q -> Particle
-  -> {
-    vy -> q.vel.y + -0.0625
-    px -> q.pos.x + q.vel.x
-    py -> q.pos.y + vy
-    pz -> q.pos.z + q.vel.z
-    -> py ? {
-      <0.0 -> Particle{pos -> F3{px  0.0 - py  pz}  vel -> F3{q.vel.x  0.0 - vy * 0.5  q.vel.z}}
-      -> Particle{pos -> F3{px  py  pz}  vel -> F3{q.vel.x  vy  q.vel.z}}
-    }
-  }!
+  P:q -> P
+  vel -> add{a -> q.vel  b -> G}!
+  pos -> add{a -> q.pos  b -> vel}!
+  -> pos.y ? {
+    <0.0 -> P{pos -> pos{y -> 0.0 - pos.y}  vel -> vel{y -> 0.0 - vel.y * 0.5}}
+    -> P{pos -> pos  vel -> vel}
+  }
 }
 step -> {
-  Array{Particle}:ps -> {}
+  Array{P}:ps -> {}
   -> ps ? {
-    {Particle(h) ...Array{Particle}:(t)} -> {move{q -> h}! ...step{ps -> t}!}
+    {P(h)  ...Array{P}:(t)} -> {move{q -> h}!  ...step{ps -> t}!}
     -> {}
   }
 }
 steps -> {
-  Array{Particle}:ps -> {}
-  u8:s -> ??
-  -> s ? {0 -> ps  -> steps{ps -> step{ps -> ps}!  s -> s - 1}!}
+  Array{P}:ps -> {}
+  u8:s -> STEPS
+  -> s ? {
+    0 -> ps
+    -> steps{ps -> step{ps -> ps}!  s -> s - 1}!
+  }
 }
-// (long long)(x * 16.0f): there is no operator from a real to an integer either
-checksum -> {
-  Array{Particle}:ps -> {}
-  f64:acc -> 0.0
+size -> {
+  Array{P}:ps -> {}
   -> ps ? {
-    {Particle(h) ...Array{Particle}:(t)} -> checksum{ps -> t  acc -> acc + h.pos.x * 16.0 + h.pos.y * 16.0 + h.pos.z * 16.0}!
+    {P(h)  ...Array{P}:(t)} -> 1 + size{ps -> t}!
+    -> 0
+  }
+}
+// (long long)(c * 16.0f) for each component c of each position
+checksum -> {
+  Array{P}:ps -> {}
+  i64:acc -> 0
+  -> ps ? {
+    {P(h)  ...Array{P}:(t)} -> checksum{
+      ps -> t
+      acc -> acc + trunc{x -> h.pos.x * 16.0}! + trunc{x -> h.pos.y * 16.0}! + trunc{x -> h.pos.z * 16.0}!
+    }!
     -> acc
   }
 }
 -> {
   u32:n -> ??
-  -> checksum{ps -> steps{ps -> spawn{n -> n}!  s -> 200}!}!
+  ps -> steps{ps -> spawn{n -> n}!}!
+  a -> io.printf{format -> "%lld\n"  n -> size{ps -> ps}!}!
+  -> io.printf{format -> "%lld\n"  n -> checksum{ps -> ps}!}!
 }!

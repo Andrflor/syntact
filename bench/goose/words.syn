@@ -1,7 +1,10 @@
-// words (Goose bench/goose/words.goose): a dictionary of N/10 + 16 random words of
-// 3..14 letters; a text of N words, word i = dict[(a * a) / vocab], a =
-// xs_mod(r, vocab); the frequency of each word; prints distinct and the total of
-// count * (|w| + w[0]). The dictionary is read at a computed position.
+// words (Goose bench/goose/words.goose): a dictionary of n/10 + 16 random words of
+// 3..14 letters; a text of n words, each followed by a space, word i the entry
+// (a * a) / vocab of the dictionary, a = xs_mod(r, vocab); the text split at its
+// spaces; the words counted in an open-addressed table of max(16, next_pow2(4 *
+// vocab)) slots probed linearly from std's hash of the bytes (stdlib/std.goose).
+// Prints the count of words, the distinct ones, and the total of count * (|w| +
+// w[0]) over the table.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
@@ -10,6 +13,9 @@ Array -> {
   -> {}
   -> {T: ...Array{T}:}
 }
+A -> Array{u8}
+// a word: one letter at least
+Word -> {u8: ...A:}
 // xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
 xs -> {
   u64:x
@@ -17,47 +23,265 @@ xs -> {
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-// a letter from 0..25: there is no operator from an integer to a character
-// (specs/language/02), so it is a pattern
-letter -> {
-  (0..25):k
-  -> k ? {0 -> "a"  1 -> "b"  2 -> "c"  3 -> "d"  4 -> "e"  5 -> "f"  6 -> "g"  7 -> "h"  8 -> "i"  9 -> "j"  10 -> "k"  11 -> "l"  12 -> "m"  13 -> "n"  14 -> "o"  15 -> "p"  16 -> "q"  17 -> "r"  18 -> "s"  19 -> "t"  20 -> "u"  21 -> "v"  22 -> "w"  23 -> "x"  24 -> "y"  -> "z"}
-}
-Word -> {string:text  u64:r}
-word -> {
-  u8:n -> ??
-  u64:r -> 12345
-  string:acc -> ""
-  -> n ? {
-    0 -> Word{acc  r}
-    -> word{n -> n - 1  r -> xs{x -> r}!  acc -> acc + letter{k -> xs{x -> r}! % 26}!}!
+M -> 0xffffffffffffffff
+
+// --- std's hash of bytes -------------------------------------------------------
+// Bytes are read from the front of the cursor, the run from them on.
+
+K -> 11400714819323198485
+Bytes4 -> {u8: u8: u8: u8:}
+Bytes8 -> {u8: u8: u8: u8: u8: u8: u8: u8:}
+// more than 8 bytes, more than 24
+Over8 -> {u8: u8: u8: u8: u8: u8: u8: u8: ...Word:}
+Over24 -> {u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: ...Over8:}
+// 8 bytes at least, 4 at least
+Long8 -> {u8: u8: u8: u8: u8: u8: u8: u8: ...A:}
+Long4 -> {u8: u8: u8: u8: ...A:}
+// little-endian words
+le64 -> {
+  Bytes8:b
+  -> b ? {
+    {u8(b0)  u8(b1)  u8(b2)  u8(b3)  u8(b4)  u8(b5)  u8(b6)  u8(b7)} -> b0 [|] (b1 << 8) [|] (b2 << 16) [|] (b3 << 24) [|] (b4 << 32) [|] (b5 << 40) [|] (b6 << 48) [|] (b7 << 56)
   }
 }
-Dict -> {Array{string}:words  u64:r}
-dict -> {
-  u32:n -> ??
-  u64:r -> 12345
-  Array{string}:acc -> {}
+le32 -> {
+  Bytes4:b
+  -> b ? {
+    {u8(b0)  u8(b1)  u8(b2)  u8(b3)} -> b0 [|] (b1 << 8) [|] (b2 << 16) [|] (b3 << 24)
+  }
+}
+// the last 8 bytes, the last 4
+last8 -> {
+  Long8:t -> Long8
+  -> t ? {
+    Bytes8: -> t
+    {u8:  ...Long8:(rest)} -> last8{t -> rest}!
+  }
+}
+last4 -> {
+  Long4:t -> Long4
+  -> t ? {
+    Bytes4: -> t
+    {u8:  ...Long4:(rest)} -> last4{t -> rest}!
+  }
+}
+rot -> {
+  u64:h
+  (1..63):k -> 1
+  -> ((h << k) [&] M) [|] (h >> (64 - k))
+}
+// one round per word of the cursor while more than 8 bytes are left
+rounds -> {
+  A:t -> {}
+  u64:h -> 0
+  -> t ? {
+    {u8(c0)  u8(c1)  u8(c2)  u8(c3)  u8(c4)  u8(c5)  u8(c6)  u8(c7)  ...Word:(rest)} -> rounds{
+      t -> rest
+      h -> rot{h -> ((h ^ le64{b -> {c0  c1  c2  c3  c4  c5  c6  c7}}!) * K) [&] M  k -> 29}!
+    }!
+    -> h
+  }
+}
+// two lanes of rounds while more than 24 bytes are left, the even and the odd
+// words of each 16
+Lanes -> {A:t  u64:h  u64:g}
+lanes -> {
+  A:t -> {}
+  u64:h -> 0
+  u64:g -> 0
+  -> t ? {
+    {u8(c0)  u8(c1)  u8(c2)  u8(c3)  u8(c4)  u8(c5)  u8(c6)  u8(c7)
+     u8(d0)  u8(d1)  u8(d2)  u8(d3)  u8(d4)  u8(d5)  u8(d6)  u8(d7)  ...Over8:(rest)} -> lanes{
+      t -> rest
+      h -> rot{h -> ((h ^ le64{b -> {c0  c1  c2  c3  c4  c5  c6  c7}}!) * K) [&] M  k -> 29}!
+      g -> rot{h -> ((g ^ le64{b -> {d0  d1  d2  d3  d4  d5  d6  d7}}!) * K) [&] M  k -> 29}!
+    }!
+    -> Lanes{t -> t  h -> h  g -> g}
+  }
+}
+// the last word through two multiply-xorshift rounds
+finish -> {
+  u64:h -> 0
+  u64:w -> 0
+  h1 -> ((h ^ w) * K) [&] M
+  h2 -> ((h1 ^ (h1 >> 32)) * 15485907386658061715) [&] M
+  -> h2 ^ (h2 >> 32)
+}
+size -> {
+  A:s -> {}
+  -> s ? {
+    {u8(b)  ...A:(t)} -> 1 + size{s -> t}!
+    -> 0
+  }
+}
+hash -> {
+  A:s -> {}
+  h0 -> (size{s -> s}! * K) [&] M
+  -> s ? {
+    Over24: -> {
+      l -> lanes{t -> s  h -> h0  g -> h0 ^ 0x9E3779B97F4A7C15}!
+      -> finish{h -> rounds{t -> l.t  h -> l.h ^ rot{h -> l.g  k -> 31}!}!  w -> le64{b -> last8{t -> s}!}!}!
+    }!
+    Over8: -> finish{h -> rounds{t -> s  h -> h0}!  w -> le64{b -> last8{t -> s}!}!}!
+    {u8(c0)  u8(c1)  u8(c2)  u8(c3)  ...A:} -> finish{h -> h0  w -> le32{b -> {c0  c1  c2  c3}}! [|] (le32{b -> last4{t -> s}!}! << 32)}!
+    {u8(a)} -> finish{h -> h0  w -> a [|] (a << 8) [|] (a << 16)}!
+    {u8(a)  u8(b)} -> finish{h -> h0  w -> a [|] (b << 8) [|] (b << 16)}!
+    {u8(a)  u8(b)  u8(c)} -> finish{h -> h0  w -> a [|] (b << 8) [|] (c << 16)}!
+    -> finish{h -> h0}!
+  }
+}
+
+// --- the text ----------------------------------------------------------------
+
+// the n letters of a word after acc, each from the next state of the chain
+Gen -> {A:text  u64:r}
+letters -> {
+  u64:r -> ??
+  u8:n -> 0
+  A:acc -> {}
   -> n ? {
-    0 -> Dict{acc  r}
+    0 -> Gen{text -> acc  r -> r}
     -> {
       s -> xs{x -> r}!
-      w -> word{n -> 3 + s % 12  r -> s}!
-      -> dict{n -> n - 1  r -> w.r  acc -> {...acc  w.text}}!
+      -> letters{r -> s  n -> n - 1  acc -> {...acc  97 + s % 26}}!
     }!
   }
 }
-text -> {
-  Array{string}:d -> {}
-  (1..4294967295):vocab -> 1
-  u32:n -> ??
-  u64:r -> 1
-  -> n ? {
-    0 -> {}
-    -> {
-      s -> xs{x -> r}!
-      a -> s % vocab
-      -> {d.#((a * a) / vocab) ...text{d -> d  vocab -> vocab  n -> n - 1  r -> s}!}
-    }!
+// split: the words of a text, cut at its spaces; w the letters read so far
+split -> {
+  A:t -> {}
+  A:w -> {}
+  -> t ? {
+    {32  ...A:(rest)} -> w ? {
+      {} -> split{t -> rest  w -> {}}!
+      -> {w  ...split{t -> rest  w -> {}}!}
+    }
+    {u8(c)  ...A:(rest)} -> split{t -> rest  w -> {...w  c}}!
+    -> w ? {
+      {} -> {}
+      -> {w}
+    }
   }
 }
+tally -> {
+  Array{Word}:ws -> {}
+  -> ws ? {
+    {Word(w)  ...Array{Word}:(t)} -> 1 + tally{ws -> t}!
+    -> 0
+  }
+}
+next_pow2 -> {
+  x -> 1
+  p -> 1
+  -> p ? {
+    >=x -> p
+    -> next_pow2{x -> x  p -> p * 2}!
+  }
+}
+
+words -> {
+  u32:n -> ??
+  vocab -> n / 10 + 16
+  Key -> 0..(vocab - 1)
+  Dict -> {...({A:} * vocab):}
+  // the dictionary, and the state of the chain after it
+  Built -> {Array{A}:d  u64:r}
+  dict -> {
+    u32:m -> ??
+    u32:i -> 0
+    u64:r -> 12345
+    Array{A}:acc -> {}
+    -> i ? {
+      >=m -> Built{d -> acc  r -> r}
+      -> {
+        s -> xs{x -> r}!
+        g -> letters{r -> s  n -> 3 + s % 12}!
+        -> dict{m -> m  i -> i + 1  r -> g.r  acc -> {...acc  g.text}}!
+      }!
+    }
+  }
+  built -> dict{m -> vocab}!
+  Dict:d -> built.d
+  // the text: n words drawn with a skew towards the front of the dictionary
+  text -> {
+    u32:m -> ??
+    u32:i -> 0
+    u64:r -> 0
+    -> i ? {
+      >=m -> {}
+      -> {
+        s -> xs{x -> r}!
+        a -> s % vocab
+        Key:k -> (a * a) / vocab
+        -> {...d.#k  32  ...text{m -> m  i -> i + 1  r -> s}!}
+      }!
+    }
+  }
+
+  // --- the table -------------------------------------------------------------
+  np -> next_pow2{x -> vocab * 4}!
+  nslots -> np ? {
+    <16 -> 16
+    -> np
+  }
+  mask -> nslots - 1
+  Idx -> 0..mask
+  // a slot is empty, or holds a word and its count
+  Slot -> {
+    -> {}
+    -> {Word:key  i32:count}
+  }
+  Slots -> {...({Slot:} * nslots):}
+  empties -> {
+    u64:m -> ??
+    u64:i -> 0
+    -> i ? {
+      >=m -> {}
+      -> {{}  ...empties{m -> m  i -> i + 1}!}
+    }
+  }
+  // key counted in the table, from the slot idx on; new is 1 when it was not in it
+  Put -> {Slots:slots  (0..1):new}
+  put -> {
+    Slots:slots -> empties{m -> nslots}!
+    Word:key -> {97}
+    Idx:idx -> 0
+    -> slots.#idx ? {
+      {} -> Put{slots -> slots{#idx -> {key -> key  count -> 1}}  new -> 1}
+      {Word(k)  i32(c)} -> (k = key) ? {
+        true -> Put{slots -> slots{#idx -> {key -> k  count -> c + 1}}  new -> 0}
+        -> put{slots -> slots  key -> key  idx -> (idx + 1) [&] mask}!
+      }
+    }
+  }
+  Table -> {Slots:slots  i64:distinct}
+  count -> {
+    Array{Word}:ws -> {}
+    Slots:slots -> empties{m -> nslots}!
+    i64:distinct -> 0
+    -> ws ? {
+      {Word(w)  ...Array{Word}:(t)} -> {
+        p -> put{slots -> slots  key -> w  idx -> hash{s -> w}! [&] mask}!
+        -> count{ws -> t  slots -> p.slots  distinct -> distinct + p.new}!
+      }!
+      -> Table{slots -> slots  distinct -> distinct}
+    }
+  }
+  weigh -> {
+    Array{Slot}:ss -> {}
+    -> ss ? {
+      {Slot(sl)  ...Array{Slot}:(t)} -> sl ? {
+        {Word(k)  i32(c)} -> c * (size{s -> k}! + k.#0)
+        -> 0
+      } + weigh{ss -> t}!
+      -> 0
+    }
+  }
+
+  Array{Word}:ws -> split{t -> text{m -> n  r -> built.r}!}!
+  table -> count{ws -> ws}!
+  a -> io.printf{format -> "%lld\n"  n -> tally{ws -> ws}!}!
+  b -> io.printf{format -> "%lld\n"  n -> table.distinct}!
+  -> io.printf{format -> "%lld\n"  n -> weigh{ss -> table.slots}!}!
+}
+-> words{n -> ??::u32}!

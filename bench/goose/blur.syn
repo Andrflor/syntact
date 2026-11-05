@@ -1,5 +1,8 @@
-// blur (Goose bench/goose/blur.goose): a WxW u8 image from xorshift64, 16 passes of
-// a 3x3 [1 2 1] blur (s >> 4) between two buffers, borders kept; sum of the image.
+// blur (Goose bench/goose/blur.goose): a WxW u8 image from xorshift64 (xs_mod(r,
+// 256) per pixel), then 16 passes of a 3x3 Gaussian blur, [1 2 1] x [1 2 1] >> 4,
+// ping-ponged between two buffers: each pass writes the inner pixels of dst, read
+// at y * W + x, and leaves its border as it is (zeros in b, the image in a).
+// Prints W and the sum of the image.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
@@ -15,61 +18,84 @@ xs -> {
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-image -> {
-  u32:n -> ??
-  u64:r -> 12345
-  -> n ? {0 -> {}  -> {(xs{x -> r}! % 256) ...image{n -> n - 1  r -> xs{x -> r}!}!}}
-}
-// one pass: dst at i = the stencil of src around i, for the inner pixels; the
-// border pixels of dst are those of the previous dst (zeros at the first pass)
-pass -> {
-  u32:w -> 3
-  Array{u8}:src -> {}
-  Array{u8}:dst -> {}
-  u32:i -> 0
-  -> i ? {
-    =(w * w) -> {}
-    -> {
-      y -> i / w
-      x -> i % w
-      inner -> (y > 0) [&] (y < w - 1) [&] (x > 0) [&] (x < w - 1)
-      v -> inner ? {
-        true -> (src.#(i - w - 1) + src.#(i - w) * 2 + src.#(i - w + 1) + src.#(i - 1) * 2 + src.#i * 4 + src.#(i + 1) * 2 + src.#(i + w - 1) + src.#(i + w) * 2 + src.#(i + w + 1)) >> 4
-        -> dst.#i
-      }
-      -> {v ...pass{w -> w  src -> src  dst -> dst  i -> i + 1}!}
-    }!
+PASSES -> 16
+blur -> {
+  (1..65535):w -> ??
+  // a buffer: w * w pixels
+  Img -> {...({u8:} * (w * w)):}
+  // n pixels, each from the next state of the chain; n zeros
+  image -> {
+    u32:n -> ??
+    u32:i -> 0
+    u64:r -> 12345
+    -> i ? {
+      >=n -> {}
+      -> {
+        s -> xs{x -> r}!
+        -> {s % 256  ...image{n -> n  i -> i + 1  r -> s}!}
+      }!
+    }
   }
-}
-passes -> {
-  u32:w -> 3
-  Array{u8}:a -> {}
-  Array{u8}:b -> {}
-  u8:p -> 0
-  -> p ? {
-    <8 -> {
-      b2 -> pass{w -> w  src -> a  dst -> b}!
-      -> passes{w -> w  a -> pass{w -> w  src -> b2  dst -> a}!  b -> b2  p -> p + 1}!
-    }!
-    -> a
+  zeros -> {
+    u32:n -> ??
+    u32:i -> 0
+    -> i ? {
+      >=n -> {}
+      -> {0  ...zeros{n -> n  i -> i + 1}!}
+    }
   }
-}
-total -> {
-  Array{u8}:xs -> {}
-  i64:acc -> 0
-  -> xs ? {
-    {u8(h) ...Array{u8}:(t)} -> total{xs -> t  acc -> acc + h}!
-    -> acc
+  // the row y of dst from the column x on: each inner pixel the stencil of src
+  // around it
+  row -> {
+    Img:src -> zeros{n -> w * w}!
+    Img:dst -> zeros{n -> w * w}!
+    u32:y -> 1
+    u32:x -> 1
+    -> x ? {
+      >=(w - 1) -> dst
+      -> {
+        i -> y * w + x
+        s -> src.#(i - w - 1) + src.#(i - w) * 2 + src.#(i - w + 1)
+           + src.#(i - 1) * 2 + src.#i * 4 + src.#(i + 1) * 2
+           + src.#(i + w - 1) + src.#(i + w) * 2 + src.#(i + w + 1)
+        -> row{src -> src  dst -> dst{#i -> s >> 4}  y -> y  x -> x + 1}!
+      }!
+    }
   }
-}
-zeros -> {
-  u32:n -> ??
-  -> n ? {0 -> {}  -> {0 ...zeros{n -> n - 1}!}}
-}
--> {
-  (3..65535):w -> ??
-  a -> image{n -> w * w}!
-  b -> zeros{n -> w * w}!
+  // one pass: the rows of dst from y on
+  pass -> {
+    Img:src -> zeros{n -> w * w}!
+    Img:dst -> zeros{n -> w * w}!
+    u32:y -> 1
+    -> y ? {
+      >=(w - 1) -> dst
+      -> pass{src -> src  dst -> row{src -> src  dst -> dst  y -> y}!  y -> y + 1}!
+    }
+  }
+  // p more pairs of passes, a into b then b into a
+  passes -> {
+    Img:a -> zeros{n -> w * w}!
+    Img:b -> zeros{n -> w * w}!
+    u8:p -> PASSES / 2
+    -> p ? {
+      0 -> a
+      -> {
+        b2 -> pass{src -> a  dst -> b}!
+        -> passes{a -> pass{src -> b2  dst -> a}!  b -> b2  p -> p - 1}!
+      }!
+    }
+  }
+  total -> {
+    Array{u8}:px -> {}
+    i64:acc -> 0
+    -> px ? {
+      {u8(h)  ...Array{u8}:(t)} -> total{px -> t  acc -> acc + h}!
+      -> acc
+    }
+  }
+  Img:a -> image{n -> w * w}!
+  Img:b -> zeros{n -> w * w}!
   c -> io.printf{format -> "%lld\n"  n -> w}!
-  -> io.printf{format -> "%lld\n"  n -> total{xs -> passes{w -> w  a -> a  b -> b}!}!}!
-}!
+  -> io.printf{format -> "%lld\n"  n -> total{px -> passes{a -> a  b -> b}!}!}!
+}
+-> blur{w -> ??::(1..65535)}!
