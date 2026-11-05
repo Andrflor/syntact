@@ -42,6 +42,18 @@ by -> box.y        // 1: y was written under the first
 b0 -> box.x#0      // 1: x#n reads the n-th
 ```
 
+The bindings of a run are read by their place, from 0: `x.#1` reads the second,
+and the place may be any term, a name or a parenthesized expression. It must be
+proven to be a place of the run: `k < |x|` (types.md §5.3).
+
+```syntact
+xs -> {10 20 30}
+a -> xs.#1          // 20
+(0..2):i -> ??
+b -> xs.#i          // one of 10, 20, 30
+c -> xs.#(i - 1)    // refused: i - 1 may be -1
+```
+
 A carve targets the first occurrence (chapter 04), so the two questions differ:
 reading asks what a name shows now, carving asks what the scope is built on.
 
