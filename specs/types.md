@@ -592,6 +592,19 @@ f64:z -> a                       = ?₁        f64 holds every f32
 The laws of a field (§4.5) hold on the exact reals, not across a rounding:
 `round32(?₁ + ?₂) - ?₂` is not `?₁`.
 
+**What the code computes.** The code may compute a value otherwise than the machine
+would, step by step: it is exact up to the precision its color states. A value of
+color C, computed from exact terms, is within the rounding of C of the exact value,
+`|computed − exact| ≤ ε_C`, ε_C half the gap of C at that value — as if computed
+exactly and rounded once. The code may change representation by a homomorphism φ —
+reals the kernel bounds into integers at a scale 2^k, and back — when the error φ
+adds, propagated by the laws of the operations, stays within ε_C. Steps that compose
+— `x ↦ M·x + b` over a ring: the integers, the reals, the bits under `^` (GF(2)) —
+run L at a time in the lanes of the machine: `x_{n+L} = M^L·x_n + b_L`, each lane
+one of L interleaved orbits, recombined by the law of their monoid. A computation
+equal to the machine's own, bit for bit, is a choice the program states (open: a
+flag of exact machine arithmetic).
+
 ### 4.11 Sizes
 
 A type carries its size: the least number of bits that tells its values apart,
