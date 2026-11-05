@@ -414,6 +414,8 @@ weight :: proc(g: ^Graph, costs: ^Costs, n: Node) -> f64 {
 		return 2 * costs.ints[.And]
 	case .Foreign, .Call:
 		return costs.call
+	case .Memory:
+		return costs.load
 	case .Match:
 		return costs.branch * f64(len(g.matches[n.owner].covers) - 1)
 	}

@@ -59,6 +59,7 @@ Inst :: union {
 	Binary, // dst = a op b; on vectors, in each lane
 	Compare, // dst = a cond b: 1 or 0
 	Foreign, // dst = a symbol, called
+	Memory, // an operation on the arena: reserve, load, store
 	Call, // dst = the values of a function of the program, called
 	Splat, // dst = a in each lane of a vector
 	Lanes, // dst = a vector of integers
@@ -133,6 +134,18 @@ Foreign :: struct {
 	dst:    Reg, // NO_REG: it gives nothing back
 	symbol: int,
 	args:   []Operand,
+}
+
+// Memory: an operation on the arena (code.Memory): Reserve, dst = the address of a
+// bytes; Load, dst = the integer at a + offset; Store, b at a + offset.
+Memory :: struct {
+	op:     code.Memory_Op,
+	dst:    Reg, // NO_REG for a store
+	a:      Reg,
+	b:      Operand,
+	offset: i64,
+	bits:   int,
+	signed: bool,
 }
 
 // Call: dst, in order, the values the function gives: NO_REG for one not read.
@@ -301,6 +314,8 @@ set_dst :: proc(inst: ^Inst, from, r: Reg) {
 		i.dst = r
 	case Foreign:
 		i.dst = r
+	case Memory:
+		i.dst = r
 	case Call:
 		for &x in i.dst do if x == from do x = r
 	case Splat:
@@ -409,6 +424,12 @@ unread :: proc(f: ^Func) {
 				switch &i in inst {
 				case Foreign:
 					if i.dst != NO_REG && !read[i.dst] do i.dst = NO_REG
+				case Memory:
+					// what it reads or reserves, not read, goes; a store stays
+					if i.op != .Store && !read[i.dst] {
+						changed = true
+						continue
+					}
 				case Call:
 					for &x in i.dst do if x != NO_REG && !read[x] do x = NO_REG
 				case Copy, Real, Text, Input, Unary, Binary, Compare, Splat, Lanes, Reduce, Select:
@@ -491,6 +512,8 @@ constants :: proc(f: ^Func) {
 				for &a in i.args do a = known(a, value)
 			case Call:
 				for &a in i.args do a = known(a, value)
+			case Memory:
+				i.b = known(i.b, value, false)
 			case Select:
 				i.b = known(i.b, value, false)
 				i.yes = known(i.yes, value)
@@ -633,6 +656,9 @@ body :: proc(b: ^Builder, src: code.Body) {
 			emit(b, Select{Reg(i.dst), .Ne, Reg(i.test), i64(0), Reg(i.yes), Reg(i.no)})
 		case code.Foreign:
 			emit(b, Foreign{i.dst == code.NONE ? NO_REG : Reg(i.dst), i.symbol, regs(i.args)})
+		case code.Memory:
+			operand: Operand = i.b == code.NONE ? Operand(i64(0)) : Operand(Reg(i.b))
+			emit(b, Memory{i.op, i.dst == code.NONE ? NO_REG : Reg(i.dst), Reg(i.a), operand, i.offset, i.bits, i.signed})
 		case code.Call:
 			emit(b, Call{registers(i.dst), i.func, regs(i.args)})
 		case code.Match:

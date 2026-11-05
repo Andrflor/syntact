@@ -125,6 +125,7 @@ Inst :: union {
 	Reduce, // dst = a₀ op a₁ op …, the lanes of a vector by an operation that commutes
 	Select, // dst = yes where test is 1, no where it is 0 — in each lane of a vector
 	Foreign, // dst = the call of an imported symbol
+	Memory, // an operation on the memory of the program: reserve, load, store
 	Call, // dst = the values of the call of a function of the program
 	Match, // dst = the values of the first arm whose cover takes the target
 	Loop, // dst = the values of a body run again at each Again
@@ -201,6 +202,28 @@ Foreign :: struct {
 	dst:    Value,
 	symbol: int,
 	args:   []Value,
+}
+
+// THE MEMORY (specs/types.md §4.13)
+//
+// A value that takes bits is placed in the arena of the scope whose collapse frees
+// it, reserved whole before it is built; then its words are stored, and read back.
+// No value is modified once built. The operations on memory run in the order they
+// are written, as effects do.
+
+Memory_Op :: enum u8 {
+	Reserve, // dst = the address of a bytes of the arena
+	Load, // dst = the integer of bits bits at a + offset, signed or not
+	Store, // the low bits bits of b, at a + offset
+}
+
+Memory :: struct {
+	op:     Memory_Op,
+	dst:    Value, // NONE for a store
+	a, b:   Value, // b: NONE but for a store
+	offset: i64,
+	bits:   int,
+	signed: bool,
 }
 
 // Call: dst = func(args…), a function of the program: what it gives, in order.
@@ -474,6 +497,15 @@ print_inst :: proc(f: ^Func, p: ^Program, inst: Inst) -> string {
 		return fmt.tprintf("%s = %s ? %s : %s%s", v(i.dst), v(i.test), v(i.yes), v(i.no), print_bounds(f, i.dst))
 	case Foreign:
 		return fmt.tprintf("%s = call %s(%s)%s", v(i.dst), p.imports[i.symbol].symbol, list(i.args), print_bounds(f, i.dst))
+	case Memory:
+		switch i.op {
+		case .Reserve:
+			return fmt.tprintf("%s = reserve %s", v(i.dst), v(i.a))
+		case .Load:
+			return fmt.tprintf("%s = load %s%+d, %s%d%s", v(i.dst), v(i.a), i.offset, i.signed ? "i" : "u", i.bits, print_bounds(f, i.dst))
+		case .Store:
+			return fmt.tprintf("store %s%+d, %s%d %s", v(i.a), i.offset, "u", i.bits, v(i.b))
+		}
 	case Call:
 		return fmt.tprintf("%scall %s(%s)%s", print_dst(i.dst), p.funcs[i.func].name, list(i.args), print_all_bounds(f, i.dst))
 	case Again:
@@ -481,4 +513,23 @@ print_inst :: proc(f: ^Func, p: ^Program, inst: Inst) -> string {
 	case Match, Loop:
 	}
 	return ""
+}
+
+// takes_memory: a value of the program takes memory: it reserves some.
+takes_memory :: proc(p: ^Program) -> bool {
+	reserves :: proc(b: Body) -> bool {
+		for inst in b.insts {
+			#partial switch i in inst {
+			case Memory:
+				if i.op == .Reserve do return true
+			case Match:
+				for arm in i.arms do if reserves(arm.body) do return true
+			case Loop:
+				if reserves(i.body) do return true
+			}
+		}
+		return false
+	}
+	for f in p.funcs do if reserves(f.body) do return true
+	return false
 }

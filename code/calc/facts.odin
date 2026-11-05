@@ -91,7 +91,7 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 				out.machine, out.lanes, out.bits = kind.machine, kind.lanes, kind.bits
 			}
 		}
-	case .Start, .Arm, .Foreign, .Call, .Match, .Loop, .Again, .Exit:
+	case .Start, .Arm, .Foreign, .Memory, .Call, .Match, .Loop, .Again, .Exit:
 	// a state, a tuple or a tail
 	}
 	if c, known := out.constant.?; known do out.bounds = {i128(c), i128(c)}

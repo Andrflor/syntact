@@ -87,6 +87,12 @@ source :: proc(p: ^code.Program) -> (string, string) {
 	for f, i in p.funcs[1:] do w.funcs[i + 1] = fmt.tprintf("fn_%s_%d", identifier(f.name), i + 1)
 	prelude(&w)
 	vectors(&w)
+	if code.takes_memory(p) {
+		// the arena: its free end, mapped where the program starts
+		strings.write_string(&w.b, "#include <sys/mman.h>\n\n")
+		strings.write_string(&w.b, "static char *arena_end;\n")
+		strings.write_string(&w.b, "static inline int64_t arena_reserve(int64_t n) { char *p = arena_end; arena_end += (n + 7) & ~(int64_t)7; return (int64_t)(intptr_t)p; }\n\n")
+	}
 	for imp, i in p.imports {
 		args := make([dynamic]string)
 		for a in imp.args do append(&args, C_TYPES[a])
@@ -155,6 +161,8 @@ prelude :: proc(w: ^Writer) {
 	libs := libraries(w.p)
 	strings.write_string(&w.b, "// Written by syntact (code/c).\n")
 	fmt.sbprintfln(&w.b, "// cc -O3 FILE.c -o FILE%s", strings.concatenate({len(libs) > 0 ? " -l" : "", strings.join(libs, " -l")}))
+	// the arena is mapped by mmap, of POSIX
+	if code.takes_memory(w.p) do strings.write_string(&w.b, "#define _DEFAULT_SOURCE\n")
 	strings.write_string(&w.b, `
 #include <math.h>
 #include <stdint.h>
@@ -303,6 +311,10 @@ survey :: proc(w: ^Writer, b: code.Body, kept_values: []bool) {
 		case code.Foreign:
 			if i.dst != code.NONE do w.defs[i.dst] = inst
 			for a in i.args do read(w, a)
+		case code.Memory:
+			if i.dst != code.NONE do w.defs[i.dst] = inst
+			read(w, i.a)
+			read(w, i.b)
 		case code.Call:
 			for x in i.dst do w.defs[x] = inst
 			for a in i.args do read(w, a)
@@ -411,6 +423,18 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 			}
 			declare(w, i.dst, call)
 			assume(w, i.dst, answer_bounds(w.p.imports[i.symbol]))
+		case code.Memory:
+			// a word of bits bits at an address of the arena
+			at := fmt.tprintf("(%sint%d_t *)(intptr_t)(%s + %d)", i.signed ? "" : "u", i.bits, name(w, i.a), i.offset)
+			switch i.op {
+			case .Reserve:
+				declare(w, i.dst, fmt.tprintf("arena_reserve(%s)", name(w, i.a)))
+			case .Load:
+				declare(w, i.dst, fmt.tprintf("(int64_t)*%s", at))
+				if w.reads[i.dst] > 0 do assume(w, i.dst)
+			case .Store:
+				line(w, "*%s = (%sint%d_t)%s;", at, i.signed ? "" : "u", i.bits, name(w, i.b))
+			}
 		case code.Call:
 			args := make([dynamic]string)
 			for a in i.args do append(&args, name(w, a))
@@ -761,6 +785,7 @@ static void write_real(double x) {
 			line(w, "}}")
 		}
 	}
+	if code.takes_memory(p) do line(w, "arena_end = mmap(NULL, (size_t)1 << 38, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);")
 	switch code.program_machine(p) {
 	case .Int:
 		line(w, "return (int)(program() & 255);")

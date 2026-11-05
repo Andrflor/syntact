@@ -28,6 +28,7 @@ Emitter :: struct {
 	rodata_vaddr: int,
 	funcs:        []int, // the offset of each function
 	calls:        [dynamic]Fixup, // calls of a function, patched once all are placed
+	arena:        bool, // a value of the program takes memory
 }
 
 // Fixup: a rel32 at `at` that reaches `target`, a label or a function.
@@ -61,6 +62,7 @@ image_of :: proc(p: ^code.Program) -> (image: []u8, err: string) {
 	}
 	e.rodata_vaddr = enc.ELF_BASE + enc.elf_headers_size(len(e.imports))
 	context.user_ptr = &e.buf
+	e.arena = code.takes_memory(p)
 	stub(&e)
 	e.funcs = make([]int, len(p.funcs))
 	laid := mir.layout(p)
@@ -71,7 +73,7 @@ image_of :: proc(p: ^code.Program) -> (image: []u8, err: string) {
 	for c in e.calls do patch(&e, c.at, e.funcs[c.target])
 	machine := make([]u8, e.buf.len)
 	copy(machine, e.buf.data[:e.buf.len])
-	return enc.build_elf(machine, e.rodata[:], e.imports[:], 0), ""
+	return enc.build_elf(machine, e.rodata[:], e.imports[:], e.arena ? 8 : 0), ""
 }
 
 // --- placing code ---
@@ -107,6 +109,11 @@ absolute :: proc(reg: enc.Register64) -> enc.MemoryAddress {
 	return enc.AddressComponents{base = reg}
 }
 
+// ARENA: the slot of the free end of the arena, in the scratch of the image;
+// ARENA_BYTES: the addresses the arena spans.
+ARENA :: enc.SCRATCH_VADDR
+ARENA_BYTES :: i64(1) << 38
+
 // --- the stub ---
 
 stub :: proc(e: ^Emitter) {
@@ -133,6 +140,20 @@ stub :: proc(e: ^Emitter) {
 		write_text(e, "input out of range\n", 2)
 		exit_with(e, 2)
 		land(e, admitted)
+	}
+	if e.arena {
+		// the arena: ARENA_BYTES of addresses, the pages given as they are first
+		// written; its free end in the slot ARENA
+		enc.mov_r64_imm64(.RAX, 9) // mmap
+		enc.xor_r32_r32(.EDI, .EDI)
+		enc.movabs_r64_imm64(.RSI, ARENA_BYTES)
+		enc.mov_r64_imm64(.RDX, 3) // read, write
+		enc.mov_r64_imm64(.R10, 0x4022) // private, anonymous, no reserve
+		enc.mov_r64_imm64(.R8, transmute(u64)i64(-1))
+		enc.xor_r32_r32(.R9D, .R9D)
+		enc.syscall()
+		enc.movabs_r64_imm64(.R11, i64(ARENA))
+		enc.mov_m64_r64(absolute(.R11), .RAX)
 	}
 	enc.call_rel32(0)
 	append(&e.calls, Fixup{here(e) - 4, 0})

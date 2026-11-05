@@ -149,7 +149,7 @@ count_live :: proc(p: ^Plan) -> int {
 // pinned: a computation that stays in its region.
 pinned :: proc(p: ^Plan, n: Node) -> bool {
 	#partial switch n.kind {
-	case .Start, .Param, .Arm, .Match, .Loop, .Foreign:
+	case .Start, .Param, .Arm, .Match, .Loop, .Foreign, .Memory:
 		return true
 	case .Call:
 		return !p.g.prog.funcs[n.index].pure

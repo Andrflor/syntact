@@ -60,3 +60,22 @@ FREE_LANES := Costs {
 	lanes   = 2,
 	lanes32 = 4,
 }
+
+// Memory reserved, stored to and read back, by hand: the same run, as written and
+// as the normal form on each machine.
+@(test)
+test_memory :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	p := cases.memory_program()
+	x64, failed := optimize(&p, &X64)
+	if !testing.expectf(t, failed == "", "%s", failed) do return
+	c, failed_c := optimize(&p, &C)
+	if !testing.expectf(t, failed_c == "", "%s", failed_c) do return
+	for &prog in ([]code.Program{p, x64, c}) {
+		run, err := code.interpret(&prog, nil, nil)
+		if !testing.expectf(t, err == "", "%s\n%s", err, code.print_program(&prog)) do continue
+		testing.expectf(t, run.result.int == cases.MEMORY_EXIT, "%d, expected %d\n%s", run.result.int, cases.MEMORY_EXIT, code.print_program(&prog))
+	}
+}

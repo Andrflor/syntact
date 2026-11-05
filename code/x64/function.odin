@@ -415,6 +415,8 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		}
 		enc.cmovcc_r64_r64(condition_code(i.cond, f.kinds[i.a].machine == .Real || unsigned_pair(fr, i.a, i.b)), x, y)
 		put(fr, place_of(fr, i.dst), x)
+	case mir.Memory:
+		memory(fr, i)
 	case mir.Call:
 		callee := e.prog.funcs[i.func]
 		assignment, msg := assign(callee.params)
@@ -1113,4 +1115,55 @@ combine :: proc(op: code.Op, x, y: enc.Register64) -> bool {
 		return false
 	}
 	return true
+}
+
+// --- memory ---
+
+// memory: an operation on the arena. Its free end is in the slot ARENA, the
+// arena mapped where the program starts (x64.odin): a reservation takes the
+// bytes there, 8-aligned; a load or a store goes through rax, a in its register
+// or in rcx.
+memory :: proc(fr: ^Frame, i: mir.Memory) {
+	switch i.op {
+	case .Reserve:
+		enc.movabs_r64_imm64(.R11, i64(ARENA))
+		enc.mov_r64_m64(.RAX, absolute(.R11))
+		get(fr, .RCX, place_of(fr, i.a))
+		enc.add_r64_imm32(.RCX, 7)
+		enc.and_r64_imm32(.RCX, transmute(u32)i32(-8))
+		enc.add_r64_r64(.RCX, .RAX)
+		enc.mov_m64_r64(absolute(.R11), .RCX)
+		put(fr, place_of(fr, i.dst), .RAX)
+	case .Load:
+		at := enc.AddressComponents{base = in_register(fr, i.a, .RCX), displacement = i32(i.offset)}
+		switch i.bits {
+		case 8:
+			enc.mov_r8_m8(.AL, at)
+			if i.signed do enc.movsx_r64_r8(.RAX, .AL)
+			else do enc.movzx_r64_r8(.RAX, .AL)
+		case 16:
+			enc.mov_r16_m16(.AX, at)
+			if i.signed do enc.movsx_r64_r16(.RAX, .AX)
+			else do enc.movzx_r64_r16(.RAX, .AX)
+		case 32:
+			enc.mov_r32_m32(.EAX, at)
+			if i.signed do enc.movsxd_r64_r32(.RAX, .EAX)
+		case:
+			enc.mov_r64_m64(.RAX, at)
+		}
+		put(fr, place_of(fr, i.dst), .RAX)
+	case .Store:
+		get(fr, .RAX, operand(fr, i.b))
+		at := enc.AddressComponents{base = in_register(fr, i.a, .RCX), displacement = i32(i.offset)}
+		switch i.bits {
+		case 8:
+			enc.mov_m8_r8(at, .AL)
+		case 16:
+			enc.mov_m16_r16(at, .AX)
+		case 32:
+			enc.mov_m32_r32(at, .EAX)
+		case:
+			enc.mov_m64_r64(at, .RAX)
+		}
+	}
 }

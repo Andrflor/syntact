@@ -41,6 +41,7 @@ Machine_State :: struct {
 	run:     ^Run,
 	depth:   int,
 	written: [dynamic]Value, // what the instruction run last writes
+	memory:  [dynamic]u8, // the arena: an address is 1 + an index of it
 }
 
 // Frame: a function running: its values, and the parameters of the loops it is in,
@@ -119,6 +120,8 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 			regs[i.dst].int = takes(i.cover, fr.f.kinds[i.x], regs[i.x]) ? 1 : 0
 		case Narrow:
 			regs[i.dst] = regs[i.src]
+		case Memory:
+			if msg := memory(m, i, regs); msg != "" do return false, msg
 		case Foreign:
 			imp := p.imports[i.symbol]
 			s, known := m.symbols[imp.symbol]
@@ -197,6 +200,8 @@ written :: proc(inst: Inst, out: ^[dynamic]Value) {
 		append(out, i.dst)
 	case Foreign:
 		append(out, i.dst)
+	case Memory:
+		if i.dst != NONE do append(out, i.dst)
 	case Call:
 		append(out, ..i.dst)
 	case Match:
@@ -375,4 +380,29 @@ binary_of :: proc(op: Op, m: Machine, a, b: Datum, unsigned := false) -> (Datum,
 	case .Neg, .Not:
 	}
 	return {}, false
+}
+
+// memory: an operation on the arena: a reservation at its end, 8-aligned; a load
+// or a store within what was reserved, little-endian.
+memory :: proc(m: ^Machine_State, i: Memory, regs: []Datum) -> string {
+	switch i.op {
+	case .Reserve:
+		for len(m.memory) % 8 != 0 do append(&m.memory, 0)
+		regs[i.dst].int = i64(len(m.memory) + 1)
+		resize(&m.memory, len(m.memory) + int(regs[i.a].int))
+	case .Load, .Store:
+		at := int(regs[i.a].int) - 1 + int(i.offset)
+		bytes := i.bits / 8
+		if at < 0 || at + bytes > len(m.memory) do return fmt.tprintf("a %v outside the memory reserved", i.op)
+		if i.op == .Store {
+			w := u64(regs[i.b].int)
+			for k in 0 ..< bytes do m.memory[at + k] = u8(w >> uint(8 * k))
+			return ""
+		}
+		w: u64
+		for k in 0 ..< bytes do w |= u64(m.memory[at + k]) << uint(8 * k)
+		if i.signed && i.bits < 64 && w >> uint(i.bits - 1) & 1 == 1 do w |= max(u64) << uint(i.bits)
+		regs[i.dst].int = i64(w)
+	}
+	return ""
 }

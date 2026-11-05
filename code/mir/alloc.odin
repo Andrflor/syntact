@@ -68,6 +68,9 @@ uses :: proc(inst: Inst, out: ^[dynamic]Reg) {
 		operand(i.b, out)
 	case Foreign:
 		for a in i.args do operand(a, out)
+	case Memory:
+		append(out, i.a)
+		operand(i.b, out)
 	case Call:
 		for a in i.args do operand(a, out)
 	case Splat:
@@ -101,6 +104,8 @@ writes :: proc(inst: Inst, out: ^[dynamic]Reg) {
 	case Compare:
 		append(out, i.dst)
 	case Foreign:
+		if i.dst != NO_REG do append(out, i.dst)
+	case Memory:
 		if i.dst != NO_REG do append(out, i.dst)
 	case Call:
 		for x in i.dst do if x != NO_REG do append(out, x)

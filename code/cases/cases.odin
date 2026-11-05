@@ -167,3 +167,70 @@ run :: proc(t: ^testing.T, build: Build) {
 		}
 	}
 }
+
+// THE MEMORY, BY HAND
+//
+// The code of a program that reserves memory, stores an integer of each width and
+// reads them back, signed and not: built as the lowering will write it, before it
+// does (specs/types.md §4.13). It exits with (5 + 300 + 70000 - 7 + 2⁴⁰ + 1) % 251.
+MEMORY_EXIT :: (5 + 300 + 70000 - 7 + (1 << 40) + 1) % 251
+
+memory_program :: proc() -> code.Program {
+	f := new_clone(code.Func{name = "main", results = make([]code.Machine, 1)})
+	f.results[0] = .Int
+	value :: proc(f: ^code.Func, b: code.Bounds = code.EVERY) -> code.Value {
+		v := code.value(f, .Int)
+		f.kinds[v].bounds = b
+		return v
+	}
+	insts := &f.body.insts
+	constant :: proc(f: ^code.Func, insts: ^[dynamic]code.Inst, x: i128) -> code.Value {
+		v := value(f, {x, x})
+		append(insts, code.Const{v, x})
+		return v
+	}
+	size := constant(f, insts, 32)
+	base := value(f, {1, i128(max(i64))})
+	append(insts, code.Memory{op = .Reserve, dst = base, a = size, b = code.NONE})
+	Word :: struct {
+		offset: i64,
+		bits:   int,
+		signed: bool,
+		x:      i128,
+	}
+	words := make([]Word, 5)
+	copy(words, []Word{{0, 8, false, 5}, {2, 16, false, 300}, {4, 32, false, 70000}, {8, 16, true, -7}, {16, 64, true, 1 << 40 + 1}})
+	total := constant(f, insts, 0)
+	for w in words {
+		append(insts, code.Memory{op = .Store, dst = code.NONE, a = base, b = constant(f, insts, w.x), offset = w.offset, bits = w.bits})
+	}
+	for w in words {
+		read := value(f, w.signed ? code.Bounds{-(1 << uint(w.bits - 1)), 1 << uint(w.bits - 1) - 1} : code.Bounds{0, 1 << uint(w.bits) - 1})
+		append(insts, code.Memory{op = .Load, dst = read, a = base, b = code.NONE, offset = w.offset, bits = w.bits, signed = w.signed})
+		sum := value(f)
+		append(insts, code.Binary{sum, total, read, .Add})
+		total = sum
+	}
+	out := value(f, {0, 250})
+	append(insts, code.Binary{out, total, constant(f, insts, 251), .Mod})
+	f.body.values = make([]code.Value, 1)
+	f.body.values[0] = out
+	p := code.Program{}
+	append(&p.funcs, f)
+	return p
+}
+
+// run_memory: the program of memory_program, built by a backend, exits as it says.
+run_memory :: proc(t: ^testing.T, build: Build) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	base, _ := os.temp_directory(context.allocator)
+	path := fmt.tprintf("%s/syntact_memory_%d", base, os.get_pid())
+	defer os.remove(path)
+	p := memory_program()
+	if msg := build(&p, path); !testing.expectf(t, msg == "", "memory: %s", msg) do return
+	state, _, _, failed := os.process_exec(os.Process_Desc{command = {path}}, context.allocator)
+	if !testing.expectf(t, failed == nil, "memory: does not run: %v", failed) do return
+	testing.expectf(t, state.exit_code == MEMORY_EXIT, "memory: exited %d, expected %d", state.exit_code, MEMORY_EXIT)
+}

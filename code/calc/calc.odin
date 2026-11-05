@@ -51,6 +51,7 @@ Kind :: enum u8 {
 	Reduce, // op over the lanes of a
 	Select, // test, yes, no: yes where test is 1, no where it is 0
 	Foreign, // index: the symbol; the state, then the arguments — gives the state after, and the answer
+	Memory, // owner: the operation and whether signed (memory_node); value: the offset; index: the bits; the state, then its operands — gives the state after, and what it reads
 	Call, // index: the function; its arguments, after the state when it has effects — then gives the state after, when it takes one, and its values
 	Match, // owner: the match; the target, the state when its arms have effects, then what each arm gives
 	Loop, // owner: the loop; what each parameter starts from, then the tail of its body

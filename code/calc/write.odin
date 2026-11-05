@@ -179,7 +179,7 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 	case .Loop:
 		write_loop(w, c, n)
 		return w.values[c]
-	case .Foreign, .Call:
+	case .Foreign, .Memory, .Call:
 		write_call(w, c, n)
 		return done(w, c, code.NONE)
 	case .Int, .Real, .Text, .Input, .Unary, .Binary, .In, .Narrow, .Splat, .Lanes, .Reduce, .Select:
@@ -223,10 +223,11 @@ write_call :: proc(w: ^Writer, c: Class, n: Node) {
 	first := effectful(w.g, n) ? 1 : 0
 	if first == 1 do ensure(w, n.args[0]) // the effects before
 	args := values_of(w, n.args[first:])
-	if n.kind == .Foreign {
+	if n.kind == .Foreign || n.kind == .Memory {
 		answer, read := gives(w, c, 1)
 		dst := read ? fresh(w, answer) : code.NONE
-		emit(w, c, code.Foreign{dst, n.index, args})
+		if n.kind == .Foreign do emit(w, c, code.Foreign{dst, n.index, args})
+		else do emit(w, c, memory_inst(n, dst, args))
 		if read do done(w, answer, dst)
 	} else {
 		results := w.g.prog.funcs[n.index].results

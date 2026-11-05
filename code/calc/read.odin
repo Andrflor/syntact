@@ -54,7 +54,7 @@ classes :: proc(r: ^Reader, vs: []code.Value) -> []Class {
 // effectful: the state reaches the call: a call of a symbol, or of a function with
 // effects.
 effectful :: proc(g: ^Graph, n: Node) -> bool {
-	return n.kind == .Foreign || n.kind == .Call && !g.prog.funcs[n.index].pure
+	return n.kind == .Foreign || n.kind == .Memory || n.kind == .Call && !g.prog.funcs[n.index].pure
 }
 
 read_inst :: proc(r: ^Reader, inst: code.Inst) {
@@ -89,6 +89,11 @@ read_inst :: proc(r: ^Reader, inst: code.Inst) {
 		set(r, i.dst, Node{kind = .Narrow, args = args})
 	case code.Foreign:
 		effect(r, code.single(i.dst), Node{kind = .Foreign, index = i.symbol}, i.args)
+	case code.Memory:
+		operands := make([dynamic]code.Value)
+		append(&operands, i.a)
+		if i.b != code.NONE do append(&operands, i.b)
+		effect(r, code.single(i.dst), memory_node(i), operands[:])
 	case code.Call:
 		n := Node{kind = .Call, index = i.func}
 		if effectful(g, n) {
@@ -138,7 +143,7 @@ has_effects :: proc(p: ^code.Program, b: code.Body) -> bool {
 
 inst_effects :: proc(p: ^code.Program, inst: code.Inst) -> bool {
 	#partial switch i in inst {
-	case code.Foreign:
+	case code.Foreign, code.Memory:
 		return true
 	case code.Call:
 		return !p.funcs[i.func].pure
@@ -269,4 +274,16 @@ read_tail_match :: proc(r: ^Reader, i: code.Match) -> Class {
 		append(outs, read_tail(r, b))
 	})
 	return add(g, Node{kind = .Match, owner = m, args = args})
+}
+
+// memory_node: the node of an operation on memory, but its arguments.
+memory_node :: proc(i: code.Memory) -> Node {
+	return Node{kind = .Memory, owner = int(i.op) | (i.signed ? 16 : 0), value = i128(i.offset), index = i.bits}
+}
+
+// memory_inst: the operation on memory of a node, on its operands.
+memory_inst :: proc(n: Node, dst: code.Value, operands: []code.Value) -> code.Memory {
+	out := code.Memory{op = code.Memory_Op(n.owner & 15), dst = dst, a = operands[0], b = code.NONE, offset = i64(n.value), bits = n.index, signed = n.owner & 16 != 0}
+	if len(operands) > 1 do out.b = operands[1]
+	return out
 }
