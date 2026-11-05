@@ -639,6 +639,9 @@ call :: proc(l: ^Lowering, c: ^kernel.Collapse) -> []Value {
 	results := l.prog.funcs[index].results
 	dst := make([]Value, len(results))
 	for m, i in results do dst[i] = value(l.f, m)
+	// what the call gives: the bounds of its image, the recursion of its bounds
+	// (specs/types.md §5.6)
+	if len(results) == 1 && results[0] == .Int do l.f.kinds[dst[0]].bounds = term_bounds(l, c)
 	emit(l, Call{dst, index, args})
 	return dst
 }

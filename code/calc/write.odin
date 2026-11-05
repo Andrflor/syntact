@@ -30,7 +30,6 @@ Open :: struct {
 // machine.
 optimize :: proc(p: ^code.Program, costs: ^Costs) -> (out: code.Program, err: string) {
 	out = code.Program{imports = p.imports, texts = p.texts, inputs = p.inputs}
-	called(p)
 	for f in p.funcs {
 		g, values, state := read(p, f)
 		g.costs = costs
