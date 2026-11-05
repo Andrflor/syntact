@@ -5,16 +5,17 @@ import "core:fmt"
 
 // THE NORMAL FORM, WRITTEN AS CODE
 //
-// Each class reached, by its computation of least cost, written once in its region,
-// after what it reads: a match with its arms, a loop with its body, each region
-// open while what runs in it is written.
+// Each class reached, by its computation of least cost, written in its region —
+// in each of its regions, the arms of a match that need it — after what it reads:
+// a match with its arms, a loop with its body, each region open while what runs
+// in it is written. A value written in a region holds while the region is open.
 
 Writer :: struct {
 	p:       ^Plan,
 	g:       ^Graph,
 	f:       ^code.Func,
 	values:  []code.Value, // per class, once written
-	written: []bool,
+	written: []bool, // per class: its value holds in the regions open
 	open:    [dynamic]Open, // the regions being written, innermost last
 	needs:   map[Class]int, // the registers writing each class takes (need)
 	loops:   [dynamic]int, // the loops whose body is being written, innermost last
@@ -22,8 +23,9 @@ Writer :: struct {
 }
 
 Open :: struct {
-	region: Region,
-	insts:  ^[dynamic]code.Inst,
+	region:  Region,
+	insts:   ^[dynamic]code.Inst,
+	defined: [dynamic]Class, // the classes written in it
 }
 
 // optimize: the program, each function as the normal form of its computations on a
@@ -55,7 +57,7 @@ write_function :: proc(p: ^Plan, f: ^code.Func, values: []Class, state: Class) -
 	out = new_clone(code.Func{name = f.name, pure = f.pure, params = f.params, results = f.results})
 	for _, j in f.params do append(&out.kinds, f.kinds[j])
 	w := Writer{p = p, g = g, f = out, values = make([]code.Value, len(g.parent)), written = make([]bool, len(g.parent))}
-	append(&w.open, Open{ROOT, &out.body.insts})
+	open(&w, ROOT, &out.body.insts)
 	ensure(&w, state)
 	out.body.values = make([]code.Value, len(values))
 	for c, k in values do out.body.values[k] = ensure(&w, c)
@@ -70,16 +72,29 @@ fresh :: proc(w: ^Writer, c: Class) -> code.Value {
 	return v
 }
 
-// emit: the instruction of c, in the region c is placed in.
-emit :: proc(w: ^Writer, c: Class, inst: code.Inst) {
-	r := w.p.place[find(w.g, c)]
-	#reverse for o in w.open {
-		if o.region == r {
-			append(o.insts, inst)
-			return
-		}
-	}
+// open: the region r, written into insts, until it is closed.
+open :: proc(w: ^Writer, r: Region, insts: ^[dynamic]code.Inst) {
+	append(&w.open, Open{region = r, insts = insts})
+}
+
+// close: the innermost region open; what was written in it holds no more.
+close :: proc(w: ^Writer) {
+	o := pop(&w.open)
+	for c in o.defined do w.written[c] = false
+	delete(o.defined)
+}
+
+// level: the open region c is written in: the innermost of its places open.
+level :: proc(w: ^Writer, c: Class) -> int {
+	places := w.p.place[find(w.g, c)]
+	#reverse for o, k in w.open do for r in places do if o.region == r do return k
 	if w.error == "" do w.error = fmt.tprintf("a %v is placed in a region not written", chosen(w.p, c).kind)
+	return 0
+}
+
+// emit: the instruction of c, in the open region at.
+emit :: proc(w: ^Writer, at: int, inst: code.Inst) {
+	append(w.open[at].insts, inst)
 }
 
 // here: the instruction, in the region being written.
@@ -87,10 +102,11 @@ here :: proc(w: ^Writer, inst: code.Inst) {
 	append(w.open[len(w.open) - 1].insts, inst)
 }
 
-// done: c is the value v.
-done :: proc(w: ^Writer, c: Class, v: code.Value) -> code.Value {
+// done: c is the value v, written in the open region at.
+done :: proc(w: ^Writer, c: Class, v: code.Value, at: int) -> code.Value {
 	c := find(w.g, c)
 	w.values[c], w.written[c] = v, true
+	append(&w.open[at].defined, c)
 	return v
 }
 
@@ -137,7 +153,7 @@ ordered :: proc(w: ^Writer, cs: []Class) -> []code.Value {
 need :: proc(w: ^Writer, c: Class) -> int {
 	c := find(w.g, c)
 	if c == NO_CLASS || w.written[c] do return 0
-	if len(w.open) > 0 && w.p.place[c] != w.open[len(w.open) - 1].region do return 0
+	if len(w.open) > 0 && !placed_in(w.p.place[c], w.open[len(w.open) - 1].region) do return 0
 	if v, known := w.needs[c]; known do return v
 	n := chosen(w.p, c)^
 	out := 1
@@ -153,6 +169,11 @@ need :: proc(w: ^Writer, c: Class) -> int {
 	return out
 }
 
+placed_in :: proc(places: []Region, r: Region) -> bool {
+	for x in places do if x == r do return true
+	return false
+}
+
 // ensure: the value of c, written where it is placed when it is not yet.
 ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 	g := w.g
@@ -162,9 +183,9 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 	n := chosen(w.p, c)^
 	switch n.kind {
 	case .Start, .Arm:
-		return done(w, c, code.NONE)
+		return done(w, c, code.NONE, level(w, c))
 	case .Argument:
-		return done(w, c, code.Value(n.index))
+		return done(w, c, code.Value(n.index), level(w, c))
 	case .Param:
 		w.error = "a parameter read outside its loop"
 		return code.NONE
@@ -183,10 +204,11 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 		return w.values[c]
 	case .Foreign, .Memory, .Call:
 		write_call(w, c, n)
-		return done(w, c, code.NONE)
+		return w.values[c]
 	case .Int, .Real, .Text, .Input, .Unary, .Binary, .In, .Narrow, .Splat, .Lanes, .Reduce, .Select:
 	}
 	args := ordered(w, n.args)
+	at := level(w, c)
 	dst := fresh(w, c)
 	inst: code.Inst
 	#partial switch n.kind {
@@ -215,8 +237,8 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 	case .Select:
 		inst = code.Select{dst, args[0], args[1], args[2]}
 	}
-	emit(w, c, inst)
-	return done(w, c, dst)
+	emit(w, at, inst)
+	return done(w, c, dst, at)
 }
 
 // write_call: the call of a symbol or of a function: after the state it takes,
@@ -225,22 +247,24 @@ write_call :: proc(w: ^Writer, c: Class, n: Node) {
 	first := effectful(w.g, n) ? 1 : 0
 	if first == 1 do ensure(w, n.args[0]) // the effects before
 	args := values_of(w, n.args[first:])
+	at := level(w, c)
 	if n.kind == .Foreign || n.kind == .Memory {
 		answer, read := gives(w, c, 1)
 		dst := read ? fresh(w, answer) : code.NONE
-		if n.kind == .Foreign do emit(w, c, code.Foreign{dst, n.index, args})
-		else do emit(w, c, memory_inst(n, dst, args))
-		if read do done(w, answer, dst)
+		if n.kind == .Foreign do emit(w, at, code.Foreign{dst, n.index, args})
+		else do emit(w, at, memory_inst(n, dst, args))
+		if read do done(w, answer, dst, at)
 	} else {
 		results := w.g.prog.funcs[n.index].results
 		dst := make([]code.Value, len(results))
 		for m, k in results {
 			answer, read := gives(w, c, first + k)
-			dst[k] = read ? done(w, answer, fresh(w, answer)) : code.value(w.f, m)
+			dst[k] = read ? done(w, answer, fresh(w, answer), at) : code.value(w.f, m)
 		}
-		emit(w, c, code.Call{dst, n.index, args})
+		emit(w, at, code.Call{dst, n.index, args})
 	}
-	if state, has := gives(w, c, 0); has && first == 1 do done(w, state, code.NONE)
+	if state, has := gives(w, c, 0); has && first == 1 do done(w, state, code.NONE, at)
+	done(w, c, code.NONE, at)
 }
 
 // read_values: of the count values a tuple gives, those read.
@@ -260,17 +284,18 @@ fresh_values :: proc(w: ^Writer, t: Class, read: []int) -> []code.Value {
 	return out
 }
 
-// done_values: the values of t read are dst.
-done_values :: proc(w: ^Writer, t: Class, read: []int, dst: []code.Value) {
+// done_values: the values of t read are dst, written in the open region at.
+done_values :: proc(w: ^Writer, t: Class, read: []int, dst: []code.Value, at: int) {
 	for j, k in read {
 		value, _ := gives(w, t, j)
-		done(w, value, dst[k])
+		done(w, value, dst[k], at)
 	}
 }
 
 // write_match: a match whose arms give values, or effects, or both.
 write_match :: proc(w: ^Writer, c: Class, n: Node) {
 	info := w.g.matches[n.owner]
+	at := level(w, c)
 	target := ensure(w, n.args[0])
 	first := 1
 	if info.state {
@@ -283,17 +308,17 @@ write_match :: proc(w: ^Writer, c: Class, n: Node) {
 	arms := make([]code.Arm, len(info.covers))
 	for &arm, k in arms {
 		arm.cover = info.covers[k]
-		append(&w.open, Open{Region{.Arm, n.owner, k}, &arm.body.insts})
+		open(w, Region{.Arm, n.owner, k}, &arm.body.insts)
 		outs := n.args[first + k * per:][:per]
 		if info.state do ensure(w, outs[per - 1])
 		arm.body.values = make([]code.Value, len(read))
 		for j, x in read do arm.body.values[x] = ensure(w, outs[j])
-		pop(&w.open)
+		close(w)
 	}
-	emit(w, c, code.Match{dst, target, arms})
-	done_values(w, c, read, dst)
-	if state, has := gives(w, c, info.values); has && info.state do done(w, state, code.NONE)
-	done(w, c, code.NONE)
+	emit(w, at, code.Match{dst, target, arms})
+	done_values(w, c, read, dst, at)
+	if state, has := gives(w, c, info.values); has && info.state do done(w, state, code.NONE, at)
+	done(w, c, code.NONE, at)
 }
 
 // write_loop: a loop: its parameters alive, from what they start from, then its
@@ -301,6 +326,7 @@ write_match :: proc(w: ^Writer, c: Class, n: Node) {
 write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 	g := w.g
 	info := g.loops[n.owner]
+	at := level(w, c)
 	count := len(info.params)
 	params := make([dynamic]code.Value)
 	init := make([dynamic]code.Value)
@@ -310,11 +336,11 @@ write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 		start := ensure(w, n.args[j])
 		param, read := lookup(g, Node{kind = .Param, owner = n.owner, index = j})
 		if j == info.state {
-			if read do done(w, g.home[param], code.NONE)
+			if read do done(w, g.home[param], code.NONE, at)
 			continue
 		}
 		if read {
-			values[j] = done(w, g.home[param], fresh(w, g.home[param]))
+			values[j] = done(w, g.home[param], fresh(w, g.home[param]), at)
 		} else {
 			values[j] = code.value(w.f, info.params[j].machine, info.params[j].lanes)
 		}
@@ -322,19 +348,19 @@ write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 		append(&init, start)
 	}
 	loop := code.Loop{params = params[:], init = init[:]}
-	append(&w.open, Open{Region{.Body, n.owner, 0}, &loop.body.insts})
+	open(w, Region{.Body, n.owner, 0}, &loop.body.insts)
 	append(&w.loops, n.owner)
 	loop.body.values = write_tail(w, n.args[count])
 	pop(&w.loops)
-	pop(&w.open)
+	close(w)
 	read := read_values(w, c, info.values)
 	loop.dst = fresh_values(w, c, read)
-	emit(w, c, loop)
-	done_values(w, c, read, loop.dst)
-	if state, has := gives(w, c, info.values); has && info.state >= 0 do done(w, state, code.NONE)
+	emit(w, at, loop)
+	done_values(w, c, read, loop.dst, at)
+	if state, has := gives(w, c, info.values); has && info.state >= 0 do done(w, state, code.NONE, at)
 	// what its parameters hold at its end
-	for j, k in info.finals do if final, has := gives(w, c, outputs(info) + k); has do done(w, final, values[j])
-	done(w, c, code.NONE)
+	for j, k in info.finals do if final, has := gives(w, c, outputs(info) + k); has do done(w, final, values[j], at)
+	done(w, c, code.NONE, at)
 }
 
 // write_tail: the end of a turn, written where it is: the values of the body read,
@@ -372,9 +398,9 @@ write_tail :: proc(w: ^Writer, t: Class) -> []code.Value {
 		dst: []code.Value
 		for &arm, k in arms {
 			arm.cover = m.covers[k]
-			append(&w.open, Open{Region{.Arm, n.owner, k}, &arm.body.insts})
+			open(w, Region{.Arm, n.owner, k}, &arm.body.insts)
 			arm.body.values = write_tail(w, n.args[first + k])
-			pop(&w.open)
+			close(w)
 			vs := arm.body.values
 			if len(vs) == 0 do continue
 			if dst == nil {

@@ -640,7 +640,10 @@ M(F(s, x))         = F(M(s), x)  M on memory only, F a symbol given no address,
 
 A computation reached from several of the values a function gives is computed once:
 a loop gives each of its values once, and the code reads them all from it where that
-costs least. A computation equal to the machine's own, bit for bit, is a choice the
+costs least. A computation runs on the paths that use it: one that some arms of a
+match need is computed in each of them, not above the others, unless running it
+where it is not needed costs less than a branch saves — never a call, which costs
+its function. A computation equal to the machine's own, bit for bit, is a choice the
 program states (open: a flag of exact machine arithmetic).
 
 ### 4.11 Sizes

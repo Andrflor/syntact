@@ -11,7 +11,8 @@ import code ".."
 //
 // What an arm narrows, a value is computed from as it is outside — its facts those
 // of the computation then —, and nothing in it may fail nor go on: a quotient by
-// what may be 0 stays in its arm. Both values computed, one kept, no branch: which
+// what may be 0 stays in its arm. Nor may it call: a call runs only on the paths
+// that need it (place.odin), and a select needs both values. Both values computed, one kept, no branch: which
 // runs is the cost's to say, and in lanes, only a select runs. And membership in
 // one cell is comparisons:
 //
@@ -75,7 +76,7 @@ in_arm :: proc(g: ^Graph, r: Region, m: int) -> bool {
 	return false
 }
 
-// freed: c, computed outside the arms of the match.
+// freed: c, computed outside the arms of the match, on each of its paths.
 freed :: proc(t: ^Unnarrow, c: Class) -> (Class, bool) {
 	g := t.g
 	c := find(g, c)
@@ -83,13 +84,13 @@ freed :: proc(t: ^Unnarrow, c: Class) -> (Class, bool) {
 	if c >= Class(len(g.scope)) do return NO_CLASS, false
 	r, defined := g.scope[c].?
 	if !defined do return NO_CLASS, false
-	if !in_arm(g, r, t.match) do return c, true
+	inside := in_arm(g, r, t.match)
 	if t.busy[c] do return NO_CLASS, false
 	t.busy[c] = true
 	out := NO_CLASS
 	for id in g.members[c] {
 		n := g.nodes[id] // a copy: what adds a node moves the nodes
-		x := free_node(t, n) or_continue
+		x := free_node(t, c, n, inside) or_continue
 		out = out == NO_CLASS ? x : merge(g, out, x)
 	}
 	t.busy[c] = false
@@ -98,27 +99,32 @@ freed :: proc(t: ^Unnarrow, c: Class) -> (Class, bool) {
 	return t.memo[c], true
 }
 
-free_node :: proc(t: ^Unnarrow, n: Node) -> (c: Class, ok: bool) {
+// free_node: the computation n of the class c, outside the arms of the match; c is
+// defined inside one of them, or not.
+free_node :: proc(t: ^Unnarrow, c: Class, n: Node, inside: bool) -> (out: Class, ok: bool) {
 	g := t.g
 	#partial switch n.kind {
 	case .Narrow:
 		// what an arm of the match narrows, as it is outside
 		token := g.nodes[g.members[find(g, n.args[1])][0]]
 		if token.kind == .Arm && token.owner == t.match do return freed(t, n.args[0])
-		return NO_CLASS, false
-	case .Unary, .Binary, .In, .Splat, .Lanes, .Reduce, .Select:
+	case .Unary, .Binary, .In, .Splat, .Lanes, .Reduce, .Select, .Get:
+	case .Int, .Real, .Text, .Input, .Argument, .Start, .Param, .Arm, .Match, .Loop, .Foreign, .Memory:
+		// what stays where it is: run there, outside the arms, or not freed
+		if inside do return NO_CLASS, false
+		return c, true
 	case:
 		return NO_CLASS, false
 	}
-	out := n
+	m := n
 	args := make([]Class, len(n.args))
 	for a, k in n.args do args[k] = freed(t, a) or_return
-	out.args = args
+	m.args = args
 	// a quotient, where the arm is not taken: by what may be 0, it would fail
 	if n.kind == .Binary && (n.op == .Div || n.op == .Mod) {
 		divisor := g.facts[find(g, args[1])]
 		if divisor.machine == .Int && divisor.bounds.lo <= 0 && divisor.bounds.hi >= 0 do return NO_CLASS, false
 		if divisor.machine == .Int && divisor.bounds.lo <= -1 && divisor.bounds.hi >= -1 && g.facts[find(g, args[0])].bounds.lo <= i128(min(i64)) do return NO_CLASS, false
 	}
-	return add(g, out), true
+	return add(g, m), true
 }
