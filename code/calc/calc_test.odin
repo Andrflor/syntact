@@ -28,8 +28,10 @@ test_interpreted :: proc(t: ^testing.T) {
 		if !testing.expectf(t, failed == "", "%s: %s\n%s", c.name, failed, code.print_program(&direct)) do continue
 		lanes, failed_lanes := optimize(&direct, &C)
 		if !testing.expectf(t, failed_lanes == "", "%s, in lanes: %s\n%s", c.name, failed_lanes, code.print_program(&direct)) do continue
-		names := []string{"lowered", "normal form", "normal form in lanes"}
-		for &prog, form in ([]code.Program{direct, x64, lanes}) {
+		free, failed_free := optimize(&direct, &FREE_LANES)
+		if !testing.expectf(t, failed_free == "", "%s, in free lanes: %s\n%s", c.name, failed_free, code.print_program(&direct)) do continue
+		names := []string{"lowered", "normal form", "normal form in lanes", "normal form in free lanes"}
+		for &prog, form in ([]code.Program{direct, x64, lanes, free}) {
 			name := names[form]
 			run, failed := code.interpret(&prog, c.inputs, symbols)
 			if !testing.expectf(t, failed == "", "%s, %s: %s\n%s", c.name, name, failed, code.print_program(&prog)) do continue
@@ -44,4 +46,17 @@ test_interpreted :: proc(t: ^testing.T) {
 			testing.expectf(t, slice.equal(run.calls[:], c.calls), "%s, %s: called %v, expected %v", c.name, name, run.calls[:], c.calls)
 		}
 	}
+}
+
+// FREE_LANES: a machine whose operations on lanes cost nothing: the normal form
+// runs in lanes wherever a law puts it there.
+FREE_LANES := Costs {
+	ints    = X64_INTS,
+	reals   = X64_REALS,
+	load    = 1,
+	call    = 20,
+	branch  = 3,
+	turns   = 16,
+	lanes   = 2,
+	lanes32 = 4,
 }

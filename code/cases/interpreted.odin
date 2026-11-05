@@ -81,6 +81,10 @@ CODE_CASES := []Code_Case {
 	{name = "answers of a recursion", source = LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> libc.abs{n -> -2}! + cnt{n -> n - 1}!}}\n-> cnt{n -> ??::u8}!", inputs = {3}, int = 6, calls = {"abs", "abs", "abs"}},
 	// in lanes of 32 bits, what only an operation of the ring or of the bits reads wraps
 	{name = "residues in lanes", source = "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> acc ^ ((n [&] 255) * 3)}!}}\n-> f{n -> ??::u32}!", inputs = {1001}, int = 107},
+	// steps that compose run in lanes, each lane by its power: over the words, and
+	// over the bits under ^ (specs/types.md §4.10)
+	{name = "affine steps in lanes", source = "f -> {u32:n -> ??  u8:x -> 7  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  x -> 255 - x  acc -> acc + x}!}}\n-> f{n -> ??::u32}!", inputs = {1001}, int = 127507},
+	{name = "linear steps of bits in lanes", source = "xs -> {u64:x  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff  b -> a ^ (a >> 7)  -> (b ^ (b << 17)) [&] 0xffffffffffffffff}\nf -> {u32:n -> ??  u64:x -> 12345  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  x -> xs{x -> x}!  acc -> acc ^ x}!}}\n-> f{n -> ??::u32}!", inputs = {1001}, int = 5585918021548957634},
 	// a quotient by a constant: products and shifts, exact over the bounds of the dividend
 	{name = "division by constants, 0", source = "n -> ??::u32\n-> n / 7 + n % 13 + n / 1000 + n % 10", inputs = {0}, int = 0},
 	{name = "division by constants, 6", source = "n -> ??::u32\n-> n / 7 + n % 13 + n / 1000 + n % 10", inputs = {6}, int = 12},
