@@ -194,6 +194,9 @@ is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
 		return is_pending_call(k, v.target)
 	case ^Operation:
 		if v.op == .Item || v.op == .From do return is_pending_call(k, v.args[0])
+	case ^And:
+		// t & S: t where it is in S (§4.2)
+		for a in v.terms do if is_pending_call(k, a) do return true
 	}
 	c, ok := as_call(t)
 	if !ok do return false
@@ -497,9 +500,11 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	// a step with a term of no type is not solved: the call stays, typed at its values
 	for b in p.branches do if holds_invalid(b.product) do return
 	stop, c, r := p.branches[0].cover, p.branches[0].product, p.branches[1].product
-	// on a run: the branch that cuts it calls, the other is the base, the empty run
+	// the branch with a cover calls, the other is the base: it takes what the cover
+	// does not (§6) — on a run cut by its head, the runs of fewer pieces
 	if !solved(c, root) && solved(r, root) {
-		if short, cuts := cuts_head(k, stop, u); cuts do stop, c, r = short, r, c
+		short, cuts := cuts_head(k, stop, u)
+		stop, c, r = cuts ? Type(short) : not_law(k, stop), r, c
 	}
 	if !solved(c, root) do return
 	family := family_of(k, given(k, c)) or_return
@@ -1593,7 +1598,9 @@ cuts_head :: proc(k: ^Kernel, cover: Type, u: ^Unknown) -> (short: ^Scope, ok: b
 	if len(inner) != 1 || is_run(inner[0]) || inner[0].color == nil do return
 	for place in places[:c] {
 		if is_run(place) do return
+		// what the place admits: its color, or the value written there
 		head := binding_color(k, place)
+		if head == nil && place.value != nil do head = values(k, binding_value(k, place)) or_return
 		if head != nil && !included(k, binding_color(k, inner[0]), head) do return
 	}
 	short = new_scope(nil, written.span)

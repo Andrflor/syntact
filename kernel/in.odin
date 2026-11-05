@@ -39,9 +39,19 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	// a field, a binding, of what a call gives: in c by induction on it (call_in)
 	if call, read := call_read(x); read && call_in(k, call, c, read_of(x)) do return Bool(true)
 	if f, ok := x.(^Fold); ok && fold_induction(k, f, c) do return Bool(true)
+	// t & A, t one value: t where it is in A (§4.2), in c when t is in ~A | c
+	if meet, ok := x.(^And); ok {
+		if t, sets, one := value_in_meet(k, meet); one {
+			if verdict, decided := in_law(k, t, or_law(k, {not_law(k, sets), c})).(Bool); decided do return verdict
+		}
+	}
 	// an operation on values is in the family its signature gives (§4.5)
 	if _, ok := x.(^Operation); ok && is_value(k, x) {
 		if f, known := family_of(k, x); known && same(k, c, family_term(f)) do return Bool(true)
+	}
+	// (t::L) in a | of shapes: L a scope whose productions are each one of them
+	if any, either := c.(^Or); either && !is_constant(x) {
+		if image, known := values(k, x); known do if s, is_scope := image.(^Scope); is_scope && !is_shape(k, s) && produced_within(k, s, any) do return Bool(true)
 	}
 	if s, ok := c.(^Scope); ok {
 		// (t::L) in S: true when S holds L, false when they are apart
@@ -93,6 +103,21 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		return bool_not(k, in_law(k, x, v.term))
 	}
 	return new_operation(.In, x, c)
+}
+
+// value_in_meet: t & A, t one value and A the sets beside it.
+value_in_meet :: proc(k: ^Kernel, meet: ^And) -> (t: Type, sets: Type, ok: bool) {
+	others := make([dynamic]Type)
+	for term in meet.terms {
+		if is_value(k, term) && !is_constant(term) {
+			if t != nil do return
+			t = term
+		} else {
+			append(&others, term)
+		}
+	}
+	if t == nil || len(others) == 0 do return
+	return t, and_law(k, others[:]), true
 }
 
 // of_values: a | of cells that are values — scopes, =t — and nothing else.
@@ -332,7 +357,11 @@ holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: Read, root: ^Scope = nil)
 	products(k, given(k, v), &leaves)
 	for leaf in leaves {
 		if is_none(leaf.term) do continue
+		// a call of root, also where a branch narrows it: t & S is t where it is in S
 		if root != nil && is_call_of(leaf.term, root) do continue
+		if meet, narrowed := leaf.term.(^And); narrowed && root != nil {
+			if t, _, one := value_in_meet(k, meet); one && is_call_of(t, root) do continue
+		}
 		shape := leaf.term.(^Scope) or_return
 		for b in placed(k, shape, .Value) {
 			if b.kind != .Push && b.kind != .Expand do continue
@@ -344,13 +373,21 @@ holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: Read, root: ^Scope = nil)
 	return true
 }
 
-// call_read: x reads a field, or a binding, of a recursive call: the call.
+// call_read: x reads a field, or a binding, of a recursive call: the call — also of
+// t & S, the call t where it is in S (§4.2).
 call_read :: proc(x: Type) -> (^Collapse, bool) {
+	read :: proc(t: Type) -> (^Collapse, bool) {
+		if meet, narrowed := t.(^And); narrowed {
+			for term in meet.terms do if c, is_call := as_call(term); is_call do return c, true
+			return nil, false
+		}
+		return as_call(t)
+	}
 	#partial switch v in x {
 	case ^Access:
-		return as_call(v.target)
+		return read(v.target)
 	case ^Operation:
-		if v.op == .Item do return as_call(v.args[0])
+		if v.op == .Item do return read(v.args[0])
 	}
 	return nil, false
 }
@@ -507,30 +544,55 @@ fold_induction :: proc(k: ^Kernel, f: ^Fold, c: Type) -> bool {
 }
 
 // shape_in: every scope the shape l admits is in s: shapes of one structure are
-// products (§5.4), included place by place — in s itself, or in a production of s.
+// products (§5.4), included place by place — in s itself, or in a production of s;
+// a | of shapes, when each is.
 shape_in :: proc(k: ^Kernel, l: Type, s: ^Scope) -> bool {
+	// one of several shapes: each in s
+	if any, either := l.(^Or); either {
+		for t in any.terms do if !shape_in(k, t, s) do return false
+		return true
+	}
 	shape, is_scope := l.(^Scope)
 	if !is_scope || !is_shape(k, shape) do return false
-	places := placed(k, shape, .Shape)
 	for p in placed(k, s, .Shape) {
 		if p.kind != .Product || p.value == nil do continue
-		target, is_shape_value := binding_type(k, p).(^Scope)
-		if !is_shape_value || !is_shape(k, target) do continue
-		others := placed(k, target, .Shape)
-		if len(others) != len(places) do continue
-		holds := true
-		for x, i in places {
-			y := others[i]
-			if x.name != y.name || x.kind != y.kind || is_run(x) || is_run(y) {
-				holds = false
-				break
-			}
-			cy := binding_color(k, y)
-			if cy == nil do continue
-			cx := binding_color(k, x)
-			holds &&= cx != nil && (same(k, cx, cy) || included(k, cx, cy))
-		}
-		if holds do return true
+		if target, is_shape_value := binding_type(k, p).(^Scope); is_shape_value && shape_within(k, shape, target) do return true
 	}
 	return false
+}
+
+// shape_within: every scope the shape l admits, the shape s admits: the same
+// structure, each color within the other's, place by place (§5.4).
+shape_within :: proc(k: ^Kernel, l, s: ^Scope) -> bool {
+	if !is_shape(k, s) do return false
+	places, others := placed(k, l, .Shape), placed(k, s, .Shape)
+	if len(others) != len(places) do return false
+	for x, i in places {
+		y := others[i]
+		if x.name != y.name || x.kind != y.kind || is_run(x) || is_run(y) do return false
+		cy := binding_color(k, y)
+		if cy == nil do continue
+		cx := binding_color(k, x)
+		if cx == nil || !same(k, cx, cy) && !included(k, cx, cy) do return false
+	}
+	return true
+}
+
+// produced_within: every value the scope s admits — what its productions give, each a
+// shape (§5.4) — one of the shapes of c admits.
+produced_within :: proc(k: ^Kernel, s: ^Scope, c: ^Or) -> bool {
+	found := false
+	for p in placed(k, s, .Shape) {
+		if p.kind != .Product do continue
+		shape, is_scope := binding_type(k, p).(^Scope)
+		if p.value == nil || !is_scope || !is_shape(k, shape) do return false
+		within := false
+		for t in c.terms do if target, is_shape_value := t.(^Scope); is_shape_value && shape_within(k, shape, target) {
+			within = true
+			break
+		}
+		if !within do return false
+		found = true
+	}
+	return found
 }

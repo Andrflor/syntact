@@ -1530,6 +1530,31 @@ places_shape :: proc(k: ^Kernel, places: []^Binding) -> Type {
 // item_image: the values a binding of the runs a layout admits may hold: the
 // colors of its places, of the pieces of its runs; L & S what both say, L | S what
 // either does.
+// place_image: what the runs a layout admits hold at the place at: a shape whose
+// places before its first run reach it, the color there; L & S, what both hold;
+// one of several, any.
+place_image :: proc(k: ^Kernel, layout: Type, at: int) -> (c: Type, ok: bool) {
+	#partial switch v in layout {
+	case ^And:
+		for t in v.terms {
+			x := place_image(k, t, at) or_continue
+			c = c == nil ? x : and_law(k, {c, x})
+		}
+		return c, c != nil
+	case ^Or:
+		places := make([]Type, len(v.terms))
+		for t, i in v.terms do places[i] = place_image(k, t, at) or_return
+		return or_law(k, places), true
+	case ^Scope:
+		if !is_shape(k, v) do return
+		for p, i in placed(k, v, .Shape) {
+			if is_run(p) || p.color == nil do return
+			if i == at do return binding_color(k, p), true
+		}
+	}
+	return
+}
+
 item_image :: proc(k: ^Kernel, layout: Type) -> (c: Type, ok: bool) {
 	#partial switch v in layout {
 	case ^And:
@@ -1685,7 +1710,11 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		return image, true
 	}
 	if o.op == .Item {
-		if set, known := values(k, o.args[0]); known do if c, read := item_image(k, set); read do return c, true
+		if set, known := values(k, o.args[0]); known {
+			// a known place: what the layout holds there (§5.3)
+			if at, placed_at := o.args[1].(Int); placed_at do if c, read := place_image(k, set, int(at)); read do return c, true
+			if c, read := item_image(k, set); read do return c, true
+		}
 	}
 	// x from k: the runs of what follows the place k
 	if o.op == .From do return suffix(k, values(k, o.args[0]) or_return, o.args[1])

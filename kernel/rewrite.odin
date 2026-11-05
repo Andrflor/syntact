@@ -79,7 +79,16 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t
 	case ^Unknown:
-		if x, found := rewritten(r, v); found do return x
+		if x, found := rewritten(r, v); found {
+			// a narrowing of an unknown a branch inside already narrowed: both hold,
+			// ?ₖ::(L & S) where L is its layout there (§6)
+			if n, narrows := x.(^Unknown); narrows && n.id == v.id && v.layout != nil && n.layout != nil && !same(k, v.layout, n.layout) {
+				// runs and scopes stay a written meet, read term by term
+				if holds_scope(v.layout) || holds_scope(n.layout) do return narrowing(v, new_and(v.layout, n.layout))
+				return narrowing(v, and_law(k, {v.layout, n.layout}))
+			}
+			return x
+		}
 		// a layout over other unknowns follows them
 		if v.layout != nil && !is_constant(v.layout) {
 			if layout := rewrite(k, v.layout, r); layout != v.layout do return narrowing(v, layout)
@@ -331,6 +340,13 @@ rewrite_all :: proc(k: ^Kernel, ts: []Type, r: Rewrite) -> []Type {
 }
 
 // narrowing: the unknown u in the layout l: `?ₖ::l`, or the primitive l itself.
+// holds_scope: t is, or is built of, scopes.
+holds_scope :: proc(t: Type) -> bool {
+	if _, is_scope := t.(^Scope); is_scope do return true
+	for p in parts(t) do if holds_scope(p) do return true
+	return false
+}
+
 narrowing :: proc(u: ^Unknown, l: Type) -> Type {
 	if is_primitive(l) do return l
 	n := new(Unknown)

@@ -1151,12 +1151,15 @@ int_bounds :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128), ok: bool) {
 }
 
 // bit_bounds: the bits of integers ≥ 0, bounded: a [&] b is at most the lesser of
-// them; a [|] b and a ^ b hold no bit above the highest of either, and a [|] b is
-// at least the greater; a << c and a >> c are monotone in a and in c.
+// them — at most b, b ≥ 0, whatever a: it keeps only bits of b —; a [|] b and a ^ b
+// hold no bit above the highest of either, and a [|] b is at least the greater;
+// a << c and a >> c are monotone in a and in c.
 bit_bounds :: proc(op: Operator, bounds: [][2]Maybe(i128)) -> (lo, hi: Maybe(i128), ok: bool) {
-	a_lo := bounds[0][0].? or_return
-	b_lo := bounds[1][0].? or_return
-	if a_lo < 0 || b_lo < 0 do return
+	a_lo, a_low := bounds[0][0].?
+	b_lo, b_low := bounds[1][0].?
+	a_natural, b_natural := a_low && a_lo >= 0, b_low && b_lo >= 0
+	if op == .Bit_And && a_natural != b_natural do return 0, a_natural ? bounds[0][1] : bounds[1][1], true
+	if !a_natural || !b_natural do return
 	a_hi, has_a := bounds[0][1].?
 	b_hi, has_b := bounds[1][1].?
 	#partial switch op {
@@ -1243,8 +1246,10 @@ mul_extended :: proc(x, y: Extended) -> (Extended, bool) {
 	s := sign_of(x) * sign_of(y)
 	if s == 0 do return {0, false}, true
 	if x.infinite || y.infinite do return {s, true}, true
+	// beyond the integers written here: unbounded on its side
 	v, ok := mul_checked(x.value, y.value)
-	return {v, false}, ok
+	if !ok do return {s, true}, true
+	return {v, false}, true
 }
 
 // div_extended: truncated, as on primitives; a finite value over an infinite one
