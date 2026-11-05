@@ -63,7 +63,7 @@ Inst :: union {
 	Splat, // dst = a in each lane of a vector
 	Lanes, // dst = a vector of integers
 	Reduce, // dst = the lanes of a by op
-	Select, // dst = yes where test is 1, no where it is 0
+	Select, // dst = yes where a comparison holds, no where it does not
 }
 
 Copy :: struct {
@@ -119,8 +119,14 @@ Reduce :: struct {
 	dst, a: Reg,
 }
 
+// Select: dst = yes where a cond b holds, no where it does not; on vectors, a is
+// the test, 1 or 0 in each lane, its cond Ne 0.
 Select :: struct {
-	dst, test, yes, no: Reg,
+	dst:     Reg,
+	cond:    Cond,
+	a:       Reg,
+	b:       Operand,
+	yes, no: Operand,
 }
 
 Foreign :: struct {
@@ -323,9 +329,9 @@ rotated :: proc(f: ^Func) {
 	}
 }
 
-// fused: a branch on a comparison nothing else reads is the branch of the
-// comparison — x = a ◁ b, to yes when x = 1: to yes when a ◁ b; when x = 0, when
-// a ◁̸ b, its contrary, on integers.
+// fused: a branch, or a select, on a comparison nothing else reads is the branch,
+// or the select, of the comparison — x = a ◁ b, to yes when x = 1: to yes when
+// a ◁ b; when x = 0, when a ◁̸ b, its contrary, on integers.
 fused :: proc(f: ^Func) {
 	reads := make([]int, len(f.kinds))
 	regs := make([dynamic]Reg)
@@ -340,6 +346,31 @@ fused :: proc(f: ^Func) {
 		for r in regs do reads[r] += 1
 	}
 	for &b in f.blocks {
+		// a select of integers on a comparison of integers before it in the block,
+		// whose operands nothing writes in between
+		for &inst, k in b.insts {
+			s, is_select := &inst.(Select)
+			if !is_select || s.cond != .Ne || s.b != Operand(i64(0)) || reads[s.a] != 1 || f.kinds[s.dst].lanes > 0 do continue
+			for j := k - 1; j >= 0; j -= 1 {
+				c, is_compare := b.insts[j].(Compare)
+				if !is_compare || c.dst != s.a {
+					clear(&regs)
+					writes(b.insts[j], &regs)
+					if slice.contains(regs[:], s.a) do break
+					continue
+				}
+				if f.kinds[c.a].machine == .Real do break
+				written := false
+				for m in j + 1 ..< k {
+					clear(&regs)
+					writes(b.insts[m], &regs)
+					written ||= slice.contains(regs[:], c.a)
+					if r, is_reg := c.b.(Reg); is_reg do written ||= slice.contains(regs[:], r)
+				}
+				if !written do s.cond, s.a, s.b = c.cond, c.a, c.b
+				break
+			}
+		}
 		br, is_branch := b.end.(Branch)
 		if !is_branch || len(b.insts) == 0 || br.cond != .Eq && br.cond != .Ne do continue
 		value, constant := br.b.(i64)
@@ -435,12 +466,15 @@ constant_values :: proc(f: ^Func) -> []Maybe(i64) {
 }
 
 // constants: a register written once, by an integer, is that integer where an
-// operand may be one; its copy goes when nothing reads it any more.
+// operand may be one — of an operation or a comparison, an integer of 32 bits,
+// sign extended, as an instruction holds it; one beyond stays in its register,
+// written once instead of at each use —; its copy goes when nothing reads it any
+// more.
 constants :: proc(f: ^Func) {
 	value := constant_values(f)
-	known :: proc(o: Operand, value: []Maybe(i64)) -> Operand {
+	known :: proc(o: Operand, value: []Maybe(i64), any_word := true) -> Operand {
 		if r, is_reg := o.(Reg); is_reg {
-			if v, has := value[r].?; has do return v
+			if v, has := value[r].?; has && (any_word || i64(i32(v)) == v) do return v
 		}
 		return o
 	}
@@ -450,18 +484,22 @@ constants :: proc(f: ^Func) {
 			case Copy:
 				i.src = known(i.src, value)
 			case Binary:
-				i.b = known(i.b, value)
+				i.b = known(i.b, value, false)
 			case Compare:
-				i.b = known(i.b, value)
+				i.b = known(i.b, value, false)
 			case Foreign:
 				for &a in i.args do a = known(a, value)
 			case Call:
 				for &a in i.args do a = known(a, value)
-			case Real, Text, Input, Unary, Splat, Lanes, Reduce, Select:
+			case Select:
+				i.b = known(i.b, value, false)
+				i.yes = known(i.yes, value)
+				i.no = known(i.no, value)
+			case Real, Text, Input, Unary, Splat, Lanes, Reduce:
 			}
 		}
 		if br, is_branch := b.end.(Branch); is_branch {
-			br.b = known(br.b, value)
+			br.b = known(br.b, value, false)
 			b.end = br
 		}
 	}
@@ -592,7 +630,7 @@ body :: proc(b: ^Builder, src: code.Body) {
 		case code.Reduce:
 			emit(b, Reduce{i.op, Reg(i.dst), Reg(i.a)})
 		case code.Select:
-			emit(b, Select{Reg(i.dst), Reg(i.test), Reg(i.yes), Reg(i.no)})
+			emit(b, Select{Reg(i.dst), .Ne, Reg(i.test), i64(0), Reg(i.yes), Reg(i.no)})
 		case code.Foreign:
 			emit(b, Foreign{i.dst == code.NONE ? NO_REG : Reg(i.dst), i.symbol, regs(i.args)})
 		case code.Call:

@@ -16,6 +16,7 @@ Writer :: struct {
 	values:  []code.Value, // per class, once written
 	written: []bool,
 	open:    [dynamic]Open, // the regions being written, innermost last
+	needs:   map[Class]int, // the registers writing each class takes (need)
 	loops:   [dynamic]int, // the loops whose body is being written, innermost last
 	error:   string,
 }
@@ -105,6 +106,51 @@ values_of :: proc(w: ^Writer, cs: []Class) -> []code.Value {
 	return out[:]
 }
 
+// ordered: the values of what a pure computation reads, each written in turn —
+// the one that needs the most registers first, so that the values written before
+// it do not wait in registers while it is (Sethi, Ullman): they commute, being
+// pure.
+ordered :: proc(w: ^Writer, cs: []Class) -> []code.Value {
+	order := make([]int, len(cs))
+	needs := make([]int, len(cs))
+	defer delete(order)
+	defer delete(needs)
+	for c, k in cs {
+		order[k] = k
+		needs[k] = need(w, c)
+	}
+	// stable, the most first
+	for k in 1 ..< len(order) {
+		for j := k; j > 0 && needs[order[j]] > needs[order[j - 1]]; j -= 1 do order[j], order[j - 1] = order[j - 1], order[j]
+	}
+	out := make([]code.Value, len(cs))
+	for k in order do out[k] = ensure(w, cs[k])
+	return out
+}
+
+// need: the registers writing c takes, its own among them: none once it is
+// written, or when it is written in another region; for a computation of
+// arguments, the most of each argument's need plus the values written before
+// it, the arguments in the order they are written.
+need :: proc(w: ^Writer, c: Class) -> int {
+	c := find(w.g, c)
+	if c == NO_CLASS || w.written[c] do return 0
+	if len(w.open) > 0 && w.p.place[c] != w.open[len(w.open) - 1].region do return 0
+	if v, known := w.needs[c]; known do return v
+	n := chosen(w.p, c)^
+	out := 1
+	#partial switch n.kind {
+	case .Unary, .Binary, .In, .Narrow, .Splat, .Reduce, .Select:
+		args := make([]int, len(n.args))
+		defer delete(args)
+		for a, k in n.args do args[k] = need(w, a)
+		for k in 1 ..< len(args) do for j := k; j > 0 && args[j] > args[j - 1]; j -= 1 do args[j], args[j - 1] = args[j - 1], args[j]
+		for x, k in args do out = max(out, x + k)
+	}
+	w.needs[c] = out
+	return out
+}
+
 // ensure: the value of c, written where it is placed when it is not yet.
 ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 	g := w.g
@@ -138,7 +184,7 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 		return done(w, c, code.NONE)
 	case .Int, .Real, .Text, .Input, .Unary, .Binary, .In, .Narrow, .Splat, .Lanes, .Reduce, .Select:
 	}
-	args := values_of(w, n.args)
+	args := ordered(w, n.args)
 	dst := fresh(w, c)
 	inst: code.Inst
 	#partial switch n.kind {

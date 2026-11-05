@@ -4538,6 +4538,14 @@ test_r64_imm32 :: proc(reg: Register64, imm: u32) {
 }
 
 // Conditional Move Instructions (64-bit)
+// Move if the condition cc holds: its code, the low nibble of 0F 4x (B 2, AE 3,
+// E 4, NE 5, BE 6, A 7, L C, GE D, LE E, G F)
+cmovcc_r64_r64 :: proc(cc: u8, dst: Register64, src: Register64) {
+	rex: u8 = rex_rb(true, u8(dst), u8(src))
+	modrm := encode_modrm(3, u8(dst), u8(src))
+	write([]u8{rex, 0x0F, 0x40 | (cc & 0xF), modrm}) // REX.W 0F 4x /r
+}
+
 // Move if equal (ZF=1)
 cmove_r64_r64 :: proc(dst: Register64, src: Register64) {
 	rex: u8 = rex_rb(true, u8(dst), u8(src))

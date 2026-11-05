@@ -369,7 +369,7 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		if f.kinds[i.dst].lanes > 0 {
 			// in each lane: no ^ ((yes ^ no) & -test)
 			bits := bits_of(fr, i.dst)
-			load_lanes(fr, .XMM1, i.test, bits)
+			load_lanes(fr, .XMM1, i.a, bits)
 			enc.pxor_xmm_xmm(.XMM2, .XMM2)
 			if bits == 32 do enc.psubd_xmm_xmm(.XMM2, .XMM1)
 			else do enc.psubq_xmm_xmm(.XMM2, .XMM1)
@@ -381,12 +381,27 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 			store_lanes(fr, i.dst, .XMM0)
 			return ""
 		}
-		// the bits of no, and of yes where test is not 0
-		get(fr, .RAX, place_of(fr, i.no))
-		t := in_register(fr, i.test, .RCX)
-		enc.test_r64_r64(t, t)
-		enc.cmovne_r64_r64(.RAX, in_register(fr, i.yes, .RDX))
-		put(fr, place_of(fr, i.dst), .RAX)
+		// the bits of no, then of yes where the comparison holds: in dst's
+		// register, unless the comparison or yes reads it; or in r11
+		x := enc.Register64.R11
+		if d, is_reg := place_of(fr, i.dst).(enc.Register64); is_reg && Place(d) != place_of(fr, i.a) && Place(d) != operand(fr, i.b) && Place(d) != operand(fr, i.yes) do x = d
+		get(fr, x, operand(fr, i.no))
+		compare(fr, i.cond, i.a, i.b)
+		// yes, by a move that keeps the flags
+		y := enc.Register64.RDX
+		switch v in operand(fr, i.yes) {
+		case enc.Register64:
+			y = v
+		case i64:
+			if fits_32(v) do enc.mov_r64_imm64(.RDX, transmute(u64)v)
+			else do enc.movabs_r64_imm64(.RDX, v)
+		case Frame_Slot:
+			enc.mov_r64_m64(.RDX, slot_memory(fr, v))
+		case enc.XMMRegister:
+			enc.movq_r64_xmm(.RDX, v)
+		}
+		enc.cmovcc_r64_r64(condition_code(i.cond, f.kinds[i.a].machine == .Real || unsigned_pair(fr, i.a, i.b)), x, y)
+		put(fr, place_of(fr, i.dst), x)
 	case mir.Call:
 		callee := e.prog.funcs[i.func]
 		assignment, msg := assign(callee.params)
@@ -472,6 +487,23 @@ int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 		}
 	}
 	constant, is_constant := b.(i64)
+	// a + b and a - c into another register than a's: one address computed
+	if r, in_reg := a.(enc.Register64); in_reg && r != x && (i.op == .Add || i.op == .Sub && is_constant) {
+		address := enc.AddressComponents{base = r}
+		switch v in b {
+		case i64:
+			d := i.op == .Add ? v : -v
+			if fits_32(d) do address.displacement = i32(d)
+		case enc.Register64:
+			address.index, address.scale = v, 1
+		case enc.XMMRegister, Frame_Slot:
+		}
+		if address.displacement != nil || address.index != nil {
+			enc.lea_r64_m64(x, address)
+			put(fr, dst, x)
+			return ""
+		}
+	}
 	#partial switch i.op {
 	case .Add, .Sub, .And, .Or, .Xor:
 		get(fr, x, a)
@@ -569,10 +601,10 @@ int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 		power(fr.e, false)
 		x = .RAX
 	case .Mul_High:
-		// rdx:rax = rax · y, unsigned
-		y := in_register_place(fr, b, .RCX)
+		// rdx:rax = rax · b, unsigned; b in a register or in the frame
 		get(fr, .RAX, place_of(fr, i.a))
-		enc.mul_r64(y)
+		if slot, in_slot := b.(Frame_Slot); in_slot do enc.mul_m64(slot_memory(fr, slot))
+		else do enc.mul_r64(in_register_place(fr, b, .RCX))
 		x = .RDX
 	case:
 		return "a binary operation the machine does not compute"
@@ -695,6 +727,30 @@ set :: proc(cond: mir.Cond, real: bool) {
 	case .Above:
 		enc.seta_r8(.AL)
 	}
+}
+
+// condition_code: the code of a cond on the flags, x86's: of the unsigned
+// conditions, on words read as unsigned and on floats.
+condition_code :: proc(cond: mir.Cond, unsigned: bool) -> u8 {
+	switch cond {
+	case .Eq:
+		return 0x4
+	case .Ne:
+		return 0x5
+	case .Lt:
+		return unsigned ? 0x2 : 0xC
+	case .Le:
+		return unsigned ? 0x6 : 0xE
+	case .Gt:
+		return unsigned ? 0x7 : 0xF
+	case .Ge:
+		return unsigned ? 0x3 : 0xD
+	case .Below_Eq:
+		return 0x6
+	case .Above:
+		return 0x7
+	}
+	return 0x5
 }
 
 // jump_if: the jump of a cond, or of its contrary; on floats, the unsigned ones.

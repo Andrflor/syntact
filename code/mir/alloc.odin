@@ -12,19 +12,20 @@ import "core:slice"
 // with its source, which holds the same value. Over this graph, the registers are
 // coloured by the registers of the machine (Chaitin, Briggs): a copy whose two
 // sides do not interfere is one register, when that leaves the graph colourable
-// (Briggs' test); then, one by one, a register with fewer neighbours than the
-// colours it may take goes, or else the one whose frame slot would cost least —
-// its reads and writes, ten times more for each loop around them, by its
+// (Briggs', George's tests); then, one by one, a register with fewer neighbours
+// than the colours it may take goes, or else the one whose frame slot would cost
+// least — its reads and writes, ten times more for each loop around them, by its
 // neighbours —, and they are coloured back in the reverse order, each by a colour
-// no neighbour took: that of a register it is copied from or to, or of the
-// argument a call takes it as, when free; a slot of the frame when none is. A
-// register living across a call takes only a register the call keeps. Floats and
-// vectors have registers of their own, none of which a call keeps: across a call,
-// they are in the frame, a slot for each lane.
+// no neighbour took: that of a register it is copied from or to, or computed from
+// or in, or of the argument a call takes it as, when free; else one such a
+// register not coloured yet may take after it; a slot of the frame when none is.
+// A register living across a call takes only a register the call keeps. Floats
+// and vectors have registers of their own, none of which a call keeps: across a
+// call, they are in the frame, a slot for each lane.
 
-// Target: the registers of a machine the scan gives, by their number: those a call
-// keeps, and those it does not; those a call takes its integers in, in order; and
-// the registers of floats and vectors, which no call keeps.
+// Target: the registers of a machine the colouring gives, by their number: those
+// a call keeps, and those it does not; those a call takes its integers in, in
+// order; and the registers of floats and vectors, which no call keeps.
 Target :: struct {
 	kept:      []int,
 	spent:     []int,
@@ -74,7 +75,10 @@ uses :: proc(inst: Inst, out: ^[dynamic]Reg) {
 	case Reduce:
 		append(out, i.a)
 	case Select:
-		append(out, i.test, i.yes, i.no)
+		append(out, i.a)
+		operand(i.b, out)
+		operand(i.yes, out)
+		operand(i.no, out)
 	case Lanes:
 	}
 }
@@ -194,7 +198,7 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 				hinted(f, hints, i.dst, i.a)
 				if b, is_reg := i.b.(Reg); is_reg && commutes(i.op) do hinted(f, hints, i.dst, b)
 			case Select:
-				hinted(f, hints, i.dst, i.no)
+				if no, is_reg := i.no.(Reg); is_reg do hinted(f, hints, i.dst, no)
 			}
 			if is_call(inst) do for r in 0 ..< n do if live[r] && !slice.contains(defs[:], Reg(r)) do crosses[r] = true
 			for d, k in defs {
@@ -242,7 +246,8 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 	}
 	// coalescing: a copy's two sides, one register, when they do not interfere and
 	// the neighbours of the two with as many neighbours as colours are fewer than
-	// the colours (Briggs)
+	// the colours (Briggs), or each neighbour of one is a neighbour of the other or
+	// has fewer neighbours than colours (George)
 	group := make([]Reg, n)
 	for &x, i in group do x = Reg(i)
 	for changed := true; changed; {
@@ -261,7 +266,19 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 				counted[z] = true
 				if neighbours(&g, group, nil, z) >= colours(f, target, z, crosses[z]) do significant += 1
 			}
-			if significant >= k do continue
+			if significant >= k {
+				george :: proc(g: ^Interference, f: ^Func, target: Target, group: []Reg, crosses: []bool, x, y: Reg) -> bool {
+					if crosses[y] && !crosses[x] do return false
+					for q in g.adjacent[y] {
+						z := find_group(group, q)
+						if z == x || z == y || connected(g, z, x) do continue
+						if neighbours(g, group, nil, z) >= colours(f, target, z, crosses[z]) do return false
+					}
+					return true
+				}
+				if george(&g, f, target, group, crosses, y, x) do x, y = y, x
+				else if !george(&g, f, target, group, crosses, x, y) do continue
+			}
 			// y into x
 			group[y] = x
 			crosses[x] ||= crosses[y]
@@ -332,6 +349,20 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 		for c in preferred do if !taken[c] && slice.contains(allowed[:], c) {
 			chosen = c
 			break
+		}
+		// else one the registers it is copied to or computed in, not coloured yet,
+		// may take after it
+		if chosen < 0 {
+			theirs: [64]bool
+			for m in members[r] do for list in ([][dynamic]Reg{copies[m], hints[m]}) do for p in list {
+				z := find_group(group, p)
+				if z == r || colour[z] >= 0 do continue
+				for q in g.adjacent[z] do if c := colour[find_group(group, q)]; c >= 0 do theirs[c] = true
+			}
+			for c in allowed do if !taken[c] && !theirs[c] {
+				chosen = c
+				break
+			}
 		}
 		if chosen < 0 do for c in allowed do if !taken[c] {
 			chosen = c
