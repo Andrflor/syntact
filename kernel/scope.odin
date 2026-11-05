@@ -1193,13 +1193,8 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	if o == .Length {
 		if is_from do return op(k, .Sub, run_law(k, .Length, from.args[:1], span), from.args[1]) // |x from k| = |x| - k
 		if is_put do return run_law(k, .Length, put.args[:1], span) // |x{#k -> v}| = |x|
-		// a run a fold builds, a binding a step: its number of steps
-		if f, is_fold := x.(^Fold); is_fold {
-			if _, es, builds := built(k, f); builds {
-				lo, hi, _ := counter_range(k, f)
-				return op(k, .Mul, Int(len(es)), op(k, .Sub, op(k, .Add, hi, Int(1)), lo))
-			}
-		}
+		// a run a fold builds: the fold of its lengths
+		if f, is_fold := x.(^Fold); is_fold do if n, read := fold_length(k, f, span); read do return n
 		s, known := x.(^Scope)
 		if !known {
 			// every run x may be has length n: |x| = n
@@ -1268,6 +1263,31 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	}
 	if int(at) > len(xs) do return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %d", print_type(x), at))
 	return run_scope(k, xs[at:])
+}
+
+// fold_length: |⟳(…; z: s ↦ {...z ...Q}; z)| = ⟳(…; ℓ: |s| ↦ ℓ + |Q|; ℓ): each step
+// places Q after what the run holds, |{...x ...Q}| = |x| + |Q| (§5.3), and nothing
+// else reads it — the length passes through the fold as through an operator.
+fold_length :: proc(k: ^Kernel, f: ^Fold, span: syn.Span) -> (n: Type, ok: bool) {
+	for z, i in f.states {
+		if !same(k, f.value, z) do continue
+		step := f.updates[i].(^Scope) or_return
+		data := run_data(k, step)
+		if len(data) == 0 || data[0].kind != .Expand || !same(k, binding_value(k, data[0]), z) do return
+		rest := run_scope(k, data[1:])
+		if reads(k, rest, z) || reads(k, f.effects, z) do return
+		for t, j in f.updates do if j != i && reads(k, t, z) do return
+		l := new_unknown(k, nil)
+		l.layout = COUNTS
+		g := new(Fold)
+		g^ = f^
+		g.states, g.inits, g.updates = slice.clone(f.states), slice.clone(f.inits), slice.clone(f.updates)
+		g.states[i], g.value = l, l
+		g.inits[i] = run_law(k, .Length, {f.inits[i]}, span)
+		g.updates[i] = op(k, .Add, l, run_law(k, .Length, {rest}, span))
+		return fold_law(k, g), true
+	}
+	return
 }
 
 // built_item: x.#a, x a run the fold f builds c bindings a step: the binding

@@ -354,7 +354,7 @@ layout_of :: proc(k: ^Kernel, u: ^Unknown) -> Type {
 held :: proc(k: ^Kernel, layout: Type) -> (image: Type, ok: bool) {
 	over := make([dynamic]^Unknown)
 	read_unknowns(layout, &over)
-	if len(over) == 0 do return layout, true
+	if len(over) == 0 && is_constant(layout) do return layout, true
 	image = layout_image(k, layout) or_return
 	return image, is_constant(image)
 }

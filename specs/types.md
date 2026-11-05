@@ -1187,7 +1187,10 @@ otherwise leaves that side without bound. The least solution, the narrowest rang
 is proven by induction: the solving only proposes it. A field every call keeps holds
 what the call gives it. On a counter, each call taken at the bound y of the step
 after, the greatest is `y ↦ α·y + max(g)` from `max(c)`, the least likewise — folds,
-solved by their laws. Its length likewise, each call's length taken in lo..hi. A
+solved by their laws, read at what the call gives the counter. A run is the orbit of
+its positions: a call that takes the rest `m from c` makes |m| / c steps when the
+bases take only the runs of fewer than c pieces, at most as many otherwise. Its
+length likewise, each call's length taken in lo..hi. A
 field the call gives a call of another equation keeps it, over that equation's own
 fields, each an unknown of its color: the recursion follows what the other builds.
 A step that is a pattern gives one of its products, `αᵢ·y + gᵢ`: when no value is

@@ -283,10 +283,9 @@ call_key :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> (key: []
 generic_solution :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> (solution: Type, ok: bool) {
 	// solved once for the bindings given: then at their values, its bound unknowns
 	// its own
-	key, through := call_key(k, root, given)
-	for g in k.generics do if g.equation.root == root && slice.equal(g.equation.given, key) && slice.equal(g.equation.through, through) do return substituted(k, g.solved, at_values(k, g.equation, given)), true
 	// the bindings given, and those the calls carve, at the values root holds
-	eq := call_equation(k, root, key, through) or_return
+	eq := keyed_equation(k, root, given) or_return
+	for g in k.generics do if g.equation == eq do return substituted(k, g.solved, at_values(k, eq, given)), true
 	solved := iteration(k, eq.generic, eq.equation) or_return
 	append(&k.generics, Generic{eq, solved})
 	return substituted(k, solved, at_values(k, eq, given)), true
@@ -368,6 +367,8 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Th
 			more = true
 		}
 		if !more {
+			// read through another equation, a term of no type: not read so
+			if len(through) > 0 && holds_invalid(equation) do return
 			eq.generic, eq.equation, eq.params = generic, equation, params
 			return eq, true
 		}
@@ -375,12 +376,20 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Th
 	return
 }
 
+// keyed_equation: the equation a call of root carving given reads: through the
+// calls of other equations it gives, unless that reading gives a term of no type;
+// then where they are unknowns of their colors.
+keyed_equation :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> (eq: ^Call_Equation, ok: bool) {
+	key, through := call_key(k, root, given)
+	eq, ok = call_equation(k, root, key, through)
+	if ok || len(through) == 0 || !eq.derived do return
+	return call_equation(k, root, key)
+}
+
 // equation_of: the equation the call c reads.
 equation_of :: proc(k: ^Kernel, c: ^Collapse) -> (eq: ^Call_Equation, ok: bool) {
 	s := c.target.(^Scope) or_return
-	root := origin(s)
-	key, through := call_key(k, root, s.changes)
-	return call_equation(k, root, key, through)
+	return keyed_equation(k, origin(s), s.changes)
 }
 
 // Generic: the solution of an equation where the bindings given, and those its
@@ -1756,9 +1765,44 @@ Image :: struct {
 	equation: ^Call_Equation,
 	measure:  Measure,
 	kept:     []Type, // what the fields every call keeps hold at the call
-	image:    Type,
+	bounds:   Bounds,
 	ok:       bool,
 	given:    bool, // false while it is given
+	at:       [dynamic]Image_At, // the bounds read at a count of steps
+}
+
+Image_At :: struct {
+	key:   []Type,
+	image: Type,
+	ok:    bool,
+}
+
+// Bounds: lo..hi; on a counter, functions of the count of steps, which is steps — or
+// any number up to it —, a term of what the call carves.
+Bounds :: struct {
+	lo, hi: Type,
+	count:  ^Unknown,
+	steps:  Type,
+	upto:   bool,
+}
+
+// bounds_at: the bounds at the count of steps the call makes.
+bounds_at :: proc(k: ^Kernel, b: Bounds, steps: Type) -> (image: Type, ok: bool) {
+	if b.count == nil do return range_law(k, b.lo, b.hi, .Int, {}), true
+	steps := steps
+	if b.upto {
+		most := layout_image(k, steps) or_return
+		_, top := int_bounds(k, most) or_return
+		any := new_unknown(k, nil)
+		any.layout = range_law(k, Int(0), Int(top.? or_return), .Int, {})
+		steps = any
+	}
+	at := rewriting(nil, b.count, steps)
+	hi := layout_image(k, rewrite(k, b.hi, at)) or_return
+	lo := layout_image(k, rewrite(k, b.lo, at)) or_return
+	_, top := int_bounds(k, hi) or_return
+	least, _ := int_bounds(k, lo) or_return
+	return range_law(k, Int(least.? or_return), Int(top.? or_return), .Int, {}), true
 }
 
 call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure.Value) -> (image: Type, ok: bool) {
@@ -1776,49 +1820,83 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure.Value) -> (im
 	for x in k.images do if x.equation == eq && x.measure == measure && !x.given do return
 	at := len(k.images)
 	append(&k.images, Image{equation = eq, measure = measure})
-	e, kept := kept_fields(k, call, eq)
-	next: for x in k.images[:at] {
+	e, values, kept := kept_fields(k, call, eq)
+	next: for &x in k.images[:at] {
 		if x.equation != eq || x.measure != measure || len(x.kept) != len(kept) do continue
 		for t, i in kept do if !same(k, t, x.kept[i]) do continue next
-		image, ok = x.image, x.ok
 		ordered_remove(&k.images, at)
-		return
+		if !x.ok do return
+		return images_at(k, &x, values)
 	}
 	if measure == .Length do e = run_law(k, .Length, {e}, eq.root.span)
 	// an equation holding a term of no type bounds nothing
+	bounds: Bounds
 	if !holds_invalid(e) {
-		image, ok = counter_bounds(k, eq, e, measure)
-		if !ok do image, ok = least_bounds(k, eq, e, measure)
+		bounds, ok = counter_bounds(k, eq, e, measure)
+		if !ok do bounds, ok = least_bounds(k, eq, e, measure)
 	}
-	k.images[at] = Image{eq, measure, kept, image, ok, true}
+	k.images[at] = Image{eq, measure, kept, bounds, ok, true, nil}
+	if !ok do return
+	return images_at(k, &k.images[at], values)
+}
+
+// images_at: the bounds of the entry at the values a call gives, read once for them.
+images_at :: proc(k: ^Kernel, x: ^Image, values: Rewrite) -> (image: Type, ok: bool) {
+	if x.bounds.count == nil do return bounds_at(k, x.bounds, nil)
+	// what the count of steps reads of the values
+	key := make([dynamic]Type)
+	for v in values do if v.unknown != nil && reads(k, x.bounds.steps, v.unknown) do append(&key, v.term)
+	next: for a in x.at {
+		for t, i in key do if t != a.key[i] && !same(k, t, a.key[i]) do continue next
+		return a.image, a.ok
+	}
+	image, ok = bounds_at(k, x.bounds, rewrite(k, x.bounds.steps, values))
+	append(&x.at, Image_At{key[:], image, ok})
 	return
 }
 
 // kept_fields: the equation the call reads, where each field that every call of it
 // keeps — carves to itself, or not at all — holds what the call gives it (§5.3: a
-// carve is the equation at the values it gives): an unknown of that image.
-kept_fields :: proc(k: ^Kernel, call: ^Collapse, eq: ^Call_Equation) -> (e: Type, kept: []Type) {
+// carve is the equation at the values it gives): an unknown of that image. values:
+// each field at what the call gives it; key: the images of those kept.
+kept_fields :: proc(k: ^Kernel, call: ^Collapse, eq: ^Call_Equation) -> (e: Type, values: Rewrite, key: []Type) {
+	values = at_values(k, eq, call.target.(^Scope).changes)
 	moved := make([dynamic]^Unknown)
+	all_moved := false
 	for x in calls_in(k, eq.equation, eq.root) {
 		target := x.target.(^Scope)
 		carved := make(map[^Unknown]Type)
-		for b, v in target.changes do if !matched(k, binding_type(k, holding(eq.generic, b)), v, &carved) do return eq.equation, nil
+		for b, v in target.changes do all_moved ||= !matched(k, binding_type(k, holding(eq.generic, b)), v, &carved)
 		for u, v in carved {
 			w, is_unknown := v.(^Unknown)
 			if !is_unknown || !same_unknown(u, w) do append(&moved, u)
 		}
 	}
 	r: Rewrite
-	images := make([dynamic]Type)
-	values: for x in at_values(k, eq, call.target.(^Scope).changes) {
+	out := make([dynamic]Type)
+	for x in values {
 		if x.unknown == nil do continue
-		for u in moved do if same_unknown(u, x.unknown) do continue values
+		kept := !all_moved
+		for u in moved do kept &&= !same_unknown(u, x.unknown)
+		if !kept do continue
 		image, known := layout_image(k, x.term)
 		if !known || !is_constant(image) do continue
 		r = rewriting(r, x.unknown, narrowing(x.unknown, image))
-		append(&images, image)
+		append(&out, image)
 	}
-	return rewrite(k, eq.equation, r), images[:]
+	return rewrite(k, eq.equation, r), values, out[:]
+}
+
+// orbit_length: the length n of the orbit of u by step until stop, in closed form:
+// μ(i: kᵢ in stop), kᵢ = stepⁱ(u) (§5.6).
+orbit_length :: proc(k: ^Kernel, u: ^Unknown, step, stop: Type, span: syn.Span) -> (n: Type, ok: bool) {
+	x := orbit_index(k, u, stop)
+	i := new_unknown(k, nil)
+	i.layout = COUNTS
+	ki := orbit(k, rewrite(k, step, rewriting(nil, u, x)), x, u, i) or_return
+	j := new_unknown(k, nil)
+	j.layout = COUNTS
+	return least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), stop), span), true
 }
 
 // Bound_Product: a product of the equation, its calls taken at one bound y: g,
@@ -1868,7 +1946,7 @@ at_bound :: proc(k: ^Kernel, t: Type, root: ^Scope, measure: Measure, y: ^Unknow
 // narrowest range. A step α·y + g, α ≥ 1, keeps hi when α·hi + max(g) ≤ hi, lo
 // when α·lo + min(g) ≥ lo; otherwise that side has no bound. x % m keeps lo at 0
 // when x ≥ 0 there, at -(m - 1) otherwise. The range is proven by induction.
-least_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure) -> (image: Type, ok: bool) {
+least_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure) -> (bounds: Bounds, ok: bool) {
 	y := new_unknown(k, nil)
 	y.layout = family_term(.Int)
 	parts := at_bound(k, e, eq.root, measure, y) or_return
@@ -1918,50 +1996,80 @@ least_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure) 
 		set := range_law(k, lo_t, hi_t, .Int, {})
 		taken := new_unknown(k, nil)
 		taken.layout = set
-		if holds_in(k, measured(k, e, eq.root, measure, taken) or_return, set, false) do return set, true
+		if holds_in(k, measured(k, e, eq.root, measure, taken) or_return, set, false) do return {lo = lo_t, hi = hi_t}, true
 	}
 	return
 }
 
 // counter_bounds: f = m ? {B -> c  -> g + f{s(m)}! + …}, each call moving the
 // counter by the same step: the bounds after the n steps of the orbit, y ↦ α·y +
-// max(g) from max(c) above, the least likewise below — folds, in closed form. A
-// pattern gives one of its products, so the bounds follow the greatest α and g
-// above, the least below, when every value is not negative.
-counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure) -> (image: Type, ok: bool) {
+// max(g) from max(c) above, the least likewise below — folds, in closed form, over
+// what the call gives the counter. A pattern gives one of its products, so the
+// bounds follow the greatest α and g above, the least below, when every value is
+// not negative. A run is the orbit of its positions: a call that takes the rest
+// m from c of the run m its pattern cuts makes at most |m| / c steps, each branch
+// making no call a base.
+counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure) -> (bounds: Bounds, ok: bool) {
 	root, generic := eq.root, eq.generic
 	p := e.(^Pattern) or_return
-	if len(p.branches) != 2 || p.branches[0].cover == nil || p.branches[1].cover != nil do return
 	u := p.target.(^Unknown) or_return
-	stop, c, r := p.branches[0].cover, p.branches[0].product, p.branches[1].product
-	// a call of the base whose production, at its values, calls nothing is that
-	// production (§7)
-	asked: Rewrite
-	for x in calls_in(k, c, root) do if v, read, given := production_at(k, x); given {
-		read.read = false
-		if solved(v, root) do asked = rewriting_call(asked, x, v)
-	}
-	c = rewrite(k, c, asked)
-	if !solved(c, root) do return
-	// every call moves the counter by the same step
-	calls := calls_in(k, r, root)
-	if len(calls) == 0 do return
+	// the calls that move the counter by one step; a call of another value whose
+	// production, at its values, calls nothing is that production (§7)
 	step: Type
-	for x in calls {
-		next, _ := counter_next(k, generic, x, u) or_return
-		if step != nil && !same(k, step, next) do return
-		step = next
+	asked: Rewrite
+	for x in calls_in(k, e, root) {
+		if next, _, moves := counter_next(k, generic, x, u); moves && (step == nil || same(k, step, next)) {
+			step = next
+			continue
+		}
+		v, read := production_at(k, x) or_return
+		read.read = false
+		if !solved(v, root) do return
+		asked = rewriting_call(asked, x, v)
 	}
+	if step == nil do return
+	bases, moves := make([dynamic]Type), make([dynamic]Type)
+	n: Type
+	if from, cuts := step.(^Operation); cuts && from.op == .From && same(k, from.args[0], u) {
+		c, constant := from.args[1].(Int)
+		if !constant || c <= 0 do return
+		// a cover that takes every run of c pieces or more leaves the runs of fewer to
+		// the branches after it: when they are the bases, the orbit stops there, after
+		// |m| / c steps; otherwise after any number up to it
+		short: Type
+		for b in p.branches {
+			product := rewrite(k, b.product, asked)
+			if solved(product, root) {
+				if short == nil do short = Bool(false)
+				append(&bases, product)
+				continue
+			}
+			if short == nil && b.cover != nil do if cut, cuts := cuts_head(k, b.cover, u); cuts && fewer_than(cut, i128(c)) do short = cut
+			append(&moves, product)
+		}
+		if _, exact := short.(^Scope); exact do n = orbit_length(k, u, step, short, p.span) or_return
+		else do n, bounds.upto = op(k, .Div, run_law(k, .Length, {u}, p.span), Int(c)), true
+	} else {
+		if len(p.branches) != 2 || p.branches[0].cover == nil || p.branches[1].cover != nil do return
+		stop := p.branches[0].cover
+		append(&bases, rewrite(k, p.branches[0].product, asked))
+		append(&moves, rewrite(k, p.branches[1].product, asked))
+		if !solved(bases[0], root) do return
+		n = orbit_length(k, u, step, stop, p.span) or_return
+	}
+	if len(bases) == 0 || len(moves) == 0 do return
 	y := new_unknown(k, nil)
 	y.layout = family_term(.Int)
-	steps := at_bound(k, r, root, measure, y) or_return
-	base := layout_image(k, c) or_return
-	clo, chi := int_bounds(k, base) or_return
+	steps := make([dynamic]Bound_Product)
+	for t in moves do append(&steps, ..at_bound(k, t, root, measure, y) or_return)
+	images := make([]Type, len(bases))
+	for t, i in bases do images[i] = layout_image(k, t) or_return
+	clo, chi := int_bounds(k, or_law(k, images)) or_return
 	a_lo, a_hi: i128 = -1, -1
 	tlo, thi: Maybe(i128)
-	for x, n in steps {
+	for x, i in steps {
 		if x.modulus > 0 do return
-		if n == 0 {
+		if i == 0 {
 			a_lo, a_hi, tlo, thi = x.a, x.a, x.lo, x.hi
 			continue
 		}
@@ -1976,14 +2084,6 @@ counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure
 		at_least, read := tlo.?
 		if !read || at_least < 0 do return
 	}
-	// the orbit of u, its length n
-	x := orbit_index(k, u, stop)
-	i := new_unknown(k, nil)
-	i.layout = COUNTS
-	ki := orbit(k, rewrite(k, step, rewriting(nil, u, x)), x, u, i) or_return
-	j := new_unknown(k, nil)
-	j.layout = COUNTS
-	n := least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), stop), p.span)
 	bound :: proc(k: ^Kernel, n: Type, a: i128, from, by: Maybe(i128), span: syn.Span) -> (out: Type, ok: bool) {
 		c := from.? or_return
 		b := by.? or_return
@@ -1997,14 +2097,12 @@ counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure
 		f.effects, f.updates, f.value = None{}, slice.clone([]Type{op(k, .Add, op(k, .Mul, Int(a), z), Int(b))}), z
 		return fold_law(k, f), true
 	}
-	hi := bound(k, n, a_hi, chi, thi, p.span) or_return
-	lo := bound(k, n, a_lo, clo, tlo, p.span) or_return
-	// over the values the call gives the counter
-	hi_image := layout_image(k, hi) or_return
-	lo_image := layout_image(k, lo) or_return
-	_, top := int_bounds(k, hi_image) or_return
-	least, _ := int_bounds(k, lo_image) or_return
-	return range_law(k, Int(least.? or_return), Int(top.? or_return), .Int, p.span), true
+	// functions of the count of steps, read at the values the call gives (bounds_at)
+	bounds.count, bounds.steps = new_unknown(k, nil), n
+	bounds.count.layout = COUNTS
+	bounds.hi = bound(k, bounds.count, a_hi, chi, thi, p.span) or_return
+	bounds.lo = bound(k, bounds.count, a_lo, clo, tlo, p.span) or_return
+	return bounds, true
 }
 
 // products: the products t may give: a pattern without effects, those of its
