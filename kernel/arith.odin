@@ -129,9 +129,10 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 	case ^Collapse:
 		if v.recursive do return call_family(k, v)
 	case ^Access:
-		// the family of the color of the field, or of what a call places there
+		// the family of the color of the field; of a field of a call, the family its
+		// fields are proven in
 		if image, known := layout_image(k, t); known do if f, one := layout_family(k, image); one do return f, true
-		return read_family(k, v.target, v.name, v.ordinal)
+		if c, read := call_read(t); read do return call_family(k, c, true)
 	case ^Fold:
 		return family_of(k, v.value)
 	case ^Least:
@@ -169,8 +170,9 @@ operation_family :: proc(k: ^Kernel, v: ^Operation) -> (Family, bool) {
 	case .From, .Put:
 		return .Scope, true
 	case .Item:
-		if set, known := values(k, v); known do return layout_family(k, set)
-		return read_family(k, v.args[0], "", -2)
+		if set, known := values(k, v); known do if f, one := layout_family(k, set); one do return f, true
+		if c, read := call_read(v); read do return call_family(k, c, true)
+		return {}, false
 	}
 	if is_string_value(t) do return .String, true
 	// a recursive call whose equation is being given fits any family
@@ -227,16 +229,12 @@ layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
 }
 
 // legal_signature: the first signature whose families are proven to hold the
-// operands. A recursive call has the family of its equation; while its equation
-// is being given, the operator on it is checked once it is (recursion.odin).
+// operands: each operand proven in the set the signature asks (§4.5). A recursive
+// call whose equation is being read is the hypothesis: the operator on it is checked
+// once the equation is given (check.odin).
 legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, bool) {
 	next: for sig in signatures(op) {
 		for a, i in args {
-			if c, is_call := as_call(a); is_call {
-				if f, known := call_family(k, c); known && !family_holds(sig.args[min(i, 1)], f) do continue next
-				continue
-			}
-			// what is read of a call being given: the hypothesis, checked once it is given
 			if is_pending_call(k, a) do continue
 			// an operation is in the family its signature gives: 100 / (n + 1) is an
 			// integer; a pattern, in that of its products, one of which it gives; a
@@ -842,25 +840,3 @@ literal :: proc(k: ^Kernel, t: Type) -> (Type, Type, bool) {
 bool_and :: proc(k: ^Kernel, a, b: Type) -> Type {return bool_law(k, .Bit_And, {a, b})}
 bool_or :: proc(k: ^Kernel, a, b: Type) -> Type {return bool_law(k, .Bit_Or, {a, b})}
 bool_not :: proc(k: ^Kernel, a: Type) -> Type {return bool_law(k, .Bit_Not, {a})}
-
-// read_family: the family of what is read of a call — its field `name`, or with
-// ordinal -2 any of its bindings —: that in the scopes the base cases of its
-// equation give, by induction (§5.6), when they agree.
-read_family :: proc(k: ^Kernel, target: Type, name: string, ordinal: int) -> (family: Family, ok: bool) {
-	c := as_call(target) or_return
-	s := c.target.(^Scope) or_return
-	root := origin(s)
-	p := first_production(k, root) or_return
-	found := false
-	for base in base_cases(binding_type(k, p), root) {
-		shape := given(k, base).(^Scope) or_continue
-		for b in placed(k, shape, .Value) {
-			if b.kind != .Push do continue
-			if ordinal != -2 && b.name != name do continue
-			f := family_of(k, binding_value(k, b)) or_return
-			if found && f != family do return {}, false
-			family, found = f, true
-		}
-	}
-	return family, found
-}

@@ -895,7 +895,7 @@ shape_of :: proc(l: ^Lowering, t: kernel.Type) -> (shape: ^kernel.Scope, ok: boo
 	case ^kernel.Unknown:
 		if v.call != nil do return shape_of(l, v.call)
 	case ^kernel.Collapse:
-		if !kernel.gives_scopes(l.k, v) do break
+		if !kernel.gives_scope(l.k, v) do break
 		root := kernel.origin(v.target.(^kernel.Scope))
 		p, _ := kernel.first_production(l.k, root)
 		return shape_of(l, kernel.base_cases(kernel.binding_type(l.k, p), root)[0])

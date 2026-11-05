@@ -33,10 +33,16 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
-	if call, ok := x.(^Collapse); ok && call.recursive && induction(k, call, c) do return Bool(true)
+	if call, ok := x.(^Collapse); ok && call.recursive && call_in(k, call, c) do return Bool(true)
 	// what a call with effects gives back: in c by the same induction (§5.6, §4.8)
-	if u, ok := x.(^Unknown); ok && u.call != nil && u.call.recursive && induction(k, u.call, c) do return Bool(true)
+	if u, ok := x.(^Unknown); ok && u.call != nil && u.call.recursive && call_in(k, u.call, c) do return Bool(true)
+	// a field, a binding, of what a call gives: in c when every field is (call_in)
+	if call, read := call_read(x); read && call_in(k, call, c, true) do return Bool(true)
 	if f, ok := x.(^Fold); ok && fold_induction(k, f, c) do return Bool(true)
+	// an operation on values is in the family its signature gives (§4.5)
+	if _, ok := x.(^Operation); ok && is_value(k, x) {
+		if f, known := family_of(k, x); known && same(k, c, family_term(f)) do return Bool(true)
+	}
 	if s, ok := c.(^Scope); ok {
 		// (t::L) in S: true when S holds L, false when they are apart
 		if !is_constant(x) {
@@ -228,42 +234,111 @@ ceil_div :: proc(x, y: i128) -> i128 {
 	return -floor_div(-x, y)
 }
 
-// induction: a recursive call is in c when its equation is, each call it makes
-// taken in c (§5.6): the equation the call reads, what it carves unknown.
+// call_in: a recursive call is in c (§5.6) — with fields, every field of the scope it
+// gives is: by induction on the equation it reads; when that equation cannot be read
+// where what the call carves is unknown (a hole the carve fills), the call is its
+// production at the values its carve gives (§5.3), its calls the hypothesis meanwhile.
+call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := false) -> bool {
+	s := call.target.(^Scope) or_return
+	root := origin(s)
+	eq, derived := equation_of(k, call)
+	if derived do return induction(k, eq, c, fields)
+	if eq == nil || reading(k, root) do return false
+	p := first_production(k, s) or_return
+	if p.state == .In_Progress do return false
+	eq.read = true
+	defer eq.read = false
+	return holds_in(k, binding_type(k, p), c, fields)
+}
+
+// induction: the calls of the equation eq are in c when the equation is, each call it
+// makes taken in c (§5.6); with fields, each read of a field of its calls taken in c.
+// While it is read, its calls are the hypothesis: nothing is proven yet.
 Induced :: struct {
 	equation: ^Scope,
 	set:      Type,
+	fields:   bool,
 	proven:   bool,
 }
 
-induction :: proc(k: ^Kernel, call: ^Collapse, c: Type) -> bool {
-	s := call.target.(^Scope) or_return
-	root := origin(s)
-	eq := equation_of(k, call) or_return
-	for x in k.induced do if x.equation == eq.generic && same(k, x.set, c) do return x.proven
-	if being_given(k, root) do return false
-	giving(k, root)
-	proven := induced(k, root, eq.equation, c)
-	pop(&k.asking)
-	append(&k.induced, Induced{eq.generic, c, proven})
+induction :: proc(k: ^Kernel, eq: ^Call_Equation, c: Type, fields: bool) -> bool {
+	for x in k.induced do if x.equation == eq.generic && x.fields == fields && same(k, x.set, c) do return x.proven
+	if reading(k, eq.root) do return false
+	at := len(k.induced)
+	append(&k.induced, Induced{eq.generic, c, fields, false})
+	proven := induced(k, eq.root, eq.equation, c, fields)
+	k.induced[at].proven = proven
 	return proven
 }
 
-induced :: proc(k: ^Kernel, root: ^Scope, e: Type, c: Type) -> bool {
+induced :: proc(k: ^Kernel, root: ^Scope, e: Type, c: Type, fields: bool) -> bool {
 	assumed: Rewrite
-	for inner in calls_in(k, e, root) {
+	taken :: proc(k: ^Kernel, c: Type) -> Type {
 		u := new_unknown(k, nil)
 		u.layout = c
-		assumed = rewriting_call(assumed, inner, u)
+		return u
 	}
+	if fields do for read in call_reads(k, e, root) do assumed = append_read(assumed, read, taken(k, c))
+	for inner in calls_in(k, e, root) do assumed = rewriting_call(assumed, inner, taken(k, fields ? EVERY_SCOPE : c))
 	// a call with effects: what it gives back, its answer, is taken in c likewise
-	for x in call_answers(k, e, root) {
-		u := new_unknown(k, nil)
-		u.layout = c
-		assumed = rewriting(assumed, x, u)
+	for x in call_answers(k, e, root) do assumed = rewriting(assumed, x, taken(k, fields ? EVERY_SCOPE : c))
+	// an effect is not a value: the verdict is read on what the effects wrap (§7)
+	return holds_in(k, given(k, rewrite(k, e, assumed)), c, fields)
+}
+
+// holds_in: v in c; with fields, v is a scope every field of which is in c — through
+// its patterns, which give one of their products (§6).
+holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: bool) -> bool {
+	if !fields {
+		verdict, _ := prove(k, in_law(k, given(k, v), c))
+		return verdict == .Proven
 	}
-	verdict, _ := prove(k, in_law(k, rewrite(k, e, assumed), c))
-	return verdict == .Proven
+	leaves := make([dynamic]Type)
+	products(given(k, v), &leaves)
+	for leaf in leaves {
+		if is_none(leaf) do continue
+		shape := leaf.(^Scope) or_return
+		for b in placed(k, shape, .Value) {
+			if b.kind != .Push && b.kind != .Expand do continue
+			verdict, _ := prove(k, in_law(k, given(k, binding_value(k, b)), c))
+			if verdict != .Proven do return false
+		}
+	}
+	return true
+}
+
+// call_read: x reads a field, or a binding, of a recursive call: the call.
+call_read :: proc(x: Type) -> (^Collapse, bool) {
+	#partial switch v in x {
+	case ^Access:
+		return as_call(v.target)
+	case ^Operation:
+		if v.op == .Item do return as_call(v.args[0])
+	}
+	return nil, false
+}
+
+// call_reads: the reads of fields, or bindings, of the calls of root in t.
+call_reads :: proc(k: ^Kernel, t: Type, root: ^Scope) -> []Type {
+	out := make([dynamic]Type)
+	visit :: proc(k: ^Kernel, t: Type, root: ^Scope, out: ^[dynamic]Type) {
+		if c, read := call_read(t); read {
+			if s, is_scope := c.target.(^Scope); is_scope && origin(s) == root do append(out, t)
+			return
+		}
+		#partial switch v in t {
+		case ^Effect:
+			if v.choice != nil do visit(k, v.choice, root, out)
+			visit(k, v.then, root, out)
+		case ^Pattern:
+			for b in v.branches do visit(k, b.product, root, out)
+		case ^Scope:
+			for b in placed(k, v, .Value) do if b.kind != .Product && b.kind != .Handler do visit(k, binding_type(k, b), root, out)
+		}
+		for p in parts(t) do visit(k, p, root, out)
+	}
+	visit(k, t, root, &out)
+	return out[:]
 }
 
 // call_answers: what the effects calling root in t give back.

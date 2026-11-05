@@ -12,8 +12,10 @@ import "core:strings"
 // solved — an iteration, in a closed form when it has one — or it stays. A call of
 // a solved equation substitutes its arguments into the solution.
 //
-// A recursive call has the family of its equation: that of its base cases. An
-// operator on it is checked once the equation is given.
+// A recursive call is read on its equation, where what it carves is unknown: what it
+// proves, by induction; the values it gives, as the scope of that equation, a color.
+// While the equation is read, its calls are the hypothesis: an operator on them is
+// checked once it is given.
 
 // recursive: the productions of a scope name it — the binding whose value it is —
 // directly or in a carve (§5.6); a carve of it is recursive with it.
@@ -101,20 +103,21 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 			}
 			// each call runs the effects of the solution: what they give back is new
 			run: Rewrite
-			if substitutable do return renewed(k, rewrite(k, solution, values), &run)
+			if substitutable do return renewed(k, substituted(k, solution, values), &run)
 		}
 	}
 	out := new(Collapse)
 	out.target, out.recursive, out.span = s, true, span
 	if root.effectful do return call_effect(k, out)
 	// a production that, at the values the carve gives, calls nothing is the value
-	// (§7); asked once, when the carve gives a known value, which may decide it
+	// (§7); asked when the carve gives a known value, which may decide it
 	decides := false
 	for _, v in s.changes do decides ||= is_constant(v)
-	if decides && s != root && !asked(k, root) {
-		giving(k, root)
-		defer pop(&k.asking)
-		if v, asked := call_production(k, out); asked && solved(v, root) do return v
+	if decides && s != root {
+		if v, eq, read := production_at(k, out); read {
+			eq.read = false
+			if solved(v, root) do return v
+		}
 	}
 	// a recursion over what a fold builds is the fold of the recursion
 	if s != root do for b, v in s.changes {
@@ -173,26 +176,19 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 	return true
 }
 
-// call_family: the family of a recursive call: that of the base cases of the
-// equation it calls, once given — false while it is being given.
-call_family :: proc(k: ^Kernel, c: ^Collapse) -> (Family, bool) {
+// call_family: the family a recursive call is proven in: `c in F` (§4.5, call_in);
+// with fields, the family every field of what it gives is proven in. None while its
+// equation is read: its calls are the hypothesis.
+call_family :: proc(k: ^Kernel, c: ^Collapse, fields := false) -> (Family, bool) {
 	s, ok := c.target.(^Scope)
-	if !ok do return {}, false
-	root := origin(s)
-	p, found := first_production(k, root)
-	if !found || p.state != .Done do return {}, false
-	if f, based := base_family(k, root, p.typed_value); based do return f, true
-	// read on the equation where what the calls carve is unknown, once
-	if being_given(k, root) do return {}, false
-	giving(k, root)
-	defer pop(&k.asking)
-	return equation_family(k, root, p.typed_value)
+	if !ok || !c.recursive || reading(k, origin(s)) do return {}, false
+	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) do if call_in(k, c, family_term(f), fields) do return f, true
+	return {}, false
 }
 
-// is_pending_call: a recursive call whose equation is being given: the hypothesis
-// of the induction, it fits any family.
+// is_pending_call: a recursive call whose equation is being read, or what is read
+// of it: the hypothesis of the induction, checked once the equation is given.
 is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
-	// what is read of it, a field or a binding, is pending with it
 	#partial switch v in t {
 	case ^Access:
 		return is_pending_call(k, v.target)
@@ -202,41 +198,17 @@ is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
 	c, ok := as_call(t)
 	if !ok do return false
 	s, is_scope := c.target.(^Scope)
-	return is_scope && being_given(k, origin(s))
+	return is_scope && reading(k, origin(s))
 }
 
-// being_given: the equation of root is being given — its production typed, or read
-// where what its calls carve is unknown (giving). Asked about itself meanwhile, it
-// answers with its calls as they are.
-being_given :: proc(k: ^Kernel, root: ^Scope) -> bool {
-	if asked(k, root) do return true
-	for b in root.bindings do if b.kind == .Product do return b.state == .In_Progress
+// reading: the equation of root is being read — its production typed, read where
+// what its calls carve is unknown (call_equation), or read at the values of a call
+// (production_at) —, as a binding is while it is given. Its calls are then the
+// hypothesis (§5.6).
+reading :: proc(k: ^Kernel, root: ^Scope) -> bool {
+	if p, found := first_production(k, root); found && p.state == .In_Progress do return true
+	for x in k.equations do if x.root == root && (!x.derived || x.read) do return true
 	return false
-}
-
-// asked: the equation of root is read where what its calls carve is unknown, or
-// its production asked at the values of a carve: asked again meanwhile, it would
-// not end.
-asked :: proc(k: ^Kernel, root: ^Scope) -> bool {
-	return slice.contains(k.asking[:], root)
-}
-
-// giving: root is being given until the deferred pop.
-giving :: proc(k: ^Kernel, root: ^Scope) {
-	append(&k.asking, root)
-}
-
-// equation_family: the family of the equation of root: that of its base cases,
-// the products that do not call it. When the values the scope holds reach none of
-// them, its calls carve those values: the family is read on the equation where
-// what they carve is an unknown of its color, root{n -> ?::C}.
-equation_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: bool) {
-	if f, based := base_family(k, root, e); based do return f, true
-	carved := carved_by_calls(k, e, root)
-	if len(carved) == 0 do return
-	generic := generic_equation(k, root, &carved) or_return
-	p := first_production(k, generic) or_return
-	return base_family(k, root, binding_type(k, p))
 }
 
 // carved_by_calls: the bindings the recursive calls of e carve.
@@ -272,18 +244,41 @@ generic_solution :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> 
 	key := make([dynamic]^Binding)
 	for b in given do append(&key, b)
 	slice.sort_by(key[:], proc(a, b: ^Binding) -> bool {return uintptr(a) < uintptr(b)})
-	for g in k.generics do if g.root == root && slice.equal(g.given, key[:]) {
-		rewrites: Rewrite
-		for b, u in g.params do rewrites = rewriting(rewrites, u.(^Unknown), b in given ? given[b] : binding_type(k, b))
-		return rewrite(k, renamed(k, g.solved), rewrites), true
-	}
+	for g in k.generics do if g.root == root && slice.equal(g.given, key[:]) do return substituted(k, g.solved, at_values(k, g.params, given)), true
 	// the bindings given, and those the calls carve, at the values root holds
 	eq := call_equation(k, root, key[:]) or_return
 	solved := iteration(k, eq.generic, eq.equation) or_return
 	append(&k.generics, Generic{root, key[:], eq.params, solved})
-	rewrites: Rewrite
-	for b, u in eq.params do rewrites = rewriting(rewrites, u.(^Unknown), b in given ? given[b] : binding_type(k, b))
-	return rewrite(k, solved, rewrites), true
+	return substituted(k, solved, at_values(k, eq.params, given)), true
+}
+
+// substituted: a solution at the values r gives (§5.6), its bound unknowns its own —
+// renamed once their layouts have followed the values.
+substituted :: proc(k: ^Kernel, solution: Type, r: Rewrite) -> Type {
+	return renamed(k, rewrite(k, solution, r))
+}
+
+// at_values: each unknown of params at the value given to its binding, or at the
+// value the scope holds.
+at_values :: proc(k: ^Kernel, params: map[^Binding]Type, given: map[^Binding]Type) -> (r: Rewrite) {
+	for b, u in params do r = rewriting(r, u.(^Unknown), b in given ? given[b] : binding_type(k, b))
+	return
+}
+
+// production_at: the production of the equation the call c reads, at the values its
+// carve gives (§5.6, §6). The equation is read until the caller closes it (eq.read):
+// meanwhile its calls are the hypothesis. Not read while it is already.
+production_at :: proc(k: ^Kernel, c: ^Collapse) -> (v: Type, eq: ^Call_Equation, ok: bool) {
+	s, is_scope := c.target.(^Scope)
+	if !is_scope || !c.recursive || reading(k, origin(s)) do return
+	eq = equation_of(k, c) or_return
+	eq.read = true
+	v = rewrite(k, eq.equation, at_values(k, eq.params, s.changes))
+	if holds_invalid(v) || has_effect(v) {
+		eq.read = false
+		return nil, nil, false
+	}
+	return v, eq, true
 }
 
 // Call_Equation: the equation a call of root reads: root's production where the bindings
@@ -295,16 +290,20 @@ Call_Equation :: struct {
 	generic:  ^Scope,
 	equation: Type,
 	params:   map[^Binding]Type,
+	derived:  bool, // read where what is carved is unknown; generic nil when it cannot be
+	read:     bool, // read at the values of a call (production_at, call_in)
 }
 
 // call_equation: the equation of root a call carving the bindings given reads,
 // given sorted by address.
-call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding) -> (eq: Call_Equation, ok: bool) {
+call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding) -> (eq: ^Call_Equation, ok: bool) {
 	for x in k.equations do if x.root == root && slice.equal(x.given, given) do return x, x.generic != nil
 	// while it is read, its calls are the hypothesis: their equation is not read yet,
 	// as a binding asked while it is given
-	at := len(k.equations)
-	append(&k.equations, Call_Equation{root = root, given = slice.clone(given)})
+	eq = new(Call_Equation)
+	eq.root, eq.given = root, slice.clone(given)
+	append(&k.equations, eq)
+	defer eq.derived = true
 	params := make(map[^Binding]Type)
 	for b in given do params[b] = nil
 	for {
@@ -318,8 +317,7 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding) -> (eq: Call_
 			more = true
 		}
 		if !more {
-			eq = Call_Equation{root, k.equations[at].given, generic, equation, params}
-			k.equations[at] = eq
+			eq.generic, eq.equation, eq.params = generic, equation, params
 			return eq, true
 		}
 	}
@@ -327,7 +325,7 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding) -> (eq: Call_
 }
 
 // equation_of: the equation the call c reads.
-equation_of :: proc(k: ^Kernel, c: ^Collapse) -> (eq: Call_Equation, ok: bool) {
+equation_of :: proc(k: ^Kernel, c: ^Collapse) -> (eq: ^Call_Equation, ok: bool) {
 	s := c.target.(^Scope) or_return
 	key := make([dynamic]^Binding)
 	for b in s.changes do append(&key, b)
@@ -351,18 +349,6 @@ holding :: proc(s: ^Scope, b: ^Binding) -> ^Binding {
 	return b
 }
 
-// base_family: the family of the base cases of e; false when there are none, or
-// not of one family.
-base_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: bool) {
-	f: Maybe(Family)
-	for b in base_cases(e, root) {
-		g := family_of(k, b) or_return
-		if current, set := f.?; set && current != g do return {}, false
-		f = g
-	}
-	return f.?
-}
-
 // base_cases: the products of e that do not call root, through the effects that wrap
 // them (§4.8).
 base_cases :: proc(e: Type, root: ^Scope) -> []Type {
@@ -374,19 +360,6 @@ base_cases :: proc(e: Type, root: ^Scope) -> []Type {
 		append(&out, e)
 	}
 	return out[:]
-}
-
-// gives_scopes: a recursive call whose equation has scopes for base cases: by
-// induction, it gives a scope, and `...` places it (§5.6).
-gives_scopes :: proc(k: ^Kernel, c: ^Collapse) -> bool {
-	s, ok := c.target.(^Scope)
-	if !ok || !c.recursive do return false
-	root := origin(s)
-	p, found := first_production(k, root)
-	if !found do return false
-	bases := base_cases(binding_type(k, p), root)
-	for b in bases do if _, is_scope := b.(^Scope); !is_scope do return false
-	return len(bases) > 0
 }
 
 // production_law: the value of a production. In a recursive scope, the equation —
@@ -430,56 +403,6 @@ effects_elsewhere :: proc(k: ^Kernel, root: ^Scope) -> bool {
 	generic := generic_equation(k, root, &fields) or_return
 	p := first_production(k, generic) or_return
 	return has_effect(with_effects(k, generic, p, binding_type(k, p)))
-}
-
-// operations_on_calls: the operations of t that take a recursive call of root.
-operations_on_calls :: proc(t: Type, root: ^Scope) -> []^Operation {
-	out := make([dynamic]^Operation)
-	visit :: proc(t: Type, root: ^Scope, out: ^[dynamic]^Operation) {
-		#partial switch v in t {
-		case ^Operation:
-			for a in v.args {
-				c, is_call := as_call(a)
-				if !is_call do continue
-				if s, is_scope := c.target.(^Scope); is_scope && origin(s) == root {
-					append(out, v)
-					break
-				}
-			}
-			for a in v.args do visit(a, root, out)
-		case ^Pattern:
-			for b in v.branches do visit(b.product, root, out)
-		case ^Or:
-			for a in v.terms do visit(a, root, out)
-		case ^And:
-			for a in v.terms do visit(a, root, out)
-		case ^Not:
-			visit(v.term, root, out)
-		case ^Effect:
-			if v.choice != nil do visit(v.choice, root, out)
-			visit(v.then, root, out)
-		}
-	}
-	visit(t, root, &out)
-	return out[:]
-}
-
-// legal_on_call: a signature of the operator holds its operands, the recursive
-// calls being of the family f.
-legal_on_call :: proc(k: ^Kernel, o: ^Operation, f: Family) -> bool {
-	// a read of a run is legal on what gives scopes (run_law)
-	if reads_run(o.op) do return f == .Scope
-	next: for sig in signatures(o.op) {
-		for a, i in o.args {
-			if _, is_call := as_call(a); is_call {
-				if !family_holds(sig.args[min(i, 1)], f) do continue next
-				continue
-			}
-			if !proven_in(k, a, family_term(sig.args[min(i, 1)])) do continue next
-		}
-		return true
-	}
-	return false
 }
 
 // solve: the solution of the equation (§5.6): its iteration, when it is a
@@ -1806,11 +1729,14 @@ call_image :: proc(k: ^Kernel, call: ^Collapse) -> (image: Type, ok: bool) {
 		for t in key do if !slice.contains(x.through, t) do continue next
 		return x.image, x.ok
 	}
-	if being_given(k, root) do return
-	giving(k, root)
+	// while the equation, or one it reads through, is read, its calls are the
+	// hypothesis: no bounds yet; while they are read, neither
+	if reading(k, root) do return
+	for t in key do if reading(k, t.equation) do return
+	at := len(k.images)
+	append(&k.images, Image{root = root, through = key[:]})
 	image, ok = bounded_call(k, call, s, root)
-	pop(&k.asking)
-	append(&k.images, Image{root, key[:], image, ok})
+	k.images[at] = Image{root, key[:], image, ok}
 	return
 }
 
@@ -1834,7 +1760,10 @@ bounded_call :: proc(k: ^Kernel, call: ^Collapse, s, root: ^Scope) -> (image: Ty
 	// a call of the base whose production, at its values, calls nothing is that
 	// production (§7)
 	asked: Rewrite
-	for x in calls_in(k, c, root) do if v, given := call_production(k, x); given && solved(v, root) do asked = rewriting_call(asked, x, v)
+	for x in calls_in(k, c, root) do if v, read, given := production_at(k, x); given {
+		read.read = false
+		if solved(v, root) do asked = rewriting_call(asked, x, v)
+	}
 	c = rewrite(k, c, asked)
 	if !solved(c, root) do return
 	// every call moves the counter by the same step
@@ -1913,66 +1842,6 @@ bounded_call :: proc(k: ^Kernel, call: ^Collapse, s, root: ^Scope) -> (image: Ty
 	_, top := int_bounds(k, hi_image) or_return
 	least, _ := int_bounds(k, lo_image) or_return
 	return range_law(k, Int(least.? or_return), Int(top.? or_return), .Int, e.span), true
-}
-
-// call_type: the type of a recursive call that stays: the scope of its equation
-// (§5.6). Its productions are the products of the equation the call reads, each
-// call of the equation in them the scope itself, a scope product the shape of what
-// its bindings hold: X = P(X), an equation in a scope like any other — Arden, `in`
-// and the reads of a scope read it. A product over the scope that is not a scope
-// leaves the type to the other laws.
-call_type :: proc(k: ^Kernel, call: ^Collapse) -> (t: ^Scope, ok: bool) {
-	if !call.recursive do return
-	s := call.target.(^Scope) or_return
-	root := origin(s)
-	eq := equation_of(k, call) or_return
-	if x, read := k.call_types[eq.generic]; read do return x, x != nil
-	k.call_types[eq.generic] = nil
-	own :: proc(t: Type, root: ^Scope) -> bool {
-		c, is_call := as_call(t)
-		if !is_call do return false
-		s, is_scope := c.target.(^Scope)
-		return is_scope && origin(s) == root
-	}
-	// the scope, held by a binding its productions name
-	host := new_scope(nil, call.span)
-	host.source, host.complete, host.reached = host, true, true
-	named := new_binding(host, .Push, call.span)
-	t = new_scope(host, call.span)
-	t.source, t.complete, t.reached = t, true, true
-	named.value = t
-	itself := new(Name)
-	itself.binding, itself.span = named, call.span
-	leaves := make([dynamic]Type)
-	products(eq.equation, &leaves)
-	for leaf in leaves {
-		if own(leaf, root) do continue
-		production := new_binding(t, .Product, call.span)
-		product, is_scope := given(k, leaf).(^Scope)
-		if !is_scope {
-			if !solved(leaf, root) do return nil, false
-			production.value = values(k, given(k, leaf)) or_return
-			continue
-		}
-		// the shape of what the product holds: each binding, what it may hold
-		shape := new_scope(t, call.span)
-		shape.source, shape.complete, shape.reached = shape, true, true
-		for b in placed(k, product, .Value) {
-			if b.kind != .Push && b.kind != .Expand do return nil, false
-			place := new_binding(shape, b.kind, b.span)
-			place.name = b.name
-			v := binding_value(k, b)
-			if own(v, root) {
-				place.color = itself
-			} else {
-				if !solved(v, root) do return nil, false
-				place.color = values(k, given(k, v)) or_return
-			}
-		}
-		production.value = shape
-	}
-	k.call_types[eq.generic] = t
-	return t, true
 }
 
 // products: the products t may give: a pattern without effects, those of its
@@ -2335,16 +2204,13 @@ tupled :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
 // built (§5.6). y takes the structure of u(y), as every state after the first.
 over_fold :: proc(k: ^Kernel, s: ^Scope, field: ^Binding, f: ^Fold, span: syn.Span) -> (out: Type, ok: bool) {
 	root := origin(s)
-	if !is_none(f.effects) || asked(k, root) do return
+	if !is_none(f.effects) do return
 	at := -1
 	for z, i in f.states do if same(k, f.value, z) do at = i
 	if at < 0 do return
 	y := f.states[at]
 	step := f.updates[at].(^Scope) or_return
 	for t, j in f.updates do if j != at && reads(k, t, y) do return
-	giving(k, root)
-	defer pop(&k.asking)
-	// y as every state after the first: of the structure of u
 	// y as every state after the first: the shape of u, a place holding y in the
 	// color of the field, as the states are (fold_induction)
 	shape := new_scope(nil, step.span)
@@ -2371,8 +2237,10 @@ over_fold :: proc(k: ^Kernel, s: ^Scope, field: ^Binding, f: ^Fold, span: syn.Sp
 	}
 	first := call(k, s, root, field, f.inits[at], span) or_return
 	next := call(k, s, root, field, rewrite(k, step, rewriting(nil, y, z)), span) or_return
-	init := call_production(k, first) or_return
-	value := call_production(k, next) or_return
+	init, init_read := production_at(k, first) or_return
+	init_read.read = false
+	value, value_read := production_at(k, next) or_return
+	value_read.read = false
 	// f{t -> y}!, the other fields as in s: w
 	w := new_unknown(k, nil)
 	family := family_of(k, init) or_return

@@ -35,7 +35,7 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 		if b.value == nil && b.color == nil do continue
 		v := binding_value(k, b) // an expansion of a run places what the run gives
 		if x, known := v.(^Scope); known do append(&out, ..placed(k, x, view))
-		else if gives_scope(k, v) do append(&out, b)
+		else if gives_scope(k, v) || is_pending_call(k, v) do append(&out, b) // a call being read: the hypothesis
 	}
 	return out[:]
 }
@@ -44,7 +44,11 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
 	v := given(k, t)
 	if _, is_scope := v.(^Scope); is_scope do return true
-	if c, is_call := as_call(v); is_call do return gives_scopes(k, c)
+	// a call: proven in the scopes, by induction (§5.6)
+	if c, is_call := as_call(v); is_call {
+		f, known := call_family(k, c)
+		return known && f == .Scope
+	}
 	set, ok := values(k, v)
 	if !ok do return false
 	one: [1]Type
@@ -1359,37 +1363,6 @@ length_image :: proc(k: ^Kernel, layout: Type) -> (n: Type, ok: bool) {
 	return n, true
 }
 
-// call_length: the lengths of the runs a recursive call gives: those of the runs
-// each product of its equation places, through its patterns; a product that calls
-// the equation gives what the call gives.
-call_length :: proc(k: ^Kernel, c: ^Collapse) -> (n: Type, ok: bool) {
-	s := c.target.(^Scope) or_return
-	root := origin(s)
-	p := first_production(k, root) or_return
-	if p.state != .Done do return
-	lengths := make([dynamic]Type)
-	gather :: proc(k: ^Kernel, t: Type, root: ^Scope, out: ^[dynamic]Type) -> bool {
-		#partial switch v in t {
-		case ^Pattern:
-			for b in v.branches do if !gather(k, b.product, root, out) do return false
-			return true
-		case ^Scope:
-			n: Type = Int(0)
-			for b in run_data(k, v) {
-				if b.kind == .Expand do return false
-				n = op(k, .Add, n, Int(1))
-			}
-			append(out, n)
-			return true
-		}
-		// what the equation gives back: the lengths gathered from its other products
-		if call, is_call := as_call(t); is_call && origin(call.target.(^Scope) or_else nil) == root do return true
-		return false
-	}
-	if !gather(k, binding_type(k, p), root, &lengths) || len(lengths) == 0 do return
-	return or_law(k, lengths[:]), true
-}
-
 // suffix: the runs that follow the place at of the runs a layout admits (§5.3): a
 // shape without its first places, at a known place; at a place not known, any of
 // those from 0 to the end of its places, a run of pieces holding its own suffixes.
@@ -1563,8 +1536,6 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 	}
 	if o.op == .Length {
 		if set, known := values(k, o.args[0]); known do if n, read := length_image(k, set); read do return n, true
-		// a call: the lengths of the runs its productions give
-		if c, is_call := as_call(o.args[0]); is_call do if n, read := call_length(k, c); read do return n, true
 		// otherwise a count of bindings: 0..
 		if _, _, pieces := run_pieces(k, o.args[0]); !pieces do return COUNTS, true
 	}

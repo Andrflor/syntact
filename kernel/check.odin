@@ -132,25 +132,19 @@ takes_recursive_call :: proc(o: ^Operation) -> bool {
 	return false
 }
 
-// call_applies: an operator on a recursive call applies to the family of the
-// equation the call is a value of: that of its base cases, by induction (§5.6).
+// call_applies: an operator on a recursive call, taken while its equation was read
+// (the hypothesis), applies once it is given: its operands are proven in the sets a
+// signature asks (§4.5), the call by induction (§5.6); a read of a run, on what gives
+// scopes.
 call_applies :: proc(k: ^Kernel, o: ^Operation) -> bool {
-	root: ^Scope
-	for a in o.args {
-		if c, ok := as_call(a); ok {
-			if s, is_scope := c.target.(^Scope); is_scope do root = origin(s)
-		}
+	switch {
+	case o.op == .In:
+		return true
+	case reads_run(o.op):
+		if gives_scope(k, o.args[0]) do return true
+	case:
+		if _, legal := legal_signature(k, o.op, o.args); legal do return true
 	}
-	p, found := first_production(k, root)
-	if !found do return true
-	f, based := equation_family(k, root, binding_type(k, p))
-	if !based {
-		report(k, .Invalid_operator, o.span, fmt.tprintf("`%s` applies to a recursive call, and the equation has no base case to give its family", operator_text[o.op]))
-		return false
-	}
-	if !legal_on_call(k, o, f) {
-		report(k, .Invalid_operator, o.span, fmt.tprintf("`%s` is not proven to apply to %s, a recursive call in %v", operator_text[o.op], print_types(o.args), f))
-		return false
-	}
-	return true
+	report(k, .Invalid_operator, o.span, fmt.tprintf("`%s` is not proven to apply to %s", operator_text[o.op], print_types(o.args)))
+	return false
 }

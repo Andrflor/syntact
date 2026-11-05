@@ -1171,7 +1171,11 @@ at those values, the production calls nothing, it is the value of the call:
 A call reads its equation where what it carves, and what its calls carve, are
 unknowns of their colors: never at the values its fields hold by default. What a
 call proves — by induction, a call in c when its equation is, each call it makes
-taken in c — holds for every value of those fields.
+taken in c — holds for every value of those fields. A field of what it gives is in c
+when every field of each scope the equation gives is, each field of its calls taken
+in c. While the equation is read, where what is carved is unknown or at the values
+of a call, its calls are the hypothesis: they stay calls, and nothing is proven of
+them yet.
 
 The values of a call that stays are bounded by the recursion of its bounds: each
 call taken at the bound y of the step after, the rest at its own bounds, the

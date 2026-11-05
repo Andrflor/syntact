@@ -344,7 +344,7 @@ narrowing :: proc(u: ^Unknown, l: Type) -> Type {
 layout_of :: proc(k: ^Kernel, u: ^Unknown) -> Type {
 	if u.layout != nil do return u.layout
 	if u.written != nil do return normal(k, u.written)
-	// what a recursive call gives back: a value of the family of its equation
+	// what a recursive call gives back: a value of the family it is proven in
 	if u.call != nil do if f, known := call_family(k, u.call); known do return family_term(f)
 	return everything()
 }
@@ -420,9 +420,13 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// what it may hold: from the least of its lower bound to the greatest of its upper
 		return outer_set(k, t)
 	case ^Collapse:
+		// a call that stays: bounded by the recursion of its bounds (§5.6); giving
+		// scopes, the scope of its equation, read as a color (§5.4); otherwise the
+		// family it is proven in
 		if image, known := call_image(k, v); known do return image, true
-		if image, known := call_type(k, v); known do return image, true
-		if f, known := family_of(k, v); known do return family_term(f), true
+		f := family_of(k, v) or_return
+		if f == .Scope do if eq, read := equation_of(k, v); read do return eq.generic, true
+		return family_term(f), true
 	case ^Fold:
 		// a sum along the fold: its init, and as many terms as steps
 		if image, known := sum_image(k, v); known do return image, true
