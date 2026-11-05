@@ -6,7 +6,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.file_path // empty' | grep -q '\\.odin$' && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"ALGEBRA CHECK: Which law of specs/types.md does this edit implement, and where does the kernel already implement it? If this is a special path, a workaround, a second version of an existing mechanism, or a case added to make a test pass, it is ad hoc: stop and go back to the algebra (AGENTS.md).\"}}' || true"
+            "command": "jq -r '.tool_input.file_path // empty' | grep -q '\\.odin$' && echo '{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"ALGEBRA CHECK: Which law of specs/types.md does this edit implement, and where does the kernel already implement it? If this is a special path, a workaround, a second version of an existing mechanism, or a case added to make a test pass, it is ad hoc: stop and go back to the algebra (AGENTS.md). Smells that mean the approach is wrong: guards, context stacks or flags saying where a fact holds, caches whose answer depends on where they are asked, unfolding a recursion or applying its steps one by one, evaluating at compile time what a law solves. Everything - kernel, memory, code generation, vectorization - is algebraic transformation and simplification by laws; correct laws first, speed after (in reasonable time).\"}}' || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // empty' | grep -q '\\.odin' && echo '{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"ALGEBRA CHECK: Which law of specs/types.md does this edit implement, and where does the kernel already implement it? If this is a special path, a workaround, a second version of an existing mechanism, or a case added to make a test pass, it is ad hoc: stop and go back to the algebra (AGENTS.md). Smells that mean the approach is wrong: guards, context stacks or flags saying where a fact holds, caches whose answer depends on where they are asked, unfolding a recursion or applying its steps one by one, evaluating at compile time what a law solves. Everything - kernel, memory, code generation, vectorization - is algebraic transformation and simplification by laws; correct laws first, speed after (in reasonable time).\"}}' || true"
           }
         ]
       }
