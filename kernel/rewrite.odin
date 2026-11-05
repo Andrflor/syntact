@@ -403,14 +403,17 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		for a, i in v.terms do terms[i] = layout_image(k, a) or_return
 		return or_law(k, terms), true
 	case ^And:
-		// what each says: a value its image, a set itself
-		terms := make([]Type, len(v.terms))
-		for a, i in v.terms {
-			terms[i] = values(k, a) or_return
+		// what each says: a value its image, a set itself; a term whose values are not
+		// read bounds nothing, ~none, and a & ~none = a (§4.1): x & C lies in C
+		terms := make([dynamic]Type, 0, len(v.terms))
+		for a in v.terms {
+			set := values(k, a) or_continue
 			// a set the laws keep written, u8 % 3: the range that bounds it
-			if _, written := terms[i].(^Operation); written do terms[i] = int_hull(k, terms[i])
+			if _, written := set.(^Operation); written do set = int_hull(k, set)
+			append(&terms, set)
 		}
-		return and_law(k, terms), true
+		if len(terms) == 0 do return nil, false
+		return and_law(k, terms[:]), true
 	case ^Not:
 		return not_law(k, layout_image(k, v.term) or_return), true
 	case ^Is:
