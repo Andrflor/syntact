@@ -254,21 +254,25 @@ induced :: proc(k: ^Kernel, root: ^Scope, c: Type) -> bool {
 	return verdict == .Proven
 }
 
-// fold_induction: a fold is in c when its states start in c, stay in c at each
-// step, and its value is in c, each state taken in c.
+// fold_induction: a fold is in c when the states its value reads start in c, stay
+// in c at each step, and its value is in c, each of those states taken in c; the
+// other states are what their layouts say.
 fold_induction :: proc(k: ^Kernel, f: ^Fold, c: Type) -> bool {
 	assumed: Rewrite
-	for z in f.states {
+	taken := make([]bool, len(f.states))
+	for z, i in f.states {
+		if !reads(k, f.value, z) do continue
 		u := new_unknown(k, nil)
 		u.layout = c
 		assumed = rewriting(assumed, z, u)
+		taken[i] = true
 	}
 	holds :: proc(k: ^Kernel, t, c: Type) -> bool {
 		verdict, _ := prove(k, in_law(k, t, c))
 		return verdict == .Proven
 	}
-	for t in f.inits do if !holds(k, t, c) do return false
-	for t in f.updates do if !holds(k, rewrite(k, t, assumed), c) do return false
+	for t, i in f.inits do if taken[i] && !holds(k, t, c) do return false
+	for t, i in f.updates do if taken[i] && !holds(k, rewrite(k, t, assumed), c) do return false
 	return holds(k, rewrite(k, f.value, assumed), c)
 }
 

@@ -1209,6 +1209,14 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		}
 		return nil, false
 	}
+	// a run a fold builds: its bindings are what each step places
+	if f, is_fold := o.args[0].(^Fold); is_fold && o.op == .Item {
+		if _, es, builds := built(k, f); builds {
+			images := make([]Type, len(es))
+			for e, i in es do images[i] = layout_image(k, e) or_return
+			return or_law(k, images), true
+		}
+	}
 	pieces, m := run_pieces(k, o.args[0]) or_return
 	shape := pieces.(^Scope) or_return
 	places := placed(k, shape, .Shape)

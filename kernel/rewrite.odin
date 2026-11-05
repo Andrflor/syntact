@@ -177,7 +177,12 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		return as_normal(p)
 	case ^Scope:
 		return rewrite_carve(k, v, r)
-	case ^Name, ^Access, ^Carve, ^Default:
+	case ^Access:
+		// x.a, x rewritten: the field of what x becomes
+		target := rewrite(k, v.target, r)
+		if target == v.target do return t
+		return as_normal(access_law(k, target, v))
+	case ^Name, ^Carve, ^Default:
 	}
 	return t
 }

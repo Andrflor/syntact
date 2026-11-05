@@ -140,6 +140,8 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 	case ^Collapse:
 		if v.recursive do return call_family(k, v)
 	case ^Access:
+		// the family of the color of the field, or of what a call places there
+		if image, known := layout_image(k, t); known do if f, one := layout_family(k, image); one do return f, true
 		return read_family(k, v.target, v.name, v.ordinal)
 	case ^Fold:
 		return family_of(k, v.value)

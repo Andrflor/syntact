@@ -548,9 +548,13 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	}
 	alpha, beta, affine := affine_in(k, v, ys[0])
 	if modulus != nil && affine && !(proven_in(k, alpha, COUNTS) && proven_in(k, beta, COUNTS)) do return
+	// v = {...P  ...y  ...Q}: affine in the runs, which compose likewise:
+	// (A, B) ∘ (P, Q) = ({...A ...P}, {...Q ...B})
+	prefix, suffix, joins := run_affine(k, v, ys[0])
+	if joins && modulus != nil do return
 	// v = y: A = 1 and B = 0 at every step, so the value is c
 	tail := affine && is_int(alpha, 1) && is_int(beta, 0)
-	if len(calls) != 1 || len(post) > 0 || !affine || family != .Int && !tail do return
+	if len(calls) != 1 || len(post) > 0 || !affine && !joins || family != .Int && !tail && !joins do return
 	modded :: proc(k: ^Kernel, t, m: Type) -> Type {return m == nil ? t : op(k, .Mod, t, m)}
 	// going down: the states the call carries, and the composed map (A, B)
 	f := new(Fold)
@@ -576,7 +580,24 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	for w in inits do append(&updates, rewrite(k, carried[w.(^Unknown)], along))
 	f.effects = rewrite(k, wrap_effects(pre, None{}), along)
 	f.value = rewrite(k, c, at_end)
-	if !tail {
+	if joins {
+		// A, and B when Q places something: without, B is {} at every step
+		a := new_unknown(k, nil)
+		a.layout = family_term(.Scope)
+		append(&states, a)
+		append(&inits, joined(k, nil))
+		append(&updates, joined(k, {a}, prefix, along))
+		last := []Type{}
+		if len(suffix) > 0 {
+			b := new_unknown(k, nil)
+			b.layout = family_term(.Scope)
+			append(&states, b)
+			append(&inits, joined(k, nil))
+			append(&updates, joined(k, nil, suffix, along, {b}))
+			last = {b}
+		}
+		f.value = joined(k, {a, f.value}, nil, nil, last)
+	} else if !tail {
 		a, b := new_unknown(k, nil), new_unknown(k, nil)
 		a.layout, b.layout = family_term(.Int), family_term(.Int)
 		if modulus != nil do a.layout, b.layout = COUNTS, COUNTS
@@ -587,6 +608,50 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	}
 	f.states, f.inits, f.updates = states[:], inits[:], updates[:]
 	return folded(k, f), true
+}
+
+// run_affine: v = {...P  ...y  ...Q}, a run that places y once, as a run, and
+// whose other bindings do not read y: the bindings P before it and Q after it.
+run_affine :: proc(k: ^Kernel, v: Type, y: ^Unknown) -> (prefix, suffix: []^Binding, ok: bool) {
+	s := v.(^Scope) or_return
+	xs := run_data(k, s)
+	at := -1
+	for b, i in xs {
+		x := binding_value(k, b)
+		if b.kind == .Expand && at < 0 {
+			if u, is_y := x.(^Unknown); is_y && same_unknown(u, y) {
+				at = i
+				continue
+			}
+		}
+		if reads(k, x, y) do return
+	}
+	if at < 0 do return
+	return xs[:at], xs[at + 1:], true
+}
+
+// joined: the run of the runs first, the bindings of the run between, rewritten by
+// r, then the runs last: {...a₀ … ...aₙ  x₀ … xₘ  ...b₀ … ...bₗ}. A run known to
+// be a scope places its bindings (§5.3).
+joined :: proc(k: ^Kernel, first: []Type, between: []^Binding = nil, r: Rewrite = nil, last: []Type = nil) -> Type {
+	s := new_scope(nil, {})
+	s.source, s.complete, s.reached = s, true, true
+	place :: proc(k: ^Kernel, s: ^Scope, kind: Kind, t: Type) {
+		if kind == .Expand {
+			if known, is_scope := given(k, t).(^Scope); is_scope {
+				for x in run_data(k, known) do place(k, s, x.kind, binding_value(k, x))
+				return
+			}
+		}
+		b := new_binding(s, kind, {})
+		b.value = t
+	}
+	for t in first do place(k, s, .Expand, t)
+	for x in between do place(k, s, x.kind, rewrite(k, binding_value(k, x), r))
+	for t in last do place(k, s, .Expand, t)
+	// {...x} is the run x
+	if len(s.bindings) == 1 && s.bindings[0].kind == .Expand do return s.bindings[0].value
+	return normal(k, s)
 }
 
 // orbit_step: the step s of the orbit the calls follow, and how far along it each
