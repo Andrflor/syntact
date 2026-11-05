@@ -301,6 +301,10 @@ Call_Equation :: struct {
 // given sorted by address.
 call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding) -> (eq: Call_Equation, ok: bool) {
 	for x in k.equations do if x.root == root && slice.equal(x.given, given) do return x, x.generic != nil
+	// while it is read, its calls are the hypothesis: their equation is not read yet,
+	// as a binding asked while it is given
+	at := len(k.equations)
+	append(&k.equations, Call_Equation{root = root, given = slice.clone(given)})
 	params := make(map[^Binding]Type)
 	for b in given do params[b] = nil
 	for {
@@ -314,12 +318,11 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding) -> (eq: Call_
 			more = true
 		}
 		if !more {
-			eq = Call_Equation{root, slice.clone(given), generic, equation, params}
-			append(&k.equations, eq)
+			eq = Call_Equation{root, k.equations[at].given, generic, equation, params}
+			k.equations[at] = eq
 			return eq, true
 		}
 	}
-	append(&k.equations, Call_Equation{root = root, given = slice.clone(given)})
 	return
 }
 
@@ -1910,6 +1913,66 @@ bounded_call :: proc(k: ^Kernel, call: ^Collapse, s, root: ^Scope) -> (image: Ty
 	_, top := int_bounds(k, hi_image) or_return
 	least, _ := int_bounds(k, lo_image) or_return
 	return range_law(k, Int(least.? or_return), Int(top.? or_return), .Int, e.span), true
+}
+
+// call_type: the type of a recursive call that stays: the scope of its equation
+// (§5.6). Its productions are the products of the equation the call reads, each
+// call of the equation in them the scope itself, a scope product the shape of what
+// its bindings hold: X = P(X), an equation in a scope like any other — Arden, `in`
+// and the reads of a scope read it. A product over the scope that is not a scope
+// leaves the type to the other laws.
+call_type :: proc(k: ^Kernel, call: ^Collapse) -> (t: ^Scope, ok: bool) {
+	if !call.recursive do return
+	s := call.target.(^Scope) or_return
+	root := origin(s)
+	eq := equation_of(k, call) or_return
+	if x, read := k.call_types[eq.generic]; read do return x, x != nil
+	k.call_types[eq.generic] = nil
+	own :: proc(t: Type, root: ^Scope) -> bool {
+		c, is_call := as_call(t)
+		if !is_call do return false
+		s, is_scope := c.target.(^Scope)
+		return is_scope && origin(s) == root
+	}
+	// the scope, held by a binding its productions name
+	host := new_scope(nil, call.span)
+	host.source, host.complete, host.reached = host, true, true
+	named := new_binding(host, .Push, call.span)
+	t = new_scope(host, call.span)
+	t.source, t.complete, t.reached = t, true, true
+	named.value = t
+	itself := new(Name)
+	itself.binding, itself.span = named, call.span
+	leaves := make([dynamic]Type)
+	products(eq.equation, &leaves)
+	for leaf in leaves {
+		if own(leaf, root) do continue
+		production := new_binding(t, .Product, call.span)
+		product, is_scope := given(k, leaf).(^Scope)
+		if !is_scope {
+			if !solved(leaf, root) do return nil, false
+			production.value = values(k, given(k, leaf)) or_return
+			continue
+		}
+		// the shape of what the product holds: each binding, what it may hold
+		shape := new_scope(t, call.span)
+		shape.source, shape.complete, shape.reached = shape, true, true
+		for b in placed(k, product, .Value) {
+			if b.kind != .Push && b.kind != .Expand do return nil, false
+			place := new_binding(shape, b.kind, b.span)
+			place.name = b.name
+			v := binding_value(k, b)
+			if own(v, root) {
+				place.color = itself
+			} else {
+				if !solved(v, root) do return nil, false
+				place.color = values(k, given(k, v)) or_return
+			}
+		}
+		production.value = shape
+	}
+	k.call_types[eq.generic] = t
+	return t, true
 }
 
 // products: the products t may give: a pattern without effects, those of its

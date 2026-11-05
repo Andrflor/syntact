@@ -421,6 +421,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return outer_set(k, t)
 	case ^Collapse:
 		if image, known := call_image(k, v); known do return image, true
+		if image, known := call_type(k, v); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Fold:
 		// a sum along the fold: its init, and as many terms as steps
