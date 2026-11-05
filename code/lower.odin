@@ -261,6 +261,9 @@ computed :: proc(t: kernel.Type) -> bool {
 		return !kernel.is_string_value(t)
 	case ^kernel.Pattern, ^kernel.Fold, ^kernel.Least, ^kernel.Series, ^kernel.Recurrent:
 		return !kernel.has_effect(t)
+	case ^kernel.Collapse:
+		// a call of an equation without effect: a function of its arguments
+		return v.recursive && !kernel.has_effect(t)
 	}
 	return false
 }
@@ -941,6 +944,8 @@ field :: proc(l: ^Lowering, a: ^kernel.Access) -> []Value {
 		x := lower_values(l, a.target)
 		if l.error != "" do return nil
 		if tree, held := held_pair(l, x); held && tree.kind == .Tree do return tree_field(l, x, tree, a.name)
+		// #k, the place k of a run: read by place (§5.3), the binding at k
+		if run, held := held_run(l, x); held && a.name == "" && a.ordinal >= 0 do return load(l, element(l, x[0], constant(l, i128(a.ordinal)), run), 0, run.item)
 		if lay, laid := layout_of_term(l, a.target); laid && lay.kind == .Fields && layout_width(lay) == len(x) do return fields_field(l, x, lay, a.name)
 		return fail_values(l, "%s is not a value the code computes yet", kernel.print_type(a))
 	}
@@ -1388,7 +1393,18 @@ in_run :: proc(l: ^Lowering, x: kernel.Type, c: kernel.Type) -> Value {
 	for p, i in places {
 		at := kernel.run_law(l.k, .Item, {x, kernel.Int(i)}, p.span, true)
 		if !kernel.is_run(p) {
-			if p.color != nil do append(&tests, kernel.normal(l.k, kernel.in_law(l.k, at, kernel.binding_color(l.k, p))))
+			// a place written with its value holds what that value may be; else its
+			// color. x.#i is read where it is checked to be there: the test is the
+			// law's, as it is
+			set: kernel.Type
+			if p.value != nil {
+				valued: bool
+				set, valued = kernel.values(l.k, kernel.binding_value(l.k, p))
+				if !valued do return fail(l, "a cover %s that tests %s is not code yet", kernel.print_type(c), kernel.print_type(kernel.binding_value(l.k, p)))
+			} else if p.color != nil {
+				set = kernel.binding_color(l.k, p)
+			}
+			if set != nil do append(&tests, kernel.in_law(l.k, at, set))
 			continue
 		}
 		// the items of a run: each what x may hold there, proven to be of its pieces

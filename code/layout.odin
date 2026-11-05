@@ -49,9 +49,9 @@ Field_Layout :: struct {
 // PAIR_BYTES: a run or a tree held in memory: two words.
 PAIR_BYTES :: 16
 
-// layout_of_set: the layout of the values of a set; false when the code holds
-// none of it.
-layout_of_set :: proc(l: ^Lowering, written: kernel.Type) -> (lay: ^Layout, ok: bool) {
+// layout_of_set: the layout of the values of a set — of the term of, when one
+// is given —; false when the code holds none of it.
+layout_of_set :: proc(l: ^Lowering, written: kernel.Type, of: kernel.Type = nil) -> (lay: ^Layout, ok: bool) {
 	set := written
 	if set == nil do return nil, false
 	// a set over unknowns: laid out as what it may hold, a set of constants
@@ -66,9 +66,22 @@ layout_of_set :: proc(l: ^Lowering, written: kernel.Type) -> (lay: ^Layout, ok: 
 	if s, is_scope := set.(^kernel.Scope); is_scope && !kernel.recursive(s) && kernel.is_shape(l.k, s) {
 		if fields, named := fields_layout(l, s); named do return fields, true
 	}
+	// the run of no binding is a value of every run, held as any: a union with it
+	// is held as the run its other terms are
+	if any, either := set.(^kernel.Or); either {
+		rest := make([dynamic]kernel.Type)
+		for t in any.terms do if !empty_run(l, t) do append(&rest, t)
+		if len(rest) > 0 && len(rest) < len(any.terms) {
+			if run, laid := layout_of_set(l, kernel.or_law(l.k, rest[:]), of); laid && run.kind == .Run do return run, true
+		}
+	}
 	if item, has := kernel.item_image(l.k, set); has {
-		// a run of a length known is held as its bindings, in values
-		n := kernel.length_image(l.k, set) or_return
+		// a run of a length known is held as its bindings, in values: the length
+		// its set admits, or that of the term — a call's, by the recursion of its
+		// bounds (§5.6)
+		n, read := kernel.length_image(l.k, set)
+		if !read && of != nil do n, read = kernel.layout_image(l.k, kernel.op(l.k, .Length, of))
+		if !read do return
 		if _, known := n.(kernel.Int); known do return
 		inner := layout_of_set(l, item) or_return
 		return new_clone(Layout{kind = .Run, item = inner, size = PAIR_BYTES, align = 8}), true
@@ -76,6 +89,12 @@ layout_of_set :: proc(l: ^Lowering, written: kernel.Type) -> (lay: ^Layout, ok: 
 	s := set.(^kernel.Scope) or_return
 	if !kernel.recursive(s) do return
 	return tree_layout(l, s)
+}
+
+// empty_run: t is {}, the run of no binding.
+empty_run :: proc(l: ^Lowering, t: kernel.Type) -> bool {
+	s, is_scope := t.(^kernel.Scope)
+	return is_scope && kernel.is_shape(l.k, s) && len(kernel.placed(l.k, s, .Shape)) == 0
 }
 
 // tree_layout: a recursive scope whose productions are shapes of fields, as a
@@ -120,8 +139,8 @@ fields_layout :: proc(l: ^Lowering, s: ^kernel.Scope) -> (lay: ^Layout, ok: bool
 
 // layout_of_term: the layout of the values t may take.
 layout_of_term :: proc(l: ^Lowering, t: kernel.Type) -> (lay: ^Layout, ok: bool) {
-	set := kernel.values(l.k, kernel.given(l.k, t)) or_return
-	return layout_of_set(l, set)
+	x := kernel.given(l.k, t)
+	return layout_of_set(l, kernel.values(l.k, x) or_return, x)
 }
 
 // layout_machines: the machine of each value that holds a value of the layout.
