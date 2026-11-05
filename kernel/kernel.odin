@@ -44,6 +44,7 @@ Kernel :: struct {
 	tupled:     [dynamic]Tupled, // the equations of an equation over a range of one of its fields (recursion.odin) // the equations of sums of an equation over one of its fields (recursion.odin)
 	images:     [dynamic]Image, // the bounds of the calls of an equation, given once (recursion.odin)
 	induced:    [dynamic]Induced, // whether the calls of an equation are in a set, proven once (in.odin)
+	fields:     [dynamic]Field, // the colors of the fields of the scope of an equation, read once (rewrite.odin)
 	plain:      map[^Operation]Plain, // what is known of an operation over plain unknowns, once (rewrite.odin)
 	read:       map[Read_Key]bool, // whether a node reads an unknown, once asked (rewrite.odin)
 	valued:     map[rawptr]Type, // what a shared node may hold, once read (size.odin)

@@ -177,9 +177,9 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 }
 
 // call_family: the family a recursive call is proven in: `c in F` (§4.5, call_in);
-// with fields, the family every field of what it gives is proven in. None while its
-// equation is read: its calls are the hypothesis.
-call_family :: proc(k: ^Kernel, c: ^Collapse, fields := false) -> (Family, bool) {
+// with a read, the family what it reads of what the call gives is proven in. None
+// while its equation is read: its calls are the hypothesis.
+call_family :: proc(k: ^Kernel, c: ^Collapse, fields := Read{}) -> (Family, bool) {
 	s, ok := c.target.(^Scope)
 	if !ok || !c.recursive || reading(k, origin(s)) do return {}, false
 	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) do if call_in(k, c, family_term(f), fields) do return f, true
@@ -2003,7 +2003,7 @@ least_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure) 
 		set := range_law(k, lo_t, hi_t, .Int, {})
 		taken := new_unknown(k, nil)
 		taken.layout = set
-		if holds_in(k, measured(k, e, eq.root, measure, taken) or_return, set, false) do return {lo = lo_t, hi = hi_t}, true
+		if holds_in(k, measured(k, e, eq.root, measure, taken) or_return, set, {}) do return {lo = lo_t, hi = hi_t}, true
 	}
 	return
 }

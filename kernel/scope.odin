@@ -44,7 +44,8 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
 	v := given(k, t)
 	if _, is_scope := v.(^Scope); is_scope do return true
-	// a call, or what holds one: proven in the scopes, by induction (§5.6)
+	// a call, or what holds one: proven in the scopes, by induction (§5.6); what is read
+	// of one, by the same induction on what it reads, or by its values
 	scopes :: proc(k: ^Kernel, t: Type) -> (bool, bool) {
 		c, is_call := as_call(t)
 		if !is_call do return false, false
@@ -52,6 +53,9 @@ gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
 		return known && f == .Scope, true
 	}
 	if holds, is_call := scopes(k, v); is_call do return holds
+	if c, read := call_read(v); read {
+		if f, known := call_family(k, c, read_of(v)); known && f == .Scope do return true
+	}
 	set, ok := values(k, v)
 	if !ok do return false
 	if holds, is_call := scopes(k, set); is_call do return holds
@@ -340,9 +344,33 @@ carve_problem :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) -> Type {
 			}
 		}
 		if color == nil do continue
-		if p := in_problem(k, v, color, span); p != nil do return p
+		// what holds the hypothesis, a call whose equation is being read, is proven
+		// once the equation is given (check.odin)
+		if p := in_problem(k, v, color, span); p != nil && !holds_call(k, v, true) do return p
 	}
 	return nil
+}
+
+// holds_call: t holds a recursive call, or reads one; pending, one whose equation is
+// being read — the hypothesis. A scope holds what its bindings place, and what a carve
+// changed in it.
+holds_call :: proc(k: ^Kernel, t: Type, pending: bool) -> bool {
+	if c, is_call := as_call(t); is_call do return !pending || is_pending_call(k, c)
+	#partial switch v in t {
+	case ^Scope:
+		for b in v.bindings {
+			if !b.carved && b.kind != .Push && b.kind != .Expand || b.value == nil do continue
+			if holds_call(k, binding_type(k, b), pending) do return true
+		}
+		return false
+	case ^Pattern:
+		for b in v.branches do if holds_call(k, b.product, pending) do return true
+	case ^Effect:
+		if v.choice != nil && holds_call(k, v.choice, pending) do return true
+		return holds_call(k, v.then, pending)
+	}
+	for p in parts(t) do if holds_call(k, p, pending) do return true
+	return false
 }
 
 // --- copies ---
@@ -1184,6 +1212,7 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 
 // run_law: read on the bindings of x where they are known; otherwise it stays.
 run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked := false) -> Type {
+	for a in args do if is_invalid(a) do return a
 	x := given(k, args[0])
 	// a pattern gives one of its products: (t ? {c -> p …}).#k = t ? {c -> p.#k …}
 	if p, is_pattern := x.(^Pattern); is_pattern && !has_effect(p) {

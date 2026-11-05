@@ -112,7 +112,16 @@ obligations :: proc(k: ^Kernel, t: Type, site := syn.Span{}) -> bool {
 		return obligations(k, v.term, site)
 	case ^Range:
 		return v.lo != nil && obligations(k, v.lo, site) || v.hi != nil && obligations(k, v.hi, site)
-	case Char, Int, Real, Bool, None, ^Unknown, ^Name, ^Scope, ^Access, ^Collapse, ^Carve, ^Default:
+	case ^Scope:
+		// a carve holding a recursive call, taken while its equation was read (the
+		// hypothesis): what it changed, proven now that the equation is given (§5.6, §7)
+		if v.carved != nil && holds_call(k, v, false) {
+			if p, invalid := carve_problem(k, v, site != {} ? site : v.span).(Invalid); invalid {
+				report(k, p.problem.kind, p.problem.span, p.problem.message)
+				return true
+			}
+		}
+	case Char, Int, Real, Bool, None, ^Unknown, ^Name, ^Access, ^Collapse, ^Carve, ^Default:
 	}
 	return false
 }

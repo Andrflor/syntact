@@ -132,7 +132,7 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		// the family of the color of the field; of a field of a call, the family its
 		// fields are proven in
 		if image, known := layout_image(k, t); known do if f, one := layout_family(k, image); one do return f, true
-		if c, read := call_read(t); read do return call_family(k, c, true)
+		if c, read := call_read(t); read do return call_family(k, c, read_of(t))
 	case ^Fold:
 		return family_of(k, v.value)
 	case ^Least:
@@ -171,7 +171,7 @@ operation_family :: proc(k: ^Kernel, v: ^Operation) -> (Family, bool) {
 		return .Scope, true
 	case .Item:
 		if set, known := values(k, v); known do if f, one := layout_family(k, set); one do return f, true
-		if c, read := call_read(v); read do return call_family(k, c, true)
+		if c, read := call_read(v); read do return call_family(k, c, read_of(v))
 		return {}, false
 	}
 	if is_string_value(t) do return .String, true

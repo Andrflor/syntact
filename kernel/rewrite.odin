@@ -682,20 +682,73 @@ field_color :: proc(k: ^Kernel, layout: Type, name: string) -> (color: Type, ok:
 	}
 	s := layout.(^Scope) or_return
 	if !is_shape(k, s) {
-		// a scope with productions: the field in those that have it, of one color
-		for p in placed(k, s, .Shape) {
-			if p.kind != .Product || p.value == nil do continue
-			c := field_color(k, binding_type(k, p), name) or_continue
-			if color != nil && !same(k, color, c) do return nil, false
-			color = c
+		// the scope of an equation, read as a color (§5.4): reading it is reading the
+		// equation — its calls the hypothesis meanwhile (§5.6) —, once
+		for x in k.equations {
+			if x.generic != s do continue
+			for f in k.fields do if f.scope == s && f.name == name do return f.color, f.color != nil
+			if reading(k, x.root) do return nil, false
+			x.read = true
+			color, ok = produced_field(k, s, name)
+			x.read = false
+			append(&k.fields, Field{s, name, ok ? color : nil})
+			return
 		}
-		return color, color != nil
+		return produced_field(k, s, name)
 	}
+	c, has := shape_field(k, s, name, nil) or_return
+	return c, has
+}
+
+// Field: the color of a field of the scope of an equation, read once.
+Field :: struct {
+	scope: ^Scope,
+	name:  string,
+	color: Type,
+}
+
+// produced_field: the field name of what the productions of s give, through their
+// patterns (§6) — in those that have it, its values the union of theirs (§5.3); a
+// call of s itself, or a read of one, adds nothing: X = X | P.
+produced_field :: proc(k: ^Kernel, s: ^Scope, name: string) -> (color: Type, ok: bool) {
+	for p in placed(k, s, .Shape) {
+		if p.kind != .Product || p.value == nil do continue
+		leaves := make([dynamic]Product)
+		products(k, binding_type(k, p), &leaves)
+		for leaf in leaves {
+			if is_none(leaf.term) || is_call_of(leaf.term, s) do continue
+			c: Type
+			if shape, is_scope := leaf.term.(^Scope); is_scope && is_shape(k, shape) {
+				has: bool
+				c, has = shape_field(k, shape, name, s) or_return
+				if !has do continue
+			} else {
+				c = field_color(k, leaf.term, name) or_return
+			}
+			color = color == nil ? c : or_law(k, {color, c})
+		}
+	}
+	return color, color != nil
+}
+
+// shape_field: the color of the field name of the shape s, when it has one; written
+// without color, its values — nothing when it reads the field of a call of itself.
+shape_field :: proc(k: ^Kernel, s: ^Scope, name: string, itself: ^Scope) -> (color: Type, has: bool, ok: bool) {
 	for b in placed(k, s, .Shape) {
 		if b.name != name do continue
-		if b.color != nil do return binding_color(k, b), true
-		// a value written without color: its values
-		if b.value != nil do return values(k, binding_value(k, b))
+		if b.color != nil do return binding_color(k, b), true, true
+		if b.value == nil do return nil, false, false
+		v := binding_value(k, b)
+		if c, read := call_read(v); read && itself != nil && is_call_of(c, itself) do return nil, false, true
+		set := values(k, v) or_return
+		return set, true, true
 	}
-	return
+	return nil, false, true
+}
+
+// is_call_of: t is a recursive call of the scope s, or of the equation s reads.
+is_call_of :: proc(t: Type, s: ^Scope) -> bool {
+	c := as_call(t) or_return
+	target := c.target.(^Scope) or_return
+	return origin(target) == origin(s)
 }

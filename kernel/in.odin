@@ -36,8 +36,8 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if call, ok := x.(^Collapse); ok && call.recursive && call_in(k, call, c) do return Bool(true)
 	// what a call with effects gives back: in c by the same induction (§5.6, §4.8)
 	if u, ok := x.(^Unknown); ok && u.call != nil && u.call.recursive && call_in(k, u.call, c) do return Bool(true)
-	// a field, a binding, of what a call gives: in c when every field is (call_in)
-	if call, read := call_read(x); read && call_in(k, call, c, true) do return Bool(true)
+	// a field, a binding, of what a call gives: in c by induction on it (call_in)
+	if call, read := call_read(x); read && call_in(k, call, c, read_of(x)) do return Bool(true)
 	if f, ok := x.(^Fold); ok && fold_induction(k, f, c) do return Bool(true)
 	// an operation on values is in the family its signature gives (§4.5)
 	if _, ok := x.(^Operation); ok && is_value(k, x) {
@@ -234,11 +234,29 @@ ceil_div :: proc(x, y: i128) -> i128 {
 	return -floor_div(-x, y)
 }
 
-// call_in: a recursive call is in c (§5.6) — with fields, every field of the scope it
+// Read: what of a recursive call an induction is about: what it gives; a field of the
+// scope it gives, x.a; or its bindings, x.#k.
+Read :: struct {
+	fields: bool,
+	name:   string, // the field read; "" for every binding
+}
+
+// read_of: what the term t reads of a call.
+read_of :: proc(t: Type) -> Read {
+	#partial switch v in t {
+	case ^Access:
+		return {true, v.name}
+	case ^Operation:
+		if v.op == .Item do return {true, ""}
+	}
+	return {}
+}
+
+// call_in: a recursive call is in c (§5.6) — with a read, what it reads of the scope it
 // gives is: by induction on the equation it reads; when that equation cannot be read
 // where what the call carves is unknown (a hole the carve fills), the call is its
 // production at the values its carve gives (§5.3), its calls the hypothesis meanwhile.
-call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := false) -> bool {
+call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool {
 	s := call.target.(^Scope) or_return
 	root := origin(s)
 	eq, derived := equation_of(k, call)
@@ -248,20 +266,21 @@ call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := false) -> bool {
 	if p.state == .In_Progress do return false
 	eq.read = true
 	defer eq.read = false
-	return holds_in(k, binding_type(k, p), c, fields)
+	return holds_in(k, binding_type(k, p), c, fields, root)
 }
 
 // induction: the calls of the equation eq are in c when the equation is, each call it
-// makes taken in c (§5.6); with fields, each read of a field of its calls taken in c.
-// While it is read, its calls are the hypothesis: nothing is proven yet.
+// makes taken in c (§5.6); with a read, the same read of each scope the equation gives,
+// that read of its calls taken in c — a call it gives adds nothing: X = X | P. While
+// it is read, its calls are the hypothesis: nothing is proven yet.
 Induced :: struct {
 	equation: ^Scope,
 	set:      Type,
-	fields:   bool,
+	fields:   Read,
 	proven:   bool,
 }
 
-induction :: proc(k: ^Kernel, eq: ^Call_Equation, c: Type, fields: bool) -> bool {
+induction :: proc(k: ^Kernel, eq: ^Call_Equation, c: Type, fields: Read) -> bool {
 	for x in k.induced do if x.equation == eq.generic && x.fields == fields && same(k, x.set, c) do return x.proven
 	if reading(k, eq.root) do return false
 	at := len(k.induced)
@@ -270,29 +289,42 @@ induction :: proc(k: ^Kernel, eq: ^Call_Equation, c: Type, fields: bool) -> bool
 	eq.read = true
 	proven := induced(k, eq.root, eq.equation, c, fields)
 	eq.read = false
+	// a field whose induction reads other fields: every field taken in c, the stronger
+	// hypothesis (§5.6)
+	if !proven && fields.name != "" do proven = induction(k, eq, c, {true, ""})
 	k.induced[at].proven = proven
 	return proven
 }
 
-induced :: proc(k: ^Kernel, root: ^Scope, e: Type, c: Type, fields: bool) -> bool {
+induced :: proc(k: ^Kernel, root: ^Scope, e: Type, c: Type, fields: Read) -> bool {
 	assumed: Rewrite
 	taken :: proc(k: ^Kernel, c: Type) -> Type {
 		u := new_unknown(k, nil)
 		u.layout = c
 		return u
 	}
-	if fields do for read in call_reads(k, e, root) do assumed = append_read(assumed, read, taken(k, c))
-	for inner in calls_in(k, e, root) do assumed = rewriting_call(assumed, inner, taken(k, fields ? EVERY_SCOPE : c))
-	// a call with effects: what it gives back, its answer, is taken in c likewise
-	for x in call_answers(k, e, root) do assumed = rewriting(assumed, x, taken(k, fields ? EVERY_SCOPE : c))
+	if fields.fields {
+		// what is read of its calls: taken in c; the calls themselves stay, the
+		// hypothesis
+		for read in call_reads(k, e, root) do if fields.name == "" || read_of(read) == fields do assumed = append_read(assumed, read, taken(k, c))
+	} else {
+		// each call, and each one a read of a field holds
+		calls := make([dynamic]^Collapse)
+		append(&calls, ..calls_in(k, e, root))
+		for read in call_reads(k, e, root) do if call, _ := call_read(read); !slice.contains(calls[:], call) do append(&calls, call)
+		for inner in calls do assumed = rewriting_call(assumed, inner, taken(k, c))
+		// a call with effects: what it gives back, its answer, is taken in c likewise
+		for x in call_answers(k, e, root) do assumed = rewriting(assumed, x, taken(k, c))
+	}
 	// an effect is not a value: the verdict is read on what the effects wrap (§7)
-	return holds_in(k, given(k, rewrite(k, e, assumed)), c, fields)
+	return holds_in(k, given(k, rewrite(k, e, assumed)), c, fields, root)
 }
 
-// holds_in: v in c; with fields, v is a scope every field of which is in c — through
-// its patterns, which give one of their products (§6).
-holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: bool) -> bool {
-	if !fields {
+// holds_in: v in c; with a read, v is a scope what it reads of which is in c — through
+// its patterns, which give one of their products (§6); a product that is a call of
+// root, the hypothesis, adds nothing: X = X | P.
+holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: Read, root: ^Scope = nil) -> bool {
+	if !fields.fields {
 		verdict, _ := prove(k, in_law(k, given(k, v), c))
 		return verdict == .Proven
 	}
@@ -300,9 +332,11 @@ holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: bool) -> bool {
 	products(k, given(k, v), &leaves)
 	for leaf in leaves {
 		if is_none(leaf.term) do continue
+		if root != nil && is_call_of(leaf.term, root) do continue
 		shape := leaf.term.(^Scope) or_return
 		for b in placed(k, shape, .Value) {
 			if b.kind != .Push && b.kind != .Expand do continue
+			if fields.name != "" && b.name != fields.name do continue
 			verdict, _ := prove(k, in_law(k, given(k, read_in(k, leaf, binding_value(k, b))), c))
 			if verdict != .Proven do return false
 		}
