@@ -39,12 +39,12 @@ check -> {
 iterate -> {
   (0..30):d -> 4
   u32:i -> ??
-  i64:sum -> 0
+  sum -> 0
   -> i ? {0 -> sum  -> iterate{d -> d  i -> i - 1  sum -> sum + check{t -> make{depth -> d}!}!}!}
 }
 depths -> {
   (0..30):max -> 15
-  (0..32):d -> 4
+  (4..32):d -> 4
   -> d ? {
     >max -> 0
     -> {

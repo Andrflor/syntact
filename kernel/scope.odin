@@ -148,8 +148,15 @@ product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 			if v := binding_type(k, p); is_invalid(v) do return v
 		}
 		call := recursive_call(k, s, c.span)
-		if stays, is_call := call.(^Collapse); is_call && stays.target == s {
-			if solution, solved := generic_solution(k, s.carved, s.changes); solved do return solution
+		// the call stays: as it is, or as the effect of an equation with effects
+		stays, is_call := call.(^Collapse)
+		if e, is_effect := call.(^Effect); is_effect && e.call != nil do stays, is_call = e.call, true
+		if is_call && stays.target == s {
+			if solution, solved := generic_solution(k, s.carved, s.changes); solved {
+				// each call runs the effects of the solution: what they give back is new
+				run: Rewrite
+				return renewed(k, solution, &run)
+			}
 		}
 		return call
 	}

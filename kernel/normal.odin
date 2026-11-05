@@ -600,8 +600,20 @@ unsupported_at :: proc(k: ^Kernel, span: syn.Span, what: string) -> Type {
 }
 
 // closed_bounds: on the integers, a bound left open is the next one closed (§4.3):
-// t.. & ~t = (t + 1).., ..t & ~t = ..(t - 1). The terms it joins are set to nil.
+// t.. & ~t = (t + 1).., ..t & ~t = ..(t - 1), and the complement of a ray is the
+// other ray: int & ~(t..) = int & ..(t - 1), int & ~(..t) = int & (t + 1)... The
+// terms it joins are set to nil.
 closed_bounds :: proc(k: ^Kernel, terms: []Type) {
+	integers := false
+	for t in terms do if is_constant(t) && integer_set(t) do integers = true
+	for t, i in terms {
+		if n, is_not := t.(^Not); is_not && integers {
+			if r, is_range := n.term.(^Range); is_range {
+				if r.lo != nil && r.hi == nil && integer_term(k, r.lo) do terms[i] = range_law(k, nil, op(k, .Sub, r.lo, Int(1)), .Int, r.span)
+				else if r.hi != nil && r.lo == nil && integer_term(k, r.hi) do terms[i] = range_law(k, op(k, .Add, r.hi, Int(1)), nil, .Int, r.span)
+			}
+		}
+	}
 	for t, i in terms {
 		r, is_range := t.(^Range)
 		if !is_range do continue
@@ -621,6 +633,15 @@ closed_bounds :: proc(k: ^Kernel, terms: []Type) {
 	}
 }
 
+// integer_set: a constant set of integers only.
+integer_set :: proc(t: Type) -> bool {
+	one: [1]Type
+	cells, negated := cells_in(t, &one)
+	if negated || len(cells) == 0 do return false
+	for c in cells do if cell_family(c) != .Int do return false
+	return true
+}
+
 // integer_term: t is an integer by its form, without a proof: an integer, an
 // unknown whose layout is integers, a +, - or * of such terms.
 integer_term :: proc(k: ^Kernel, t: Type) -> bool {
@@ -629,12 +650,7 @@ integer_term :: proc(k: ^Kernel, t: Type) -> bool {
 		return true
 	case ^Unknown:
 		layout := layout_of(k, v)
-		if !is_constant(layout) do return false
-		one: [1]Type
-		cells, negated := cells_in(layout, &one)
-		if negated || len(cells) == 0 do return false
-		for c in cells do if cell_family(c) != .Int do return false
-		return true
+		return is_constant(layout) && integer_set(layout)
 	case ^Operation:
 		#partial switch v.op {
 		case .Add, .Sub, .Mul, .Neg:

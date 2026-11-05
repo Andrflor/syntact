@@ -153,19 +153,17 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 		}
 		targets: []Narrowed
 		if u, is_unknown := o.args[0].(^Unknown); is_unknown {
-			targets = []Narrowed{{u, o.args[1]}}
+			targets = []Narrowed{{u, o.args[1], true}}
 		} else {
-			// a·u + t in S, t not reading u: each unknown in the preimage of S, bounded
-			// by what t may be
-			unsaid = bool_and(k, unsaid, l)
 			targets = bounded_preimage(k, o.args[0], o.args[1], positive)
 		}
+		said := false
 		for target in targets {
-			u, set := target.unknown, target.set
-			if !is_constant(set) {
-				// a set over unknowns: u is in what it may hold, out of what it always
-				// holds — said by its bounds; the literal stays unsaid
-				unsaid = bool_and(k, unsaid, l)
+			u, set, exact := target.unknown, rewrite(k, target.set, out), target.exact
+			if !is_constant(set) && depends(k, set, u) {
+				// a set over unknowns whose layouts read u: by its bounds — u is in
+				// what it may hold, out of what it always holds
+				exact = false
 				bound: Type
 				known: bool
 				if positive do bound, known = outer_set(k, set)
@@ -181,7 +179,9 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 			layout := and_law(k, {current, positive ? set : not_law(k, set)})
 			if is_none(layout) do return nil, false, nil
 			out = rewriting(out, u, narrowing(u, layout))
+			said ||= exact
 		}
+		if !said do unsaid = bool_and(k, unsaid, l)
 	}
 	return out, true, unsaid
 }
@@ -371,16 +371,30 @@ term_bound :: proc(k: ^Kernel, t: Type, least: bool) -> (out: Type, ok: bool) {
 	return Int(b), true
 }
 
-// Narrowed: an unknown, and the set a literal puts it in.
+// Narrowed: an unknown, the set a literal puts it in, and whether that set says
+// the literal exactly.
 Narrowed :: struct {
 	unknown: ^Unknown,
 	set:     Type,
+	exact:   bool,
+}
+
+// depends: the set reads u, or reads an unknown whose layout does.
+depends :: proc(k: ^Kernel, set: Type, u: ^Unknown) -> bool {
+	read := make([dynamic]^Unknown)
+	read_unknowns(set, &read)
+	for w in read {
+		if w.id == u.id do return true
+		if l := layout_of(k, w); !is_constant(l) && depends(k, l, u) do return true
+	}
+	return false
 }
 
 // bounded_preimage: e = a·u + t, t a term not reading u, in the constant set s,
-// for each unknown u of degree 1 in e: u is in the preimage of s by a·u + b for some
-// b t may be (positive: the hull of the preimages at the bounds of t), or for every
-// one (negated: their meet) — the law of the preimage (in.odin) at the bounds of t.
+// for each unknown u of degree 1 in e: u is in the preimage of s by a·u + t. With
+// a = ±1 it is the set s - t, or t - s, exactly; otherwise it is bounded at the
+// bounds of t: u is in the preimage for some b t may be (positive: the hull of the
+// preimages at the bounds of t), or for every one (negated: their meet).
 bounded_preimage :: proc(k: ^Kernel, e, s: Type, positive: bool) -> []Narrowed {
 	out := make([dynamic]Narrowed)
 	if !is_constant(s) do return nil
@@ -396,6 +410,12 @@ bounded_preimage :: proc(k: ^Kernel, e, s: Type, positive: bool) -> []Narrowed {
 		alpha, t, affine := affine_in(k, e, x)
 		a, constant := alpha.(Int)
 		if !affine || !constant || a == 0 do continue
+		if a == 1 || a == -1 {
+			if set, exact := shifted(k, cells, i128(a), t); exact {
+				append(&out, Narrowed{x, set, true})
+				continue
+			}
+		}
 		image := layout_image(k, t) or_continue
 		tl, th := int_bounds(k, image) or_continue
 		low := tl.? or_continue
@@ -403,7 +423,7 @@ bounded_preimage :: proc(k: ^Kernel, e, s: Type, positive: bool) -> []Narrowed {
 		at_low := preimage(k, cells, i128(a), low) or_continue
 		at_high := preimage(k, cells, i128(a), high) or_continue
 		if !positive {
-			append(&out, Narrowed{x, and_law(k, {at_low, at_high})})
+			append(&out, Narrowed{x, and_law(k, {at_low, at_high}), false})
 			continue
 		}
 		lo1, hi1 := int_bounds(k, at_low) or_continue
@@ -412,9 +432,28 @@ bounded_preimage :: proc(k: ^Kernel, e, s: Type, positive: bool) -> []Narrowed {
 		lo, hi: Maybe(i128)
 		if l1, has1 := lo1.?; has1 do if l2, has2 := lo2.?; has2 do lo = min(l1, l2)
 		if h1, has1 := hi1.?; has1 do if h2, has2 := hi2.?; has2 do hi = max(h1, h2)
-		append(&out, Narrowed{x, discrete_cell(.Int, lo, hi)})
+		append(&out, Narrowed{x, discrete_cell(.Int, lo, hi), false})
 	}
 	return out[:]
+}
+
+// shifted: the integers v such that a·v + t is in the cells, a = ±1: each cell
+// lo..hi gives (lo - t)..(hi - t), or (t - hi)..(t - lo).
+shifted :: proc(k: ^Kernel, cells: []Type, a: i128, t: Type) -> (set: Type, ok: bool) {
+	if !integer_term(k, t) do return
+	parts := make([]Type, len(cells))
+	for c, i in cells {
+		if cell_family(c) != .Int do return
+		lo, hi := discrete_bounds(c)
+		from, to: Type
+		if l, has := lo.?; has do from = op(k, .Sub, Int(l), t)
+		if h, has := hi.?; has do to = op(k, .Sub, Int(h), t)
+		if a < 0 {
+			from, to = to == nil ? nil : op(k, .Neg, to), from == nil ? nil : op(k, .Neg, from)
+		}
+		parts[i] = range_law(k, from, to, .Int, {})
+	}
+	return or_law(k, parts), true
 }
 
 // narrow_either: the rewrite a disjunction makes: each side narrows on its own; an

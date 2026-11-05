@@ -270,7 +270,10 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t, true
 	case ^Unknown:
-		return layout_of(k, v), true
+		// a layout over other unknowns: what it may hold
+		layout := layout_of(k, v)
+		if !is_constant(layout) do if image, known := layout_image(k, layout); known do return image, true
+		return layout, true
 	case ^Operation:
 		if is_string_value(t) do return t, true
 		if v.op == .In do return family_term(.Bool), true
@@ -279,7 +282,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		for a, i in v.args do args[i] = layout_image(k, a) or_return
 		// the term computes exactly: only a rounding rounds (format.odin)
 		if v.op == .Round do return round_law(k, args[0], bits_format(args[1]), v.span), true
-		return exact_law(k, v.op, args, v.span), true
+		return related_image(k, t, exact_law(k, v.op, args, v.span)), true
 	case ^Or:
 		terms := make([]Type, len(v.terms))
 		for a, i in v.terms do terms[i] = layout_image(k, a) or_return
@@ -323,6 +326,37 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Effect, ^Pattern, ^Scope, ^Name, ^Carve, ^Default:
 	}
 	return nil, false
+}
+
+// related_image: the image of a term of degree 1 in an unknown narrowed between
+// bounds over other unknowns, u::(L & l..h): a·u + r lies between a·l + r and
+// a·h + r, each a term over the others — the image keeps what relates them.
+// image is the image of the term, each unknown replaced by its layout on its own.
+related_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
+	if !is_constant(image) do return image
+	read := make([dynamic]^Unknown)
+	read_unknowns(t, &read)
+	out := image
+	for u in read {
+		layout := layout_of(k, u)
+		if is_constant(layout) do continue
+		alpha, r, affine := affine_in(k, t, u)
+		a, constant := alpha.(Int)
+		if !affine || !constant || a == 0 do continue
+		terms := []Type{layout}
+		if both, narrowed := layout.(^And); narrowed do terms = both.terms
+		for x in terms {
+			bounds, is_range := x.(^Range)
+			if !is_range || is_constant(x) do continue
+			lo, hi := bounds.lo, bounds.hi
+			if a < 0 do lo, hi = hi, lo
+			least, most: Type
+			if lo != nil do least = term_bound(k, op(k, .Add, op(k, .Mul, alpha, lo), r), true) or_continue
+			if hi != nil do most = term_bound(k, op(k, .Add, op(k, .Mul, alpha, hi), r), false) or_continue
+			out = and_law(k, {out, range_law(k, least, most, .Int, {})})
+		}
+	}
+	return out
 }
 
 // sum_image: the values of a fold whose value is a state x: c ↦ x + g, g not

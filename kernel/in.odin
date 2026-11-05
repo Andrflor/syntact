@@ -114,7 +114,9 @@ in_cells :: proc(k: ^Kernel, x, c: Type, cells: []Type) -> Type {
 	case ^Scope:
 		return Bool(false)
 	case ^Unknown:
-		return layout_in(k, x, layout_of(k, v), c)
+		// its layout, or what that layout may hold when it reads other unknowns
+		image, _ := layout_image(k, x)
+		return layout_in(k, x, image, c)
 	}
 	if u, a, b, linear := linear_in(x); linear && !(a == 1 && b == 0) {
 		if set, exact := preimage(k, cells, a, b); exact do return in_law(k, u, set)

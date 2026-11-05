@@ -121,7 +121,7 @@ test_function_gives_scope :: proc(t: ^testing.T) {
 // lowered, its normal form without error (bench/goose).
 @(test)
 test_benchmarks_lower :: proc(t: ^testing.T) {
-	for name in ([]string{"sum", "tree", "interp"}) {
+	for name in ([]string{"sum", "tree", "interp", "bintrees"}) {
 		arena: vmem.Arena
 		context.allocator = vmem.arena_allocator(&arena)
 		path := fmt.tprintf("%s/../bench/goose/%s.syn", #directory, name)

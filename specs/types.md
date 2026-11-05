@@ -1172,11 +1172,22 @@ sum{t -> build{d -> m  s -> a}!}!    an equation in m and a: no tree
 ```
 
 A branch narrows the unknowns its reach speaks of: `u in S` gives `?ₖ::(L & S)`,
-`[~](u in S)` gives `?ₖ::(L & ~S)`. A set over unknowns narrows by its bounds: u is
-in what S may hold when the literal holds, out of what S always holds when it does
-not. `a·u + t in S`, t not reading u, narrows each such u to the preimage of S at the
-bounds of t. A disjunction narrows each unknown to the union of what its sides
+`[~](u in S)` gives `?ₖ::(L & ~S)`, S over other unknowns as well: the layout of u
+then reads them. `a·u + t in S`, t not reading u, is `u in (S - t) / a`: with a = ±1
+that set exactly, otherwise its bounds at the bounds of t. A layout never reads,
+through other layouts, its own unknown: there, a set over unknowns narrows by its
+bounds — u is in what S may hold when the literal holds, out of what S always holds
+when it does not. A disjunction narrows each unknown to the union of what its sides
 narrow it to. What the reach says beyond that stays its guard.
+
+The image of a term reads such a layout with what relates them: a·u + r, u between
+l and h, lies between a·l + r and a·h + r.
+
+```text
+max::0..30, d::0..32
+d ? {>max -> 0  -> 1 << (max - d + 4)}
+      d is ?::(0..32 & ..max): max - d + 4 lies in 4..(max + 4), in 4..34   ✓
+```
 
 What a branch types holds for the values of the target that reach it. Its checks
 are guarded by the branch: with `reach` the target in its cover and in none of the
