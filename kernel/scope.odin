@@ -1341,16 +1341,24 @@ by_place :: proc(k: ^Kernel, o: Operator, x: Type, xs: []^Binding, i: Type, span
 	return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %s", print_type(x), print_type(i)))
 }
 
-// fold_length: |⟳(…; z: s ↦ {...z ...Q}; z)| = ⟳(…; ℓ: |s| ↦ ℓ + |Q|; ℓ): each step
-// places Q after what the run holds, |{...x ...Q}| = |x| + |Q| (§5.3), and nothing
-// else reads it — the length passes through the fold as through an operator.
+// fold_length: |⟳(…; z: s ↦ {...P ...z ...Q}; z)| = ⟳(…; ℓ: |s| ↦ ℓ + |P| + |Q|; ℓ):
+// each step places P and Q around what the run holds, |{...P ...x ...Q}| = |x| + |P|
+// + |Q| (§5.3), and nothing else reads it — the length passes through the fold as
+// through an operator.
 fold_length :: proc(k: ^Kernel, f: ^Fold, span: syn.Span) -> (n: Type, ok: bool) {
 	for z, i in f.states {
 		if !same(k, f.value, z) do continue
+		// z placed once, as a run, anywhere among the bindings of the step
 		step := f.updates[i].(^Scope) or_return
 		data := run_data(k, step)
-		if len(data) == 0 || data[0].kind != .Expand || !same(k, binding_value(k, data[0]), z) do return
-		rest := run_scope(k, data[1:])
+		others := make([dynamic]^Binding)
+		placed_z := 0
+		for b in data {
+			if b.kind == .Expand && same(k, binding_value(k, b), z) do placed_z += 1
+			else do append(&others, b)
+		}
+		if placed_z != 1 do return
+		rest := run_scope(k, others[:])
 		if reads(k, rest, z) || reads(k, f.effects, z) do return
 		for t, j in f.updates do if j != i && reads(k, t, z) do return
 		l := new_unknown(k, nil)

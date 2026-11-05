@@ -460,6 +460,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if image, known := layout_image(k, v.value); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Least:
+		if image, known := least_image(k, v); known do return image, true
 		return COUNTS, true
 	case ^Series:
 		if v.op == .Add {
@@ -665,14 +666,26 @@ built_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 // sum_image: the values of a fold whose value is a state x: c ↦ x + g, g not
 // reading x: c, and n terms of g, n its steps.
 sum_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
-	lo, hi := counter_range(k, f) or_return
+	// the steps: along a counter, from lo to hi; otherwise the length of the orbit of
+	// the index from its start (§5.6), the index where its layout says
+	steps: Type
+	along: Rewrite
+	if lo, hi, counter := counter_range(k, f); counter {
+		steps = op(k, .Add, op(k, .Sub, hi, lo), Int(1))
+		along = rewriting(nil, f.index, narrowing(f.index, range_law(k, lo, hi, .Int, f.span)))
+	} else {
+		// the orbit of the start: its points from what the start may be
+		start := new_unknown(k, nil)
+		start.layout = layout_image(k, f.start) or_return
+		n := orbit_length(k, start, rewrite(k, f.next, rewriting(nil, f.index, start)), f.stop, f.span) or_return
+		steps = rewrite(k, n, rewriting(nil, start, f.start))
+	}
 	for z, i in f.states {
 		if !same(k, f.value, z) do continue
 		// x ↦ x + g: the ring reads the update as 1·x + g
 		one, g := affine_in(k, f.updates[i], z) or_return
 		if !is_int(one, 1) do return
-		steps := op(k, .Add, op(k, .Sub, hi, lo), Int(1))
-		terms := hull_times(k, steps, rewrite(k, g, rewriting(nil, f.index, narrowing(f.index, range_law(k, lo, hi, .Int, f.span))))) or_return
+		terms := hull_times(k, steps, rewrite(k, g, along)) or_return
 		start := layout_image(k, f.inits[i]) or_return
 		return exact_law(k, .Add, {start, terms}, f.span), true
 	}
@@ -809,4 +822,24 @@ summed_image :: proc(k: ^Kernel, v: ^Series) -> (image: Type, ok: bool) {
 		return call_image(k, c, Measure{.Sum, g, at})
 	}
 	return
+}
+
+// least_image: μ(i: m / c ** i in B), B holding 0, m ≥ 0: the orbit reaches 0, the
+// later the greater m — at most the count of the digits of m in base c, at its bound.
+least_image :: proc(k: ^Kernel, l: ^Least) -> (image: Type, ok: bool) {
+	holds := l.holds.(^Operation) or_return
+	if holds.op != .In || !is_bool(in_law(k, Int(0), holds.args[1]), true) do return
+	div := holds.args[0].(^Operation) or_return
+	if div.op != .Div do return
+	power := div.args[1].(^Operation) or_return
+	if power.op != .Pow do return
+	c := power.args[0].(Int) or_return
+	at, by_index := power.args[1].(^Unknown)
+	if !by_index || !same_unknown(at, l.index) || c < 2 || reads(k, div.args[0], l.index) do return
+	lo, hi := int_bounds(k, layout_image(k, div.args[0]) or_return) or_return
+	if (lo.? or_return) < 0 do return
+	top := hi.? or_return
+	digits: i128 = 0
+	for x := top; x > 0; x /= i128(c) do digits += 1
+	return range_law(k, Int(0), Int(digits), .Int, l.span), true
 }
