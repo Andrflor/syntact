@@ -29,3 +29,6 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - 23:20 check at 55fa317: kernel types sum tree interp bintrees records push strlist scene (outputs of the six identical to Goose);
   still failing in the kernel: respond (3 errors), sexp (22), calc (32), lru (3), graph (3), words (3), blur (18), particles (6).
   strlist and scene typed but not compiled yet (backend: layout of split's result; f32). Backend agent launched on them.
+- kernel agent done (8 commits, green each): strlist types. Remaining: respond 1 error (buffer length; 60 s kernel time — regression),
+  calc 32 / sexp 22 (fields read in their colour, not at the values the call gives: nodes + 1, v*10 + d), lru 3 ((a*a)/keys < keys),
+  graph/words: my ports are incomplete (no main). Weak point to fix: linear bounds not re-proven by induction.
