@@ -2,6 +2,7 @@ package kernel
 
 import syn "../syntax"
 import "core:fmt"
+import "core:slice"
 
 // NORMAL FORMS
 //
@@ -259,6 +260,12 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 	others := mark(k)
 	if !is_or do closed_bounds(k, flat)
 	for t in flat do if t != nil && !is_constant(t) && !contains_same(k, pushed(k, others), t) do push(k, t)
+	// a & ~a = none, a | ~a = ~none (§2)
+	for t in pushed(k, others) {
+		n, negated := t.(^Not)
+		if !negated || !contains_same(k, pushed(k, others), n.term) do continue
+		return is_or ? everything() : None{}
+	}
 	parts := mark(k)
 	push_all(k, k.scratch[others:parts])
 	sort_types(pushed(k, parts))
@@ -516,9 +523,10 @@ binding_value :: proc(k: ^Kernel, b: ^Binding) -> Type {
 
 // written_value: a scope without production each of whose bindings is written
 // with its value: one value, not a set of them (a shape, a scope that produces).
+// {}, the empty run, is one.
 written_value :: proc(t: Type) -> bool {
 	s, is_scope := t.(^Scope)
-	if !is_scope || len(s.bindings) == 0 do return false
+	if !is_scope do return false
 	for b in s.bindings do if b.kind == .Product || b.value == nil || b.color != nil do return false
 	return true
 }
@@ -541,11 +549,34 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 	case ^Is:
 		return v.term
 	case ^Operation:
-		// a run of n pieces: none of them, {}, when n may be 0 (§5.5)
-		if _, pieces := v.args[0].(^Scope); pieces && v.op == .Mul && is_bool(in_law(k, Int(0), v.args[1]), true) do return run_scope(k, nil)
+		// a run of n pieces: none of them, {}, when n may be 0; otherwise n times the
+		// default of a piece of one binding, the run a fold places (§5.5)
+		if piece, pieces := v.args[0].(^Scope); pieces && v.op == .Mul {
+			if is_bool(in_law(k, Int(0), v.args[1]), true) do return run_scope(k, nil)
+			inner := placed(k, piece, .Shape)
+			if len(inner) == 1 && !is_run(inner[0]) && inner[0].color != nil && is_value(k, v.args[1]) {
+				f := new(Fold)
+				f.index, f.span = new_unknown(k, nil), span
+				f.index.layout = COUNTS
+				f.start, f.next, f.stop = Int(0), op(k, .Add, f.index, Int(1)), new_range(v.args[1], nil, .Int)
+				z := new_unknown(k, nil)
+				z.layout = family_term(.Scope)
+				f.states, f.inits = slice.clone([]^Unknown{z}), slice.clone([]Type{Type(run_scope(k, nil))})
+				item := run_scope(k, nil)
+				d := new_binding(item, .Push, span)
+				d.value = default_of(k, binding_color(k, inner[0]), span)
+				f.updates = slice.clone([]Type{joined(k, {z}, nil, nil, {Type(item)})})
+				f.value, f.effects = z, None{}
+				return folded(k, f)
+			}
+		}
 	}
 	if is_primitive(c) do return c
-	if !is_constant(c) do return unsupported_at(k, span, fmt.tprintf("the default of %s, a type over unknowns", print_type(c)))
+	// over unknowns: its distinguished element 0, when it is proven to hold it
+	if !is_constant(c) {
+		if verdict, _ := prove(k, in_law(k, Int(0), c)); verdict == .Proven do return Int(0)
+		return unsupported_at(k, span, fmt.tprintf("the default of %s, a type over unknowns", print_type(c)))
+	}
 	// its distinguished element, when it holds it
 	for d in ([3]Type{Int(0), real_int(0), empty_string()}) do if !is_none(and_law(k, {d, c})) && inhabited(k, and_law(k, {d, c})) do return d
 	if !is_none(and_law(k, {Bool(false), c})) do return Bool(false)

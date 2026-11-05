@@ -48,6 +48,7 @@ Kernel :: struct {
 	read:       map[Read_Key]bool, // whether a node reads an unknown, once asked (rewrite.odin)
 	valued:     map[rawptr]Type, // what a shared node may hold, once read (size.odin)
 	generics:   [dynamic]Generic, // the solutions of equations where what is given is unknown, once (recursion.odin)
+	tails:      [dynamic]Tail, // what tail calls give, once per equation and bindings given (recursion.odin)
 	asking:     [dynamic]^Scope, // the equations read where what their calls carve is unknown: being given, their calls are the hypothesis (is_pending_call)
 	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check

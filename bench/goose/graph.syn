@@ -1,7 +1,7 @@
 // graph (Goose bench/goose/graph.goose): V vertices, 8V edges u -> w drawn from
 // xorshift64 (u = xs_mod(r, V), w = xs_mod(r >> 24, V)); BFS from four sources
-// (seed 999), the total of the distances reached. Adjacency as one run per vertex,
-// pushed to at a computed vertex; distances as a run, carved at a computed vertex.
+// (seed 999), the total of the distances reached. Prints the pool's length (V + 8V)
+// and the total. A vertex is a place of the runs of the graph: (0..v - 1).
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
@@ -17,23 +17,85 @@ xs -> {
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-// adj with w pushed to the list of u
-push -> {
-  Array{Array{u32}}:adj -> {}
-  u32:u -> 0
-  u32:w -> 0
-  -> adj{#u -> {...adj.#u  w}}
-}
-edges -> {
-  u32:v -> 1
-  u32:e -> ??
-  u64:r -> 12345
-  Array{Array{u32}}:adj -> {}
-  -> e ? {
-    0 -> adj
-    -> {
-      s -> xs{x -> r}!
-      -> edges{v -> v  e -> e - 1  r -> s  adj -> push{adj -> adj  u -> s % v  w -> (s >> 24) % v}!}!
-    }!
+graph -> {
+  (1..1000000):v -> ??
+  V -> 0..(v - 1)
+  // v lists, v distances: one per vertex
+  Adj -> {...({Array{V}:} * v):}
+  Dist -> {...({i32:} * v):}
+  // n copies of t
+  copies -> {
+    (0..v):n -> ??
+    t -> {}
+    -> n ? {0 -> {}  -> {t ...copies{n -> n - 1  t -> t}!}}
   }
+  // e edges, each w pushed in front of the list of u, as the pool's links do
+  edges -> {
+    (0..8000000):e -> ??
+    u64:r -> 12345
+    Adj:adj -> copies{n -> v  t -> {}}!
+    -> e ? {
+      0 -> adj
+      -> {
+        s -> xs{x -> r}!
+        u -> s % v
+        -> edges{e -> e - 1  r -> s  adj -> adj{#u -> {(s >> 24) % v  ...adj.#u}}}!
+      }!
+    }
+  }
+  // a BFS level by level, as the queue gives them: the vertices of this level, those
+  // of the next one, each vertex its distance in dist; the total of the distances
+  Step -> {Dist:dist  Array{V}:q}
+  visit -> {
+    Array{V}:ws -> {}
+    i32:d -> 0
+    Dist:dist -> ??
+    Array{V}:q -> {}
+    -> ws ? {
+      {V(w)  ...Array{V}:(rest)} -> dist.#w ? {
+        <0 -> visit{ws -> rest  d -> d  dist -> dist{#w -> d + 1}  q -> {...q  w}}!
+        -> visit{ws -> rest  d -> d  dist -> dist  q -> q}!
+      }
+      -> Step{dist  q}
+    }
+  }
+  bfs -> {
+    Adj:adj -> ??
+    Dist:dist -> ??
+    Array{V}:level -> {}
+    Array{V}:next -> {}
+    total -> 0
+    -> level ? {
+      {V(u)  ...Array{V}:(rest)} -> {
+        d -> dist.#u
+        step -> visit{ws -> adj.#u  d -> d  dist -> dist  q -> next}!
+        -> bfs{adj -> adj  dist -> step.dist  level -> rest  next -> step.q  total -> total + d}!
+      }!
+      -> next ? {
+        {} -> total
+        -> bfs{adj -> adj  dist -> dist  level -> next  next -> {}  total -> total}!
+      }
+    }
+  }
+  sources -> {
+    Adj:adj -> ??
+    (0..4):k -> 4
+    u64:seed -> 999
+    total -> 0
+    -> k ? {
+      0 -> total
+      -> {
+        s -> xs{x -> seed}!
+        src -> s % v
+        found -> bfs{adj -> adj  dist -> copies{n -> v  t -> -1}!{#src -> 0}  level -> {src}}!
+        -> sources{adj -> adj  k -> k - 1  seed -> s  total -> total + found}!
+      }!
+    }
+  }
+  -> sources{adj -> edges{e -> 8 * v}!}!
 }
+-> {
+  (1..1000000):v -> ??
+  a -> io.printf{format -> "%lld\n"  n -> 9 * v}!
+  -> io.printf{format -> "%lld\n"  n -> graph{v -> v}!}!
+}!
