@@ -132,9 +132,16 @@ Version :: struct {
 // normal form is its own, wherever it is asked —; and then that normal form, once
 // computed (normal.odin).
 Known :: struct {
-	normal: bool, // a normal form: normal gives it back
-	closed: bool,
-	form:   Type,
+	normal:    bool, // a normal form: normal gives it back
+	closed:    bool,
+	constancy: Constancy, // whether it holds no unknown, once asked (lattice.odin)
+	form:      Type,
+}
+
+Constancy :: enum u8 {
+	Unknown,
+	Yes,
+	No,
 }
 
 Or :: struct {

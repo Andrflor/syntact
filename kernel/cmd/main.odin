@@ -1,5 +1,6 @@
 package main
 
+import arena "../../arena"
 import syn "../../syntax"
 import kernel ".."
 import "core:fmt"
@@ -13,6 +14,14 @@ main :: proc() {
 		fmt.eprintln("usage: kernel FILE")
 		os.exit(2)
 	}
+	// the whole check in one arena (arena/arena.odin)
+	check: arena.Arena
+	if err := arena.init(&check); err != nil {
+		fmt.eprintln("no memory for the check:", err)
+		os.exit(2)
+	}
+	context.allocator = arena.allocator(&check)
+	context.temp_allocator = context.allocator
 	data, err := os.read_entire_file(os.args[1], context.allocator)
 	if err != nil {
 		fmt.eprintln("cannot read:", os.args[1])

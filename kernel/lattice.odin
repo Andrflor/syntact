@@ -1240,6 +1240,26 @@ decided :: proc(t: Type) -> bool {
 
 // is_constant: a term without unknown or name.
 is_constant :: proc(t: Type) -> bool {
+	// a shared node: computed once, kept in it
+	#partial switch v in t {
+	case ^Operation:
+		if v.constancy == .Unknown do v.constancy = constancy(t)
+		return v.constancy == .Yes
+	case ^Or:
+		if v.constancy == .Unknown do v.constancy = constancy(t)
+		return v.constancy == .Yes
+	case ^And:
+		if v.constancy == .Unknown do v.constancy = constancy(t)
+		return v.constancy == .Yes
+	}
+	return constancy(t) == .Yes
+}
+
+constancy :: proc(t: Type) -> Constancy {
+	return computed_constant(t) ? .Yes : .No
+}
+
+computed_constant :: proc(t: Type) -> bool {
 	switch v in t {
 	case Char, Int, Real, Bool, None, ^Scope:
 		return true
