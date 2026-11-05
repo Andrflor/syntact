@@ -56,12 +56,7 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 		a := g.facts[find(g, n.args[0])]
 		out.machine, out.lanes, out.bits = a.machine, a.lanes, a.bits
 		if a.machine != .Int do break
-		#partial switch n.op {
-		case .Neg:
-			out.bounds = fit({-a.bounds.hi, -a.bounds.lo})
-		case .Not:
-			out.bounds = fit({-a.bounds.hi - 1, -a.bounds.lo - 1})
-		}
+		out.bounds = unary_bounds(n.op, a.bounds)
 		if x, known := a.constant.?; known {
 			if a.lanes > 0 {
 				out.constant = i128(code.unary(n.op, .Int, code.Datum{int = i64(x)}).int)
@@ -124,6 +119,17 @@ in_64 :: proc(b: code.Bounds) -> bool {
 // fit: the bounds, when the machine computes them without wrapping.
 fit :: proc(b: code.Bounds) -> code.Bounds {
 	return in_64(b) ? b : code.EVERY
+}
+
+// unary_bounds: the bounds of op a, from a's.
+unary_bounds :: proc(op: code.Op, a: code.Bounds) -> code.Bounds {
+	#partial switch op {
+	case .Neg:
+		return fit({-a.hi, -a.lo})
+	case .Not:
+		return fit({-a.hi - 1, -a.lo - 1})
+	}
+	return code.EVERY
 }
 
 // binary_bounds: the bounds of a op b, from theirs.
@@ -260,4 +266,144 @@ exact :: proc(op: code.Op, x, y: i128) -> (r: i128, ok: bool) {
 		r = x >= y ? 1 : 0
 	}
 	return r, code.in_word({r, r})
+}
+
+// THE FACTS OF A CALL
+//
+// A call gives what its function gives: of an integer, the bounds of the values its
+// body gives, each by the facts of its operations, from those of what it reads. Of
+// a recursion they are a least fixed point (Kleene): no call is bounded at first —
+// what it gives is not reached —, and each turn bounds the values of each body, a
+// call giving what the turn before found its function gives, until no bound moves;
+// what still moves after TURNS turns is any integer. They hold of each call that
+// returns, by induction on its depth. What each call gives in the code meets them.
+
+TURNS :: 16
+
+// Reached: the bounds of a value, nil while it is not reached.
+Reached :: Maybe(code.Bounds)
+
+// called: the program, what each call gives bounded by what its function gives.
+called :: proc(p: ^code.Program) {
+	gives := make([][]Reached, len(p.funcs))
+	for f, i in p.funcs do gives[i] = make([]Reached, len(f.results))
+	for turn := 0; ; turn += 1 {
+		next := make([][]Reached, len(p.funcs))
+		for f, i in p.funcs {
+			env := make([]Reached, len(f.kinds))
+			defer delete(env)
+			for _, j in f.params do env[j] = f.kinds[j].bounds
+			reach_body(p, f, f.body, gives, env)
+			next[i] = make([]Reached, len(f.results))
+			for v, k in f.body.values do if k < len(next[i]) do next[i][k] = env[v]
+		}
+		same := true
+		for g, i in gives do for x, k in g {
+			// each turn holds the one before: the bounds only grow
+			if a, reached := x.?; reached {
+				b, has := next[i][k].?
+				next[i][k] = has ? code.hull(a, b) : a
+			}
+			if x == next[i][k] do continue
+			same = false
+			// past TURNS turns, what moves is any integer
+			if turn >= TURNS do next[i][k] = code.EVERY
+		}
+		gives = next
+		if same do break
+	}
+	for f in p.funcs do bound_calls(f.kinds[:], f.body, gives)
+}
+
+// bound_calls: what each call of a body gives, bounded.
+bound_calls :: proc(kinds: []code.Kind, b: code.Body, gives: [][]Reached) {
+	for inst in b.insts {
+		#partial switch i in inst {
+		case code.Call:
+			for x, k in i.dst {
+				r, reached := gives[i.func][k].?
+				if !reached || kinds[x].machine != .Int do continue
+				if m := code.meet(kinds[x].bounds, r); m.lo <= m.hi do kinds[x].bounds = m
+			}
+		case code.Match:
+			for arm in i.arms do bound_calls(kinds, arm.body, gives)
+		case code.Loop:
+			bound_calls(kinds, i.body, gives)
+		}
+	}
+}
+
+// reach_body: the bounds of the values of a body, each by its operation, the
+// calls by what their functions gave in the turn before.
+reach_body :: proc(p: ^code.Program, f: ^code.Func, b: code.Body, gives: [][]Reached, env: []Reached) {
+	// x, by its own bounds and those the code gives it
+	known :: proc(f: ^code.Func, env: []Reached, x: code.Value, b: code.Bounds) {
+		k := f.kinds[x]
+		if k.machine != .Int || k.lanes > 0 {
+			env[x] = k.bounds
+			return
+		}
+		m := code.meet(k.bounds, b)
+		env[x] = m.lo <= m.hi ? m : k.bounds
+	}
+	own :: proc(f: ^code.Func, env: []Reached, x: code.Value) {env[x] = f.kinds[x].bounds}
+	for inst in b.insts {
+		switch i in inst {
+		case code.Const:
+			own(f, env, i.dst)
+		case code.Real_Const:
+			own(f, env, i.dst)
+		case code.Text_Const:
+			own(f, env, i.dst)
+		case code.Input:
+			own(f, env, i.dst)
+		case code.Unary:
+			if a, reached := env[i.a].?; reached do known(f, env, i.dst, unary_bounds(i.op, a))
+		case code.Binary:
+			a, reached_a := env[i.a].?
+			c, reached_b := env[i.b].?
+			if !reached_a || !reached_b do continue
+			known(f, env, i.dst, comparison(i.op) ? code.Bounds{0, 1} : binary_bounds(i.op, a, c))
+		case code.In:
+			if env[i.x] != nil do known(f, env, i.dst, {0, 1})
+		case code.Narrow:
+			if a, reached := env[i.src].?; reached do known(f, env, i.dst, a)
+		case code.Splat:
+			if env[i.a] != nil do own(f, env, i.dst)
+		case code.Lanes:
+			own(f, env, i.dst)
+		case code.Reduce:
+			if env[i.a] != nil do own(f, env, i.dst)
+		case code.Select:
+			yes, reached_yes := env[i.yes].?
+			no, reached_no := env[i.no].?
+			if env[i.test] != nil && reached_yes && reached_no do known(f, env, i.dst, code.hull(yes, no))
+		case code.Foreign:
+			if i.dst != code.NONE do own(f, env, i.dst)
+		case code.Call:
+			for x, k in i.dst {
+				if r, reached := gives[i.func][k].?; reached do known(f, env, x, r)
+			}
+		case code.Match:
+			if env[i.target] == nil do continue
+			for arm in i.arms {
+				reach_body(p, f, arm.body, gives, env)
+				for v, k in arm.body.values {
+					r, reached := env[v].?
+					if !reached || k >= len(i.dst) do continue
+					if d, has := env[i.dst[k]].?; has do env[i.dst[k]] = code.hull(d, r)
+					else do env[i.dst[k]] = r
+				}
+			}
+			for x in i.dst do if r, reached := env[x].?; reached do known(f, env, x, r)
+		case code.Loop:
+			// the parameters, by what the code gives them
+			for x in i.params do own(f, env, x)
+			reach_body(p, f, i.body, gives, env)
+			for x, k in i.dst do if k < len(i.body.values) {
+				if r, reached := env[i.body.values[k]].?; reached do known(f, env, x, r)
+			}
+		case code.Again:
+		}
+	}
 }
