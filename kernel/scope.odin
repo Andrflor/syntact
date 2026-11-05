@@ -926,8 +926,16 @@ pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts, used: Type, lengths: []
 	least, _ := discrete_bounds(first_cell(used))
 	if is_none(counts_from(counts, (least.? or_else 0) + 1)) do return Bool(false)
 	if xs[0].kind == .Expand {
-		pieces, m, ok := run_pieces(k, binding_value(k, xs[0]))
-		if !ok || !included(k, pieces, a) do return stays
+		v := binding_value(k, xs[0])
+		pieces, m, ok := run_pieces(k, v)
+		if !ok {
+			// a run proven to be pieces of a, as many as it holds
+			if piece, is_shape := a.(^Scope); is_shape && is_bool(in_law(k, v, repeated(k, piece, COUNTS, xs[0].span)), true) {
+				return pieces_in(k, xs[1:], a, counts, op(k, .Add, used, COUNTS), lengths, any_length, empty, stays)
+			}
+			return stays
+		}
+		if !included(k, pieces, a) do return stays
 		return pieces_in(k, xs[1:], a, counts, op(k, .Add, used, m), lengths, any_length, empty, stays)
 	}
 	out: Type = Bool(false)
@@ -1503,6 +1511,8 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		if set, known := values(k, o.args[0]); known do if n, read := length_image(k, set); read do return n, true
 		// a call: the lengths of the runs its productions give
 		if c, is_call := as_call(o.args[0]); is_call do if n, read := call_length(k, c); read do return n, true
+		// otherwise a count of bindings: 0..
+		if _, _, pieces := run_pieces(k, o.args[0]); !pieces do return COUNTS, true
 	}
 	if o.op == .Item {
 		if set, known := values(k, o.args[0]); known do if c, read := item_image(k, set); read do return c, true

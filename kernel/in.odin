@@ -34,6 +34,8 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
 	if call, ok := x.(^Collapse); ok && call.recursive && induction(k, call, c) do return Bool(true)
+	// what a call with effects gives back: in c by the same induction (§5.6, §4.8)
+	if u, ok := x.(^Unknown); ok && u.call != nil && u.call.recursive && induction(k, u.call, c) do return Bool(true)
 	if f, ok := x.(^Fold); ok && fold_induction(k, f, c) do return Bool(true)
 	if s, ok := c.(^Scope); ok {
 		// (t::L) in S: true when S holds L, false when they are apart
@@ -258,8 +260,38 @@ induced :: proc(k: ^Kernel, root: ^Scope, c: Type) -> bool {
 		u.layout = c
 		assumed = rewriting_call(assumed, inner, u)
 	}
+	// a call with effects: what it gives back, its answer, is taken in c likewise
+	for x in call_answers(e, root) {
+		u := new_unknown(k, nil)
+		u.layout = c
+		assumed = rewriting(assumed, x, u)
+	}
 	verdict, _ := prove(k, in_law(k, rewrite(k, e, assumed), c))
 	return verdict == .Proven
+}
+
+// call_answers: what the effects calling root in t give back.
+call_answers :: proc(t: Type, root: ^Scope) -> []^Unknown {
+	out := make([dynamic]^Unknown)
+	visit :: proc(t: Type, root: ^Scope, out: ^[dynamic]^Unknown) {
+		#partial switch v in t {
+		case ^Effect:
+			if v.call != nil && v.answer != nil {
+				if s, is_scope := v.call.target.(^Scope); is_scope && origin(s) == root do append(out, v.answer)
+			}
+			if v.choice != nil do visit(v.choice, root, out)
+			visit(v.then, root, out)
+		case ^Pattern:
+			visit(v.target, root, out)
+			for b in v.branches do visit(b.product, root, out)
+		case ^Scope:
+			for b in v.bindings do if b.value != nil do visit(b.value, root, out)
+		case:
+			for p in parts(t) do visit(p, root, out)
+		}
+	}
+	visit(t, root, &out)
+	return out[:]
 }
 
 // built_in: a run a fold builds, {e₀ … eₙ₋₁}, or what of it follows k, in a shape
