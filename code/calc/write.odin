@@ -30,15 +30,17 @@ Open :: struct {
 // machine.
 optimize :: proc(p: ^code.Program, costs: ^Costs) -> (out: code.Program, err: string) {
 	out = code.Program{imports = p.imports, texts = p.texts, inputs = p.inputs}
+	reads := footprints(p)
 	for f in p.funcs {
 		g, values, state := read(p, f)
 		g.costs = costs
+		g.footprints = reads
 		rebuild(g)
 		saturate(g, 100 * len(g.nodes))
-		best, _ := extract(g, costs)
 		roots := make([dynamic]Class)
 		append(&roots, ..values)
 		append(&roots, state)
+		best := extract(g, costs, roots[:])
 		plan := plan(g, best, roots[:])
 		if plan.error != "" do return out, fmt.tprintf("%s: %s", f.name, plan.error)
 		written, msg := write_function(plan, f, values, state)

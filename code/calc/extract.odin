@@ -251,34 +251,65 @@ C := Costs {
 
 
 // extract: the node of least cost of each class, by its index — -1 for a class
-// nothing computes —, and that cost. A computation costs what each class it reaches costs once —
+// nothing computes. A computation costs what each class it reaches costs once —
 // computed once, read as often as it is —: its weight times how often it runs, the
 // turns of each loop it is in (a class is where its scope is). From the best each
 // class has, to a fixed point; a node that reaches its own class is no computation
-// of it.
-extract :: proc(g: ^Graph, costs: ^Costs) -> (best: []int, cost: []f64) {
+// of it. Then the values of the roots together: a tuple — a loop — is computed
+// once and gives each of its values, so that where the classes it gives read it,
+// what it reaches is paid once for all of them: each tuple some of whose values
+// are read, the classes it reaches counted as paid, the best of each class again;
+// kept where the computation of the roots costs less.
+extract :: proc(g: ^Graph, costs: ^Costs, roots: []Class) -> []int {
 	scope := scopes(g)
 	index_members(g)
 	turns := make([]f64, len(g.loops))
 	for _, l in g.loops do turns[l] = turns_of(g, costs, l)
-	n := len(g.parent)
-	runs := make([]f64, n)
+	runs := make([]f64, len(g.parent))
 	for &r, c in runs {
 		r = 1
 		if s, has := scope[c].?; has do r = runs_in(g, turns, s)
 	}
-	best = make([]int, n)
-	cost = make([]f64, n)
+	best := cheapest(g, costs, runs, scope, nil, nil)
+	total, _ := paid(g, costs, runs, best, roots)
+	for improved := true; improved; {
+		improved = false
+		reached := reached_by(g, best, roots)
+		for n, id in g.nodes {
+			if n.kind != .Loop || reached[find(g, g.home[id])] || !gives_reached(g, id, reached) do continue
+			free := reached_by(g, best, one(g.home[id]), id)
+			other := cheapest(g, costs, runs, scope, free, best)
+			cost, ok := paid(g, costs, runs, other, roots)
+			if ok && cost < total - 1e-9 {
+				best, total, improved = other, cost, true
+				reached = reached_by(g, best, roots)
+			}
+		}
+	}
+	return best
+}
+
+// cheapest: the node of least cost of each class, to a fixed point; the classes
+// free paid already, by the node paid gives each.
+cheapest :: proc(g: ^Graph, costs: ^Costs, runs: []f64, scope: []Maybe(Region), free: []bool, paid: []int) -> []int {
+	n := len(g.parent)
+	best := make([]int, n)
+	cost := make([]f64, n)
 	reach := make([][]Class, n)
 	for &b in best do b = -1
 	for &c in cost do c = INFINITE
-	local :: proc(g: ^Graph, costs: ^Costs, runs: []f64, best: []int, x: Class) -> f64 {
+	if free != nil do for f, c in free do if f {
+		best[c], cost[c], reach[c] = paid[c], 0, one(Class(c))
+	}
+	local :: proc(g: ^Graph, costs: ^Costs, runs: []f64, best: []int, free: []bool, x: Class) -> f64 {
+		if free != nil && free[x] do return 0
 		return weight(g, costs, g.nodes[best[x]]) * runs[x]
 	}
 	for round := 0; round < 64; round += 1 {
 		changed := false
 		for node, id in g.nodes {
 			c := find(g, g.home[id])
+			if free != nil && free[c] do continue
 			r, defined := node_scope(g, node, scope)
 			if s, has := scope[c].?; !defined || !has || r != s do continue
 			// what it reaches: its arguments' classes, and theirs
@@ -294,7 +325,7 @@ extract :: proc(g: ^Graph, costs: ^Costs) -> (best: []int, cost: []f64) {
 			}
 			if !computes do continue
 			total := weight(g, costs, node) * runs[c]
-			for x in reached do if x != c do total += local(g, costs, runs, best, x)
+			for x in reached do if x != c do total += local(g, costs, runs, best, free, x)
 			if total < cost[c] - 1e-9 {
 				cost[c], best[c] = total, id
 				insert_sorted(&reached, c)
@@ -306,7 +337,93 @@ extract :: proc(g: ^Graph, costs: ^Costs) -> (best: []int, cost: []f64) {
 		}
 		if !changed do break
 	}
-	return
+	return best
+}
+
+// reached_by: the classes the computation best of roots reaches — the first of
+// them by the node first, when it is one.
+reached_by :: proc(g: ^Graph, best: []int, roots: []Class, first := -1) -> []bool {
+	out := make([]bool, len(g.parent))
+	visit :: proc(g: ^Graph, best: []int, c: Class, node: int, out: []bool) {
+		c := find(g, c)
+		if out[c] do return
+		out[c] = true
+		id := node >= 0 ? node : best[c]
+		if id < 0 do return
+		for a in g.nodes[id].args do visit(g, best, a, -1, out)
+	}
+	for r in roots do if r != NO_CLASS do visit(g, best, r, first, out)
+	return out
+}
+
+// gives_reached: some value the tuple of the node id gives is read where reached.
+gives_reached :: proc(g: ^Graph, id: int, reached: []bool) -> bool {
+	t := find(g, g.home[id])
+	for n, k in g.nodes do if n.kind == .Get && find(g, n.args[0]) == t && reached[find(g, g.home[k])] do return true
+	return false
+}
+
+// paid: what the computation best of the roots costs, each class it reaches once,
+// the parameters of a loop it reads alive as the plan has them (place.odin); not
+// a computation where a class it reaches has none, or reaches itself.
+paid :: proc(g: ^Graph, costs: ^Costs, runs: []f64, best: []int, roots: []Class) -> (f64, bool) {
+	Paid :: struct {
+		g:     ^Graph,
+		costs: ^Costs,
+		runs:  []f64,
+		best:  []int,
+		live:  [][]bool,
+		state: []u8, // 1 while its arguments are visited, 2 once paid
+		total: f64,
+		ok:    bool,
+	}
+	visit :: proc(p: ^Paid, c: Class) {
+		g := p.g
+		c := find(g, c)
+		if p.state[c] == 2 || !p.ok do return
+		if p.state[c] == 1 || p.best[c] < 0 {
+			p.ok = false
+			return
+		}
+		p.state[c] = 1
+		n := g.nodes[p.best[c]]
+		#partial switch n.kind {
+		case .Param:
+			p.live[n.owner][n.index] = true
+		case .Again:
+			for a, j in n.args do if p.live[n.owner][j] do visit(p, a)
+		case .Loop:
+			last := len(n.args) - 1
+			for a, j in n.args[:last] do if p.live[n.owner][j] do visit(p, a)
+			visit(p, n.args[last])
+		case:
+			for a in n.args do visit(p, a)
+		}
+		if n.kind == .Get {
+			if t := g.nodes[p.best[find(g, n.args[0])]]; p.best[find(g, n.args[0])] >= 0 && t.kind == .Loop {
+				info := g.loops[t.owner]
+				if k := n.index - outputs(info); k >= 0 do p.live[t.owner][info.finals[k]] = true
+			}
+		}
+		p.state[c] = 2
+		p.total += weight(g, p.costs, n) * p.runs[c]
+	}
+	p := Paid{g = g, costs = costs, runs = runs, best = best, live = make([][]bool, len(g.loops)), ok = true}
+	for info, l in g.loops {
+		p.live[l] = make([]bool, len(info.params))
+		if info.state >= 0 do p.live[l][info.state] = true
+	}
+	for {
+		alive := 0
+		for l in p.live do for x in l do if x do alive += 1
+		p.state = make([]u8, len(g.parent), context.temp_allocator)
+		p.total = 0
+		for r in roots do if r != NO_CLASS do visit(&p, r)
+		if !p.ok do return INFINITE, false
+		now := 0
+		for l in p.live do for x in l do if x do now += 1
+		if now == alive do return p.total, true
+	}
 }
 
 // runs_in: how often a computation in the region r runs: the turns of each loop it
@@ -444,3 +561,4 @@ bits :: proc(hi: i128) -> int {
 	for x := min(hi, i128(max(i64))); x > 0; x >>= 1 do out += 1
 	return out
 }
+

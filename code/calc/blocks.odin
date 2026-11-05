@@ -32,7 +32,7 @@ blocked :: proc(g: ^Graph, f: ^Fold, lanes: int) -> bool {
 	for r in f.reductions do append(&kinds, code.Kind{f.info.params[r.param].machine, code.EVERY, lanes, 0})
 	zero := make([]code.Bounds, 1)
 	// each lane runs B of the turns of the loop: its turns, over L
-	b := new_loop(g, parent, kinds[:], code.Cover{ints = zero}, .Lanes, turns_of(g, g.costs, f.l) / f64(lanes))
+	b := new_loop(g, parent, kinds[:], code.Cover{ints = zero}, .Lanes, turns_of(g, g.costs, f.l) / f64(lanes), f.info.parts)
 	vectors := make(map[int]Class)
 	for x, k in f.steps do vectors[x.param] = b.params[k + 1]
 	nexts := make([dynamic]Class)

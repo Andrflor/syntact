@@ -102,7 +102,7 @@ Match_Info :: struct {
 // has no effects, how a law carries each parameter — what each turn does to it;
 // nil for the loop's own —, how many values it gives, the parameters it gives at
 // its end, after its values and its state, how many turns it runs — 0: as many as
-// a loop does —, and what made it.
+// a loop does —, what made it, and the loops of the code whose turns it runs.
 Loop_Info :: struct {
 	parent:  Region,
 	node:    int,
@@ -113,6 +113,7 @@ Loop_Info :: struct {
 	finals:  [dynamic]int,
 	turns:   f64,
 	origin:  Origin,
+	parts:   []int,
 }
 
 // Origin: a loop of the code; or its lanes, or the turns they leave, by the law of
@@ -155,6 +156,8 @@ Graph :: struct {
 	merges:  int, // how many merges were made
 	members: [][dynamic]int, // per class: its nodes, as they were when the laws last looked
 	scope:   []Maybe(Region), // per class: where it is defined, then
+	results: []Class, // what the function gives
+	footprints: [][]Footprint, // per function of the program, per parameter: what it reads through it
 }
 
 find :: proc(g: ^Graph, c: Class) -> Class {

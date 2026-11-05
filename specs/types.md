@@ -606,9 +606,42 @@ steps that compose is also the fold of its blocks: its orbit cut into L runs of
 B = ⌈N/L⌉ steps, run k starting at x_{k·B} = M^{k·B}·x₀ (the closed form of the
 orbit, M^n by squares, or r(M) for r = tⁿ mod the characteristic polynomial of M
 (Cayley–Hamilton)), each run in a lane by M itself; what the fold gathers along
-the orbit is recombined by the law of its monoid, in the order of the runs. A computation
-equal to the machine's own, bit for bit, is a choice the program states (open: a
-flag of exact machine arithmetic).
+the orbit is recombined by the law of its monoid, in the order of the runs.
+
+Folds over one orbit are the fold of their pair (banana split): two loops of one
+region whose counters start from one value, step by one δ and stop at one bound run
+the same turns; where neither reads what the other gives, they are one loop carrying
+the parameters of both and giving what each gives. Its effects are those of the one
+that has some, in their order: two loops with effects are not one. Two parameters of
+a loop that start from one value, and whose nexts are one computation where the two
+are identified, are one (by induction on the turns).
+
+```text
+⟳(x ↦ f(x)) × ⟳(y ↦ h(y))  = ⟳((x, y) ↦ (f(x), h(y)))      one orbit, one bound
+⟳(p ↦ f(p, q), q ↦ f(q, p)) = ⟳(p ↦ f(p, p))               p₀ = q₀
+```
+
+A reservation is cells no other shares; an address read from it is base + offset,
+and of the offset the code knows its residue modulo m, m dividing the word
+(ℤ → ℤ/m is a homomorphism of rings, kept by + − and a product by a constant;
+joined where two computations meet, m the gcd of the moduli and of the difference of
+the residues). What reads its cells: each load whose value is used, at its residue;
+each function the address is given to, by what that function reads through it;
+every cell where the address escapes — to a symbol, into memory, out of the
+function. A store no reader reads is not done; an effect on memory only and a call
+of a symbol given no address commute — what the symbol does it does to the world,
+what the memory holds it holds:
+
+```text
+store(s, a + k, v) = s          no reader of a reads a cell of a + k (mod m)
+M(F(s, x))         = F(M(s), x)  M on memory only, F a symbol given no address,
+                                 M reading nothing F gives
+```
+
+A computation reached from several of the values a function gives is computed once:
+a loop gives each of its values once, and the code reads them all from it where that
+costs least. A computation equal to the machine's own, bit for bit, is a choice the
+program states (open: a flag of exact machine arithmetic).
 
 ### 4.11 Sizes
 

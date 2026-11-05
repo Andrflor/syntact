@@ -131,10 +131,11 @@ Built :: struct {
 }
 
 // new_loop: a loop of parameters of these kinds, in parent, each of which it gives
-// at its end; it ends where its test is in the cover exit.
-new_loop :: proc(g: ^Graph, parent: Region, kinds: []code.Kind, exit: code.Cover, origin: Origin, turns: f64 = 0) -> Built {
+// at its end; it ends where its test is in the cover exit; it runs the turns of
+// the loops of the code parts.
+new_loop :: proc(g: ^Graph, parent: Region, kinds: []code.Kind, exit: code.Cover, origin: Origin, turns: f64 = 0, parts: []int = nil) -> Built {
 	b := Built{v = len(g.loops), m = len(g.matches)}
-	info := Loop_Info{parent = parent, state = -1, origin = origin, turns = turns}
+	info := Loop_Info{parent = parent, state = -1, origin = origin, turns = turns, parts = parts}
 	for k, j in kinds {
 		append(&info.params, k)
 		append(&info.carried, nil)
@@ -187,7 +188,7 @@ interleaved :: proc(g: ^Graph, f: ^Fold, lanes, bits: int) -> bool {
 	stops := make([]code.Bounds, 1)
 	stops[0] = {1, 1}
 	// L turns of the loop at once: its turns, over L
-	b := new_loop(g, f.info.parent, kinds[:], code.Cover{ints = stops}, .Lanes, turns_of(g, g.costs, f.l) / f64(lanes))
+	b := new_loop(g, f.info.parent, kinds[:], code.Cover{ints = stops}, .Lanes, turns_of(g, g.costs, f.l) / f64(lanes), f.info.parts)
 	i := b.params[0]
 	// the counter of the lanes takes points of the orbit of the loop's
 	if param, is := lookup(g, Node{kind = .Param, owner = f.l, index = f.counter}); is {
@@ -265,25 +266,33 @@ own_params :: proc(info: Loop_Info) -> int {
 }
 
 // Turn: how a turn of a loop ends: a match whose arm exit gives what the loop
-// gives, and whose arm step goes on, by an Again; the token of that arm.
+// gives, by an Exit, and whose arm step goes on, by an Again; the token of that
+// arm; the first of its arguments that is an arm, after the target and the state.
 Turn :: struct {
 	match:      Node,
 	exit, step: int,
 	again:      Node,
+	ending:     Node,
 	step_token: Class,
+	first:      int,
 }
 
 turn_of :: proc(g: ^Graph, tail: Class, l: int) -> (t: Turn, ok: bool) {
 	for id in g.members[find(g, tail)] {
 		n := g.nodes[id]
-		if n.kind != .Match || !g.matches[n.owner].tail || len(n.args) != 3 do continue
+		if n.kind != .Match || !g.matches[n.owner].tail do continue
+		t.first = g.matches[n.owner].state ? 2 : 1
+		if len(n.args) != t.first + 2 do continue
 		t.match = n
 		t.exit, t.step = -1, -1
 		for k in 0 ..< 2 {
-			for aid in g.members[find(g, n.args[1 + k])] {
+			for aid in g.members[find(g, n.args[t.first + k])] {
 				a := g.nodes[aid]
 				if a.owner != l do continue
-				if a.kind == .Exit do t.exit = k
+				if a.kind == .Exit {
+					t.exit = k
+					t.ending = a
+				}
 				if a.kind == .Again {
 					t.step = k
 					t.again = a
@@ -547,41 +556,62 @@ splat :: proc(g: ^Graph, c: Class, lanes: int, bits := 0) -> Class {
 	return add(g, Node{kind = .Splat, value = i128(lanes), index = bits, args = one(c)})
 }
 
-// Copy: the computations of a turn of the loop from, as those of the loop to: its
-// own parameters, its matches, its tail.
+// Copy: the computations of a turn of the loops from, as those of the loop to:
+// the own parameters of from[k] as those of to from base[k] on, their matches —
+// the arms of a match renumbered by arms —, their tails, their effects.
 Copy :: struct {
-	g:        ^Graph,
-	from, to: int,
-	own:      int,
-	matches:  map[int]int,
-	memo:     map[Class]Class,
-	busy:     map[Class]bool,
+	g:       ^Graph,
+	from:    []int,
+	base:    []int,
+	to:      int,
+	matches: map[int]int,
+	arms:    map[[2]int]int,
+	memo:    map[Class]Class,
+	busy:    map[Class]bool,
 }
 
 // copy_loop: a loop that computes what l does, by the same turns, from what its
 // node is given — its own parameters only, the tail of its body its one argument.
-copy_loop :: proc(g: ^Graph, l: int) -> (r: int, ok: bool) {
+copy_loop :: proc(g: ^Graph, l: int, origin := Origin.Rest) -> (r: int, ok: bool) {
 	info := g.loops[l]
 	r = len(g.loops)
 	own := own_params(info)
-	copy_info := Loop_Info{parent = info.parent, state = info.state, values = info.values, origin = .Rest}
+	copy_info := Loop_Info{parent = info.parent, state = info.state, values = info.values, origin = origin, parts = info.parts}
 	for j in 0 ..< own {
 		append(&copy_info.params, info.params[j])
 		append(&copy_info.carried, nil)
 	}
+	for j in info.finals do if j < own do append(&copy_info.finals, j)
 	append(&g.loops, copy_info)
-	t := Copy{g = g, from = l, to = r, own = own}
-	tail := copied(&t, g.nodes[info.node].args[len(g.nodes[info.node].args) - 1]) or_return
+	t := Copy{g = g, from = []int{l}, base = []int{0}, to = r}
+	tail, copied_all := copied(&t, g.nodes[info.node].args[len(g.nodes[info.node].args) - 1])
+	if !copied_all {
+		abandon(g, r)
+		return r, false
+	}
 	add(g, Node{kind = .Loop, owner = r, args = one(tail)})
 	g.loops[r].node = len(g.nodes) - 1
 	return r, true
+}
+
+// abandon: a loop a law could not build: no law looks at it, the code reads it
+// nowhere.
+abandon :: proc(g: ^Graph, l: int) {
+	g.loops[l].parts = nil
+	g.loops[l].origin = .Rest
+}
+
+// source: the index in t.from of the loop l, -1 when it is none of them.
+source :: proc(t: ^Copy, l: int) -> int {
+	for x, k in t.from do if x == l do return k
+	return -1
 }
 
 copied :: proc(t: ^Copy, c: Class) -> (Class, bool) {
 	g := t.g
 	c := find(g, c)
 	if x, done := t.memo[c]; done do return x, true
-	if invariant(g, c, t.from) do return c, true
+	if invariant_all(g, c, t.from) do return c, true
 	if t.busy[c] || c >= Class(len(g.members)) do return NO_CLASS, false
 	t.busy[c] = true
 	out := NO_CLASS
@@ -598,29 +628,37 @@ copied :: proc(t: ^Copy, c: Class) -> (Class, bool) {
 	return t.memo[c], true
 }
 
+// invariant_all: no turn of any of the loops ls changes c.
+invariant_all :: proc(g: ^Graph, c: Class, ls: []int) -> bool {
+	for l in ls do if !invariant(g, c, l) do return false
+	return true
+}
+
 copy_node :: proc(t: ^Copy, n: Node) -> (c: Class, ok: bool) {
 	g := t.g
 	out := n
 	#partial switch n.kind {
 	case .Param:
-		if n.owner != t.from || n.index >= t.own do return NO_CLASS, false
-		out.owner = t.to
+		k := source(t, n.owner)
+		if k < 0 || n.index >= own_params(g.loops[n.owner]) do return NO_CLASS, false
+		out.owner, out.index = t.to, t.base[k] + n.index
 		return add(g, out), true
 	case .Arm:
 		out.owner = copy_match(t, n.owner)
+		out.index = t.arms[{n.owner, n.index}] or_else n.index
 		return add(g, out), true
 	case .Match:
 		out.owner = copy_match(t, n.owner)
 	case .Again:
-		if n.owner != t.from do return NO_CLASS, false
+		if len(t.from) != 1 || n.owner != t.from[0] do return NO_CLASS, false
 		out.owner = t.to
-		out.args = n.args[:t.own]
+		out.args = n.args[:own_params(g.loops[n.owner])]
 	case .Exit:
-		if n.owner != t.from do return NO_CLASS, false
+		if len(t.from) != 1 || n.owner != t.from[0] do return NO_CLASS, false
 		out.owner = t.to
-	case .Call:
-		if !g.prog.funcs[n.index].pure do return NO_CLASS, false
-	case .Narrow, .Unary, .Binary, .In, .Get, .Splat, .Lanes, .Reduce, .Select:
+	case .Int, .Real, .Text, .Input, .Argument, .Start:
+		return add(g, n), true
+	case .Narrow, .Unary, .Binary, .In, .Get, .Splat, .Lanes, .Reduce, .Select, .Call, .Foreign, .Memory:
 	case:
 		return NO_CLASS, false
 	}
@@ -630,7 +668,7 @@ copy_node :: proc(t: ^Copy, n: Node) -> (c: Class, ok: bool) {
 	return add(g, out), true
 }
 
-// copy_match: the match of the copy for a match of the body of from.
+// copy_match: the match of the copy for a match of the body of a loop of from.
 copy_match :: proc(t: ^Copy, m: int) -> int {
 	if x, done := t.matches[m]; done do return x
 	info := t.g.matches[m]
@@ -643,9 +681,9 @@ copy_match :: proc(t: ^Copy, m: int) -> int {
 copy_region :: proc(t: ^Copy, r: Region) -> Region {
 	switch r.kind {
 	case .Body:
-		if r.owner == t.from do return Region{.Body, t.to, 0}
+		if source(t, r.owner) >= 0 do return Region{.Body, t.to, 0}
 	case .Arm:
-		if inside(t.g, r, Region{.Body, t.from, 0}) do return Region{.Arm, copy_match(t, r.owner), r.arm}
+		for l in t.from do if inside(t.g, r, Region{.Body, l, 0}) do return Region{.Arm, copy_match(t, r.owner), t.arms[{r.owner, r.arm}] or_else r.arm}
 	case .Root:
 	}
 	return r

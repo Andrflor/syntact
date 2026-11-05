@@ -19,8 +19,11 @@ import code ".."
 // there only. Only what leaves the ring is carried — a polynomial an operation of
 // another kind reads, a power, a quotient —: what it is made of comes along.
 
-// loop_laws: the laws of each loop, on the classes as the laws last saw them.
+// loop_laws: the laws of each loop, on the classes as the laws last saw them; the
+// law of parameters identified and of the pair (fusion.odin).
 loop_laws :: proc(g: ^Graph) {
+	identified(g)
+	defer paired(g)
 	consumed := make([]bool, len(g.parent))
 	for n in g.nodes {
 		if ring(n) do continue

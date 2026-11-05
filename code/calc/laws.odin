@@ -53,6 +53,7 @@ saturated :: proc(g: ^Graph, budget: int) {
 			for law in LAWS do law(g, find(g, g.home[id]), n)
 		}
 		loop_laws(g)
+		memory_laws(g)
 		rebuild(g)
 		if len(g.nodes) == nodes && g.merges == merges do return
 	}

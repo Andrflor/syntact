@@ -30,7 +30,8 @@ read :: proc(p: ^code.Program, f: ^code.Func) -> (g: ^Graph, values: []Class, st
 	r.state = add(g, Node{kind = .Start})
 	r.token = r.state
 	read_body(&r, f.body)
-	return g, classes(&r, f.body.values), r.state
+	g.results = classes(&r, f.body.values)
+	return g, g.results, r.state
 }
 
 read_body :: proc(r: ^Reader, b: code.Body) {
@@ -213,7 +214,8 @@ read_match :: proc(r: ^Reader, i: code.Match) {
 read_loop :: proc(r: ^Reader, i: code.Loop) {
 	g := r.g
 	l := len(g.loops)
-	info := Loop_Info{parent = r.region, state = -1, values = len(i.dst)}
+	info := Loop_Info{parent = r.region, state = -1, values = len(i.dst), parts = make([]int, 1)}
+	info.parts[0] = l
 	for x in i.params {
 		append(&info.params, code.Kind{g.func.kinds[x].machine, code.EVERY, g.func.kinds[x].lanes, g.func.kinds[x].bits})
 		append(&info.carried, nil)
