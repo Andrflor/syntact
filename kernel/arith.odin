@@ -112,33 +112,19 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		return layout_family(k, image)
 	case ^Operation:
 		if v.op == .In do return .Bool, true
-		#partial switch v.op {
-		case .Length:
-			return .Count, true
-		case .From:
-			return .Scope, true
-		case .Item:
-			if set, known := values(k, v); known do return layout_family(k, set)
-			return read_family(k, v.args[0], "", -2)
+		known, plain := plain_of(k, v)
+		if plain && known.typed {
+			f, has := known.family.?
+			return f, has
 		}
-		if is_string_value(t) do return .String, true
-		// a recursive call whose equation is being given fits any family
-		families: [2]Maybe(Family)
-		for a, i in v.args {
-			if i >= 2 do break
-			f, ok := family_of(k, a)
-			if ok {
-				families[i] = f
-			} else if !is_pending_call(k, a) {
-				return {}, false
-			}
+		f, has := operation_family(k, v)
+		if plain {
+			known, _ = plain_of(k, v)
+			known.typed = true
+			if has do known.family = f
+			k.plain[v] = known
 		}
-		// the operation was proven legal when it was built: its operands are read in
-		// the families the signature restricts (a divisor, a count, in the integers)
-		next: for sig in signatures(v.op) {
-			for f, i in families[:min(len(v.args), 2)] do if g, known := f.?; known && !family_holds(domain(sig.args[i]), g) do continue next
-			return sig.result, true
-		}
+		return f, has
 	case ^Collapse:
 		if v.recursive do return call_family(k, v)
 	case ^Access:
@@ -164,6 +150,39 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 			f = g
 		}
 		return f.?
+	}
+	return {}, false
+}
+
+// operation_family: the family of the operation v, by its signature.
+operation_family :: proc(k: ^Kernel, v: ^Operation) -> (Family, bool) {
+	t := Type(v)
+	#partial switch v.op {
+	case .Length:
+		return .Count, true
+	case .From:
+		return .Scope, true
+	case .Item:
+		if set, known := values(k, v); known do return layout_family(k, set)
+		return read_family(k, v.args[0], "", -2)
+	}
+	if is_string_value(t) do return .String, true
+	// a recursive call whose equation is being given fits any family
+	families: [2]Maybe(Family)
+	for a, i in v.args {
+		if i >= 2 do break
+		f, ok := family_of(k, a)
+		if ok {
+			families[i] = f
+		} else if !is_pending_call(k, a) {
+			return {}, false
+		}
+	}
+	// the operation was proven legal when it was built: its operands are read in
+	// the families the signature restricts (a divisor, a count, in the integers)
+	next: for sig in signatures(v.op) {
+		for f, i in families[:min(len(v.args), 2)] do if g, known := f.?; known && !family_holds(domain(sig.args[i]), g) do continue next
+		return sig.result, true
 	}
 	return {}, false
 }

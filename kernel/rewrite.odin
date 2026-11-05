@@ -283,11 +283,26 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if is_string_value(t) do return t, true
 		if v.op == .In do return family_term(.Bool), true
 		if v.op == .Length || v.op == .Item || v.op == .From do return run_image(k, v)
+		known, plain := plain_of(k, v)
+		if plain && known.imaged do return known.image, known.image != nil
 		args := make([]Type, len(v.args))
-		for a, i in v.args do args[i] = layout_image(k, a) or_return
-		// the term computes exactly: only a rounding rounds (format.odin)
-		if v.op == .Round do return round_law(k, args[0], bits_format(args[1]), v.span), true
-		return related_image(k, t, exact_law(k, v.op, args, v.span)), true
+		image: Type
+		computed := true
+		for a, i in v.args {
+			args[i], computed = layout_image(k, a)
+			if !computed do break
+		}
+		if computed {
+			// the term computes exactly: only a rounding rounds (format.odin)
+			if v.op == .Round do image = round_law(k, args[0], bits_format(args[1]), v.span)
+			else do image = related_image(k, t, exact_law(k, v.op, args, v.span))
+		}
+		if plain {
+			known, _ = plain_of(k, v)
+			known.imaged, known.image = true, image
+			k.plain[v] = known
+		}
+		return image, image != nil
 	case ^Or:
 		terms := make([]Type, len(v.terms))
 		for a, i in v.terms do terms[i] = layout_image(k, a) or_return
@@ -337,6 +352,36 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Effect, ^Scope, ^Name, ^Carve, ^Default:
 	}
 	return nil, false
+}
+
+// Plain: what is known of an operation over plain terms — constants, unknowns that
+// no call gives, operations over them —, which depends on nothing but the term:
+// its image and its family, each computed once.
+Plain :: struct {
+	plain, imaged, typed: bool,
+	image:                Type,
+	family:               Maybe(Family),
+}
+
+// plain_of: what is known of o, and whether o is plain — found once.
+plain_of :: proc(k: ^Kernel, o: ^Operation) -> (Plain, bool) {
+	if entry, found := k.plain[o]; found do return entry, entry.plain
+	is_plain :: proc(k: ^Kernel, t: Type) -> bool {
+		#partial switch v in t {
+		case Int, Real, Char, Bool, None:
+			return true
+		case ^Unknown:
+			return v.call == nil
+		case ^Operation:
+			_, plain := plain_of(k, v)
+			return plain
+		}
+		return false
+	}
+	entry := Plain{plain = true}
+	for a in o.args do entry.plain &&= is_plain(k, a)
+	k.plain[o] = entry
+	return entry, entry.plain
 }
 
 // related_image: the image of a term of degree 1 in an unknown narrowed between

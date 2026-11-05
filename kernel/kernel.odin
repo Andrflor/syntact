@@ -44,6 +44,7 @@ Kernel :: struct {
 	tupled:     [dynamic]Tupled, // the equations of an equation over a range of one of its fields (recursion.odin) // the equations of sums of an equation over one of its fields (recursion.odin)
 	images:     [dynamic]Image, // the bounds of the calls of an equation, given once (recursion.odin)
 	induced:    [dynamic]Induced, // whether the calls of an equation are in a set, proven once (in.odin)
+	plain:      map[^Operation]Plain, // what is known of an operation over plain unknowns, once (rewrite.odin)
 	reached:    [dynamic]Type, // what the reaches of the branches being typed say beyond their rewrite: it holds in them (§6)
 	asking:     [dynamic]^Scope, // the equations read where what their calls carve is unknown: being given, their calls are the hypothesis (is_pending_call)
 	markers:    int, // the unknowns that stand for a hole while it is inferred
