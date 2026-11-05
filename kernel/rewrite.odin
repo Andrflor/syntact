@@ -51,7 +51,23 @@ rewriting_call :: proc(r: Rewrite, c: ^Collapse, t: Type) -> Rewrite {
 
 // reads: t holds the unknown u: rewriting u changes it.
 reads :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
-	return !same(k, rewrite(k, t, rewriting(nil, u, new_unknown(k, nil))), t)
+	#partial switch _ in t {
+	case nil, Char, Int, Real, Bool, None, Invalid:
+		return false
+	}
+	// a node is never changed once built: what it reads, asked once
+	node := t
+	key := Read_Key{node = (^rawptr)(&node)^, unknown = u.id}
+	if known, found := k.read[key]; found do return known
+	read := !same(k, rewrite(k, t, rewriting(nil, u, new_unknown(k, nil))), t)
+	k.read[key] = read
+	return read
+}
+
+// Read_Key: a node, and an unknown it may read.
+Read_Key :: struct {
+	node:    rawptr,
+	unknown: int,
 }
 // rewrite: t with its unknowns rewritten, in normal form. A term none of whose parts
 // a rewrite changes is the term itself: in normal form, its parts the same, its law
@@ -119,17 +135,29 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	case ^Fold:
 		parts := fold_parts(v)
 		rewritten := rewrite_all(k, parts, r)
-		if identical(rewritten, parts) do return t
-		return fold_law(k, with_parts(v, rewritten))
+		index, renamed := bound_as(k, r, v.index)
+		states := make([]^Unknown, len(v.states))
+		for z, i in v.states {
+			x, moved := bound_as(k, r, z)
+			states[i] = x
+			renamed ||= moved
+		}
+		if identical(rewritten, parts) && !renamed do return t
+		out := with_parts(v, rewritten)
+		out.index, out.states = index, states
+		return fold_law(k, out)
 	case ^Least:
 		holds := rewrite(k, v.holds, r)
-		if holds == v.holds do return t
-		return least_law(k, v.index, holds, v.span)
+		index, renamed := bound_as(k, r, v.index)
+		if holds == v.holds && !renamed do return t
+		return least_law(k, index, holds, v.span)
 	case ^Series:
 		out := new(Series)
 		out^ = v^
 		out.lo, out.hi, out.term = rewrite(k, v.lo, r), rewrite(k, v.hi, r), rewrite(k, v.term, r)
-		if out.lo == v.lo && out.hi == v.hi && out.term == v.term do return t
+		renamed: bool
+		out.index, renamed = bound_as(k, r, v.index)
+		if out.lo == v.lo && out.hi == v.hi && out.term == v.term && !renamed do return t
 		return series_law(k, out)
 	case ^Recurrent:
 		out := new(Recurrent)
@@ -237,6 +265,56 @@ rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> ^Scope {
 // rewrite_fold: the fold with its parts rewritten; what it binds is its own.
 rewrite_fold :: proc(k: ^Kernel, f: ^Fold, r: Rewrite) -> ^Fold {
 	return with_parts(f, rewrite_all(k, fold_parts(f), r))
+}
+
+// bound_as: an unknown bound in a term — an index, a state — as r rewrites it: as
+// its occurrences are, renamed or its layout rewritten.
+bound_as :: proc(k: ^Kernel, r: Rewrite, u: ^Unknown) -> (^Unknown, bool) {
+	if w, is_unknown := rewrite(k, u, r).(^Unknown); is_unknown && w != u do return w, true
+	return u, false
+}
+
+// renamed: t, each unknown bound in it — the index and the states of a fold, the
+// index of a Σ or a μ — another of the same layout: the same term, its bound
+// unknowns its own.
+renamed :: proc(k: ^Kernel, t: Type) -> Type {
+	bound := make([dynamic]^Unknown)
+	visit :: proc(t: Type, out: ^[dynamic]^Unknown) {
+		#partial switch v in t {
+		case ^Fold:
+			append(out, v.index)
+			append(out, ..v.states)
+			for p in fold_parts(v) do visit(p, out)
+		case ^Series:
+			append(out, v.index)
+			visit(v.lo, out)
+			visit(v.hi, out)
+			visit(v.term, out)
+		case ^Least:
+			append(out, v.index)
+			visit(v.holds, out)
+		case ^Pattern:
+			visit(v.target, out)
+			for b in v.branches do visit(b.product, out)
+		case ^Effect:
+			visit(v.then, out)
+			if v.choice != nil do visit(v.choice, out)
+		case ^Scope, ^Collapse:
+		case:
+			for p in parts(t) do visit(p, out)
+		}
+	}
+	visit(t, &bound)
+	if len(bound) == 0 do return t
+	r: Rewrite
+	for u in bound {
+		fresh := new(Unknown)
+		fresh^ = u^
+		fresh.id = k.unknowns
+		k.unknowns += 1
+		r = rewriting(r, u, fresh)
+	}
+	return rewrite(k, t, r)
 }
 
 // identical: the same terms, each the very term.

@@ -45,6 +45,8 @@ Kernel :: struct {
 	images:     [dynamic]Image, // the bounds of the calls of an equation, given once (recursion.odin)
 	induced:    [dynamic]Induced, // whether the calls of an equation are in a set, proven once (in.odin)
 	plain:      map[^Operation]Plain, // what is known of an operation over plain unknowns, once (rewrite.odin)
+	read:       map[Read_Key]bool, // whether a node reads an unknown, once asked (rewrite.odin)
+	generics:   [dynamic]Generic, // the solutions of equations where what is given is unknown, once (recursion.odin)
 	asking:     [dynamic]^Scope, // the equations read where what their calls carve is unknown: being given, their calls are the hypothesis (is_pending_call)
 	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check

@@ -267,6 +267,16 @@ generic_equation :: proc(k: ^Kernel, root: ^Scope, carved: ^map[^Binding]Type) -
 // sum{n -> m}! = m ? {0 -> 0  -> m + sum{n -> m - 1}!} gives m * (m + 1) / 2 whatever
 // m, and whatever n holds in sum.
 generic_solution :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> (solution: Type, ok: bool) {
+	// solved once for the bindings given: then at their values, its bound unknowns
+	// its own
+	key := make([dynamic]^Binding)
+	for b in given do append(&key, b)
+	slice.sort_by(key[:], proc(a, b: ^Binding) -> bool {return uintptr(a) < uintptr(b)})
+	for g in k.generics do if g.root == root && slice.equal(g.given, key[:]) {
+		rewrites: Rewrite
+		for b, u in g.params do rewrites = rewriting(rewrites, u.(^Unknown), b in given ? given[b] : binding_type(k, b))
+		return rewrite(k, renamed(k, g.solved), rewrites), true
+	}
 	// the bindings given, and those the calls carve, at the values root holds
 	values := make(map[^Binding]Type)
 	for b, v in given do values[b] = v
@@ -285,11 +295,21 @@ generic_solution :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> 
 		}
 		if !more {
 			solved := iteration(k, generic, equation) or_return
+			append(&k.generics, Generic{root, key[:], params, solved})
 			rewrites: Rewrite
 			for b, u in params do rewrites = rewriting(rewrites, u.(^Unknown), values[b])
 			return rewrite(k, solved, rewrites), true
 		}
 	}
+}
+
+// Generic: the solution of an equation where the bindings given, and those its
+// calls carve, are the unknowns params holds.
+Generic :: struct {
+	root:   ^Scope,
+	given:  []^Binding,
+	params: map[^Binding]Type,
+	solved: Type,
 }
 
 // holding: the binding of s that holds b, a binding of the scope s copies: b
