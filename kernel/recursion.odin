@@ -1935,7 +1935,7 @@ measured :: proc(k: ^Kernel, t: Type, root: ^Scope, measure: Measure, to: Type) 
 // at_bound: the products of t, each call of root in it taken at y.
 at_bound :: proc(k: ^Kernel, t: Type, root: ^Scope, measure: Measure, y: ^Unknown) -> (out: []Bound_Product, ok: bool) {
 	leaves := make([dynamic]Type)
-	products(measured(k, t, root, measure, y) or_return, &leaves)
+	products(k, measured(k, t, root, measure, y) or_return, &leaves)
 	parts := make([dynamic]Bound_Product)
 	for x in leaves do append(&parts, bound_product(k, x, y) or_return)
 	return parts[:], true
@@ -2107,9 +2107,15 @@ counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure
 
 // products: the products t may give: a pattern without effects, those of its
 // branches; otherwise t.
-products :: proc(t: Type, out: ^[dynamic]Type) {
+products :: proc(k: ^Kernel, t: Type, out: ^[dynamic]Type) {
 	if p, is_pattern := t.(^Pattern); is_pattern && !has_effect(p) {
-		for b in p.branches do products(b.product, out)
+		// each product in its branch, where its reach holds: t & S there (§6)
+		reached, _, invalid := reaches(k, p.target, p.branches)
+		if invalid != nil {
+			append(out, invalid)
+			return
+		}
+		for r in reached do products(k, branch_product(k, p.branches[r.branch], r.rewrite, p.target), out)
 		return
 	}
 	append(out, t)

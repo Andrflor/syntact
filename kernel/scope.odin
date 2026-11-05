@@ -44,13 +44,17 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
 	v := given(k, t)
 	if _, is_scope := v.(^Scope); is_scope do return true
-	// a call: proven in the scopes, by induction (§5.6)
-	if c, is_call := as_call(v); is_call {
+	// a call, or what holds one: proven in the scopes, by induction (§5.6)
+	scopes :: proc(k: ^Kernel, t: Type) -> (bool, bool) {
+		c, is_call := as_call(t)
+		if !is_call do return false, false
 		f, known := call_family(k, c)
-		return known && f == .Scope
+		return known && f == .Scope, true
 	}
+	if holds, is_call := scopes(k, v); is_call do return holds
 	set, ok := values(k, v)
 	if !ok do return false
+	if holds, is_call := scopes(k, set); is_call do return holds
 	one: [1]Type
 	cells, negated := cells_in(set, &one)
 	if negated || len(cells) == 0 do return false
@@ -1472,8 +1476,10 @@ item_image :: proc(k: ^Kernel, layout: Type) -> (c: Type, ok: bool) {
 		return
 	case ^Scope:
 		shape := v
-		if recursive(v) do shape = arden(k, v) or_return
-		if !is_shape(k, shape) do return
+		// an equation Arden solves is the shape of its solution; otherwise what its
+		// productions place
+		if recursive(v) do if solved, read := arden(k, v); read do shape = solved
+		if !is_shape(k, shape) do return produced_items(k, v)
 		items := make([dynamic]Type)
 		for p in placed(k, shape, .Shape) {
 			// a binding written with its value: what that value may be
@@ -1497,6 +1503,41 @@ item_image :: proc(k: ^Kernel, layout: Type) -> (c: Type, ok: bool) {
 		return or_law(k, items[:]), true
 	}
 	return
+}
+
+// produced_items: the bindings of the runs a scope with productions admits: what
+// its productions place (§5.4). A run of a call of its own equation places what
+// the scope places: X = X ∪ P adds nothing to P. While they are read, the equation
+// is read, its calls the hypothesis.
+produced_items :: proc(k: ^Kernel, s: ^Scope) -> (c: Type, ok: bool) {
+	root := origin(s)
+	if reading(k, root) do return
+	for x in k.equations do if x.generic == s do x.read = true
+	defer for x in k.equations do if x.generic == s do x.read = false
+	leaves := make([dynamic]Type)
+	for p in placed(k, s, .Shape) do if p.kind == .Product && p.value != nil do products(k, binding_type(k, p), &leaves)
+	own :: proc(t: Type, root: ^Scope) -> bool {
+		c, is_call := as_call(t)
+		if !is_call do return false
+		s, is_scope := c.target.(^Scope)
+		return is_scope && origin(s) == root
+	}
+	items := make([dynamic]Type)
+	for leaf in leaves {
+		if own(leaf, root) do continue
+		run := given(k, leaf).(^Scope) or_return
+		for b in run_data(k, run) {
+			v := binding_value(k, b)
+			if b.kind == .Push {
+				append(&items, values(k, given(k, v)) or_return)
+				continue
+			}
+			if own(v, root) do continue
+			append(&items, item_image(k, values(k, given(k, v)) or_return) or_return)
+		}
+	}
+	if len(items) == 0 do return
+	return or_law(k, items[:]), true
 }
 
 // repeated: the shape {...P * n} of the runs of n pieces P.

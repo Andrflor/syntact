@@ -266,7 +266,10 @@ induction :: proc(k: ^Kernel, eq: ^Call_Equation, c: Type, fields: bool) -> bool
 	if reading(k, eq.root) do return false
 	at := len(k.induced)
 	append(&k.induced, Induced{eq.generic, c, fields, false})
+	// the proof reads the equation: meanwhile its calls are the hypothesis
+	eq.read = true
 	proven := induced(k, eq.root, eq.equation, c, fields)
+	eq.read = false
 	k.induced[at].proven = proven
 	return proven
 }
@@ -294,7 +297,7 @@ holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: bool) -> bool {
 		return verdict == .Proven
 	}
 	leaves := make([dynamic]Type)
-	products(given(k, v), &leaves)
+	products(k, given(k, v), &leaves)
 	for leaf in leaves {
 		if is_none(leaf) do continue
 		shape := leaf.(^Scope) or_return
