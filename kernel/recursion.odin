@@ -462,6 +462,8 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	if len(p.branches) != 2 || p.branches[0].cover == nil || p.branches[1].cover != nil do return
 	u := p.target.(^Unknown) or_return
 	root := origin(s)
+	// a step with a term of no type is not solved: the call stays, typed at its values
+	for b in p.branches do if holds_invalid(b.product) do return
 	stop, c, r := p.branches[0].cover, p.branches[0].product, p.branches[1].product
 	// on a run: the branch that cuts it calls, the other is the base, the empty run
 	if !solved(c, root) && solved(r, root) {

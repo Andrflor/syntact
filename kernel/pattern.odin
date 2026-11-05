@@ -296,6 +296,14 @@ holds_invalid :: proc(t: Type) -> bool {
 	if f, is_fold := t.(^Fold); is_fold {
 		for x in fold_parts(f) do if holds_invalid(x) do return true
 	}
+	if e, is_effect := t.(^Effect); is_effect {
+		if e.call != nil && holds_invalid(e.call) do return true
+		if e.choice != nil && holds_invalid(e.choice) do return true
+		return holds_invalid(e.then)
+	}
+	if c, is_call := t.(^Collapse); is_call {
+		if s, is_scope := c.target.(^Scope); is_scope do for _, v in s.changes do if holds_invalid(v) do return true
+	}
 	for x in parts(t) do if holds_invalid(x) do return true
 	return false
 }

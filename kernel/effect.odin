@@ -285,6 +285,11 @@ ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, run: ^Rew
 				continue
 			}
 			t := binding_type(k, b)
+			// a binding of no type: what the run gives has none, never an effect dropped
+			if is_invalid(t) {
+				append(parts, t)
+				continue
+			}
 			if !has_effect(t) do continue
 			if run != nil {
 				t = in_run(k, t, run)
