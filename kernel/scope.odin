@@ -1172,8 +1172,15 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	at, placed_at := i.(Int)
 	if o == .Item && !checked && !(known && placed_at) && !is_pending_call(k, x) {
 		if _, is_fold := x.(^Fold); !is_fold || !placed_at {
+			// by the length of x as a term, or by the least length its values have
 			past := op(k, .Sub, i, run_law(k, .Length, {x}, span))
-			if verdict, _ := prove(k, in_law(k, past, range_law(k, nil, Int(-1), .Int, span))); verdict != .Proven {
+			verdict, _ := prove(k, in_law(k, past, range_law(k, nil, Int(-1), .Int, span)))
+			if verdict != .Proven {
+				if set, known := values(k, x); known do if n, read := length_image(k, set); read {
+					if least, bounded := term_bound(k, n, true); bounded do verdict, _ = prove(k, in_law(k, i, range_law(k, nil, op(k, .Sub, least, Int(1)), .Int, span)))
+				}
+			}
+			if verdict != .Proven {
 				return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a place of %s, and %s is not proven to be one", operator_text[o], print_type(x), print_type(i)))
 			}
 		}
@@ -1296,6 +1303,74 @@ call_length :: proc(k: ^Kernel, c: ^Collapse) -> (n: Type, ok: bool) {
 	return or_law(k, lengths[:]), true
 }
 
+// suffix: the runs that follow the place at of the runs a layout admits (§5.3): a
+// shape without its first places, at a known place; at a place not known, any of
+// those from 0 to the end of its places, a run of pieces holding its own suffixes.
+// L & S what both say, L | S what either does.
+suffix :: proc(k: ^Kernel, layout: Type, at: Type) -> (out: Type, ok: bool) {
+	#partial switch v in layout {
+	case ^And:
+		for t in v.terms {
+			x := suffix(k, t, at) or_continue
+			out = out == nil ? x : and_law(k, {out, x})
+		}
+		return out, out != nil
+	case ^Or:
+		parts := make([]Type, len(v.terms))
+		for t, i in v.terms do parts[i] = suffix(k, t, at) or_return
+		return or_law(k, parts), true
+	case ^Scope:
+		// runs of any number of pieces hold their own suffixes
+		if _, m, repeats := layout_pieces(k, v); repeats && same(k, m, COUNTS) do return v, true
+		shape := v
+		if recursive(v) do shape = arden(k, v) or_return
+		if !is_shape(k, shape) do return
+		places := placed(k, shape, .Shape)
+		fixed := 0
+		for p in places {
+			if is_run(p) do break
+			fixed += 1
+		}
+		for p in places[fixed:] do if !is_run(p) do return // a place after a run: where it falls is not known
+		if c, known := at.(Int); known {
+			if int(c) <= fixed do return places_shape(k, places[int(c):]), true
+			// past the places: the runs, c - fixed pieces fewer, when they are one run of pieces
+			rest := places[fixed:]
+			if len(rest) == 0 do return
+			o, repeats := binding_color(k, rest[0]).(^Operation)
+			if !repeats || o.op != .Mul do return
+			piece := length_image(k, o.args[0]) or_return
+			if !is_int(piece, 1) do return
+			fewer := and_law(k, {int_hull(k, exact_law(k, .Sub, {layout_image(k, o.args[1]) or_return, c - Int(fixed)}, rest[0].span)), COUNTS})
+			b := new(Binding)
+			b^ = rest[0]^
+			b.color = new_operation(.Mul, o.args[0], fewer)
+			b.typed_color = b.color
+			out := make([dynamic]^Binding)
+			append(&out, b)
+			append(&out, ..rest[1:])
+			return run_scope(k, out[:]), true
+		}
+		// a place not known: any of the suffixes at 0 … fixed, the runs holding theirs
+		if len(places) > fixed {
+			_, _, closed := layout_pieces(k, run_scope(k, places[fixed:]))
+			if !closed do return
+		}
+		parts := make([]Type, fixed + 1)
+		for i in 0 ..= fixed do parts[i] = places_shape(k, places[i:])
+		return or_law(k, parts), true
+	}
+	return
+}
+
+// places_shape: the shape of these places; one run `...C:` alone is C.
+places_shape :: proc(k: ^Kernel, places: []^Binding) -> Type {
+	if len(places) == 1 && is_run(places[0]) && places[0].color != nil {
+		if _, repeats := binding_color(k, places[0]).(^Operation); !repeats do return binding_color(k, places[0])
+	}
+	return run_scope(k, places)
+}
+
 // item_image: the values a binding of the runs a layout admits may hold: the
 // colors of its places, of the pieces of its runs; L & S what both say, L | S what
 // either does.
@@ -1398,12 +1473,6 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		c := binding_color(k, places[0])
 		return c, c != nil
 	}
-	// x from k: what x is of runs of pieces only, which hold what follows k of them
-	set := values(k, o.args[0]) or_return
-	terms := []Type{set}
-	if both, narrowed := set.(^And); narrowed do terms = both.terms
-	kept := make([dynamic]Type)
-	for t in terms do if _, _, repeats := layout_pieces(k, t); repeats do append(&kept, t)
-	if len(kept) == 0 do return
-	return and_law(k, kept[:]), true
+	// x from k: the runs of what follows the place k
+	return suffix(k, values(k, o.args[0]) or_return, o.args[1])
 }
