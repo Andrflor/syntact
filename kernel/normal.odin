@@ -222,7 +222,8 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 		}
 	}
 	others := mark(k)
-	for t in flat do if !is_constant(t) && !contains_same(k, pushed(k, others), t) do push(k, t)
+	if !is_or do closed_bounds(k, flat)
+	for t in flat do if t != nil && !is_constant(t) && !contains_same(k, pushed(k, others), t) do push(k, t)
 	parts := mark(k)
 	push_all(k, k.scratch[others:parts])
 	sort_types(pushed(k, parts))
@@ -596,4 +597,50 @@ calls_itself :: proc(t: Type) -> bool {
 
 unsupported_at :: proc(k: ^Kernel, span: syn.Span, what: string) -> Type {
 	return problem(.Unsupported, span, fmt.tprintf("not in the kernel yet: %s", what))
+}
+
+// closed_bounds: on the integers, a bound left open is the next one closed (§4.3):
+// t.. & ~t = (t + 1).., ..t & ~t = ..(t - 1). The terms it joins are set to nil.
+closed_bounds :: proc(k: ^Kernel, terms: []Type) {
+	for t, i in terms {
+		r, is_range := t.(^Range)
+		if !is_range do continue
+		for u, j in terms {
+			n, is_not := u.(^Not)
+			if !is_not || j == i do continue
+			if !integer_term(k, n.term) do continue
+			if r.lo != nil && r.hi == nil && same(k, r.lo, n.term) {
+				terms[i], terms[j] = range_law(k, op(k, .Add, r.lo, Int(1)), nil, .Int, r.span), nil
+				break
+			}
+			if r.hi != nil && r.lo == nil && same(k, r.hi, n.term) {
+				terms[i], terms[j] = range_law(k, nil, op(k, .Sub, r.hi, Int(1)), .Int, r.span), nil
+				break
+			}
+		}
+	}
+}
+
+// integer_term: t is an integer by its form, without a proof: an integer, an
+// unknown whose layout is integers, a +, - or * of such terms.
+integer_term :: proc(k: ^Kernel, t: Type) -> bool {
+	#partial switch v in t {
+	case Int:
+		return true
+	case ^Unknown:
+		layout := layout_of(k, v)
+		if !is_constant(layout) do return false
+		one: [1]Type
+		cells, negated := cells_in(layout, &one)
+		if negated || len(cells) == 0 do return false
+		for c in cells do if cell_family(c) != .Int do return false
+		return true
+	case ^Operation:
+		#partial switch v.op {
+		case .Add, .Sub, .Mul, .Neg:
+			for a in v.args do if !integer_term(k, a) do return false
+			return true
+		}
+	}
+	return false
 }
