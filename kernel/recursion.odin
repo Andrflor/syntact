@@ -920,6 +920,12 @@ folded :: proc(k: ^Kernel, fold: ^Fold) -> Type {
 // a sum with a closed form (simplified); a fold left with nothing to fold, whose
 // value does not read k, is its value, effects included.
 fold_law :: proc(k: ^Kernel, f: ^Fold) -> Type {
+	// it starts where it stops: no step runs, the value is that of the inits
+	if is_bool(in_law(k, f.start, f.stop), true) {
+		at := rewriting(nil, f.index, f.start)
+		for z, i in f.states do at = rewriting(at, z, f.inits[i])
+		return rewrite(k, f.value, at)
+	}
 	g := simplified(k, f)
 	if is_none(g.effects) && len(g.states) == 0 && !reads(k, g.value, g.index) do return g.value
 	return g

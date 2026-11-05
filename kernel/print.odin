@@ -644,5 +644,10 @@ write_binding :: proc(b: ^Printer, x: ^Binding) {
 	}
 	if x.name != "" || x.color != nil do strings.write_string(b, x.kind == .Pull ? " <- " : " -> ")
 	b.color = x.color
+	// a scope named after the binding: its name would only say the binding again
+	if s, is_scope := x.value.(^Scope); is_scope && s.carved == nil && s.name != "" && s.name == x.name {
+		write_body(b, s)
+		return
+	}
 	write_type(b, x.value, 0)
 }
