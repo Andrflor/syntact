@@ -38,7 +38,17 @@ Lowering :: struct {
 	read:    [dynamic]Value, // the value of each input, read in the entry
 	funcs:   [dynamic]Lowered, // the function of each recursive equation lowered, in each context
 	self:    ^Self, // the function being lowered; nil in the program itself
+	held:    map[Held]^Layout, // the layout of each run or tree, by the first value that holds it
+	trees:   [dynamic]^Layout, // the layout of each tree, made once
+	results: map[int]^Layout, // of each function that gives a run or a tree, its layout
+	fields:  map[int]map[^kernel.Binding]^Layout, // of each function, the layout of each of its fields
 	error:   string,
+}
+
+// Held: a value of a function.
+Held :: struct {
+	f: ^Func,
+	v: Value,
 }
 
 // Bound: what an unknown stands for in the code: the values an effect gave back, a
@@ -166,6 +176,7 @@ fresh :: proc(l: ^Lowering, xs: []Value) -> []Value {
 	for x, i in xs {
 		out[i] = value(l.f, machine_of(l.f, x))
 		l.f.kinds[out[i]].bounds = bounds_of(l.f, x)
+		if lay, is_run := l.held[{l.f, x}]; is_run do l.held[{l.f, out[i]}] = lay
 	}
 	return out
 }
@@ -197,9 +208,9 @@ close_body :: proc(l: ^Lowering, outer: ^[dynamic]Inst, bound: int) {
 }
 
 // lower_body: t, as a body of its own.
-lower_body :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> (b: Body) {
+lower_body :: proc(l: ^Lowering, t: kernel.Type, tail: bool, into: ^Layout = nil) -> (b: Body) {
 	outer, bound := open_body(l, &b)
-	b.values = lower_values(l, t, tail)
+	b.values = held_as(l, t, into, tail)
 	close_body(l, outer, bound)
 	return
 }
@@ -221,6 +232,12 @@ lower_values :: proc(l: ^Lowering, t: kernel.Type, tail := false) -> []Value {
 	// one term, its values: where it is computed, a pure term reads them again
 	if made && computed(t) do append(&l.bound, Bound{term = t, values = vs})
 	return vs
+}
+
+// held_as: the values of t, held as the layout says when one is given.
+held_as :: proc(l: ^Lowering, t: kernel.Type, into: ^Layout, tail := false) -> []Value {
+	if into == nil do return lower_values(l, t, tail)
+	return build(l, t, into, tail)
 }
 
 // lower: the value of t, where one is read — NONE for none.
@@ -272,9 +289,13 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> []Value {
 			emit(l, Text_Const{r, text(l.prog, string_of(v))})
 			return single(r)
 		}
-		if v.op == .Item do return item(l, v)
+		if kernel.reads_run(v.op) do return run_read(l, v)
 		return single(operation(l, v))
 	case ^kernel.Scope:
+		// a run of bindings not all known: laid out in memory
+		if _, fields := fields_of(l, v); !fields {
+			if run, laid := layout_of_term(l, t); laid && run.kind == .Run do return run_of(l, v, run)
+		}
 		// a scope of fields: the values of its fields, in order
 		out := make([dynamic]Value)
 		given(l, v, &out)
@@ -282,10 +303,12 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> []Value {
 	case ^kernel.Access:
 		return field(l, v)
 	case ^kernel.Pattern:
-		for b in v.branches[1:] do if !same_fields(l, v.branches[0].product, b.product) do return fail_values(l, "the branches of %s give scopes of other fields", kernel.print_type(t))
-		target := lower(l, v.target)
-		if l.error != "" do return nil
-		return match(l, v.branches, target, tail)
+		for b in v.branches[1:] do if !same_fields(l, v.branches[0].product, b.product) {
+			// branches that give runs: each laid out as the run the pattern gives
+			if run, laid := layout_of_term(l, t); laid && run.kind == .Run do return build(l, t, run, tail)
+			return fail_values(l, "the branches of %s give scopes of other fields", kernel.print_type(t))
+		}
+		return pattern(l, v, tail)
 	case ^kernel.Effect:
 		return effect(l, v, tail)
 	case ^kernel.Collapse:
@@ -415,7 +438,10 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> []Value {
 // fold: a fold (specs/types.md §5.6) as a loop on k and its states: k from start,
 // each state from its init; while k is not in stop, the effects of a step, then
 // the updates and the next k, which the loop takes again; where k stops, the value.
-fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> []Value {
+// A state that is a run is laid out in memory: the value's as the fold is held
+// (into), another as the kernel types it; one that grows is reserved whole before
+// the first step, and each update stores what it appends in its place (grows).
+fold :: proc(l: ^Lowering, f: ^kernel.Fold, into: ^Layout = nil) -> []Value {
 	start := lower(l, f.start)
 	if l.error != "" do return nil
 	if machine_of(l.f, start) != .Int do return fail_values(l, "a fold whose orbit is not of integers is not code yet")
@@ -423,11 +449,27 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> []Value {
 	starts := make([dynamic]Value)
 	append(&params, value(l.f, .Int))
 	append(&starts, start)
-	for init in f.inits {
-		v := lower(l, init)
+	runs := make([]^Layout, len(f.states))
+	held := make([][]Value, len(f.states))
+	for init, i in f.inits {
+		runs[i] = state_run(l, f, i, into)
+		vs: []Value
+		switch {
+		case runs[i] != nil && grows(l, f, i):
+			vs = grown(l, f, i, runs[i])
+		case runs[i] != nil:
+			vs = build(l, init, runs[i])
+		case:
+			vs = lower_values(l, init)
+		}
 		if l.error != "" do return nil
-		append(&params, value(l.f, machine_of(l.f, v)))
-		append(&starts, v)
+		first := len(params)
+		for v in vs {
+			append(&params, value(l.f, machine_of(l.f, v)))
+			append(&starts, v)
+		}
+		held[i] = params[first:]
+		if runs[i] != nil do hold(l, runs[i], held[i])
 	}
 	loop := Loop{params = params[:], init = starts[:]}
 	outer, bound := open_body(l, &loop.body)
@@ -436,18 +478,27 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> []Value {
 	head := new_clone(f.index^)
 	head.layout, head.written, head.call = nil, nil, nil
 	append(&l.bound, Bound{unknown = head, values = single(params[0])})
-	for x, i in f.states do append(&l.bound, Bound{unknown = x, values = single(params[i + 1])})
+	for x, i in f.states do append(&l.bound, Bound{unknown = x, values = held[i]})
 	arms := make([]Arm, 2)
-	arms[0].body = lower_body(l, f.value, false)
+	arms[0].body = lower_body(l, f.value, false, into)
 	// arms[1] ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
 	lower(l, f.effects)
 	args := make([dynamic]Value)
 	append(&args, NONE) // the next k, once the states are given
 	for t, i in f.updates {
-		x := lower(l, t)
-		if l.error == "" && machine_of(l.f, x) != machine_of(l.f, params[i + 1]) do fail(l, "the update of a fold gives a %v, its state is a %v", machine_of(l.f, x), machine_of(l.f, params[i + 1]))
-		append(&args, x)
+		xs: []Value
+		switch {
+		case runs[i] != nil && grows(l, f, i):
+			xs = appended(l, held[i], t, runs[i])
+		case runs[i] != nil:
+			xs = build(l, t, runs[i])
+		case:
+			xs = lower_values(l, t)
+		}
+		if l.error != "" do break
+		if !slice.equal(machines_of(l.f, xs), machines_of(l.f, held[i])) do fail(l, "the update of a fold gives %v, its state is %v", machines_of(l.f, xs), machines_of(l.f, held[i]))
+		append(&args, ..xs)
 	}
 	args[0] = lower(l, f.next)
 	emit(l, Again{args[:]})
@@ -464,6 +515,19 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> []Value {
 	}
 	loop.body.values = close_match(l, target, arms)
 	return close_loop(l, loop, outer, bound)
+}
+
+// state_run: the layout of the state i of a fold when it is a run: as the fold is
+// held when it is the fold's value, otherwise as the kernel types the fold that
+// gives it.
+state_run :: proc(l: ^Lowering, f: ^kernel.Fold, i: int, into: ^Layout) -> ^Layout {
+	if into != nil && into.kind == .Run {
+		if v, is_state := f.value.(^kernel.Unknown); is_state && kernel.same_unknown(v, f.states[i]) do return into
+	}
+	ending := new_clone(f^)
+	ending.value = f.states[i]
+	if run, laid := layout_of_term(l, ending); laid && run.kind == .Run do return run
+	return nil
 }
 
 // close_loop: the loop, its body closed: its values those of its body.
@@ -642,6 +706,7 @@ call :: proc(l: ^Lowering, c: ^kernel.Collapse) -> []Value {
 	// what the call gives: the bounds of its image, the recursion of its bounds
 	// (specs/types.md §5.6)
 	if len(results) == 1 && results[0] == .Int do l.f.kinds[dst[0]].bounds = term_bounds(l, c)
+	if gives, held := l.results[index]; held do hold(l, gives, dst)
 	emit(l, Call{dst, index, args})
 	return dst
 }
@@ -675,6 +740,9 @@ arguments :: proc(l: ^Lowering, c: ^kernel.Collapse) -> (index: int, args: []Val
 		v := kernel.binding_value(l.k, b)
 		if g, through := called(v); through && this.through[b.source] != nil {
 			for x in g.bindings do if is_parameter(l, x) do given(l, kernel.binding_value(l.k, x), &out)
+		} else if lay, whole := l.fields[index][b.source]; whole {
+			// a field passed whole: its value laid out as the function holds it
+			append(&out, ..build(l, v, lay))
 		} else {
 			given(l, v, &out)
 		}
@@ -705,10 +773,7 @@ function_of :: proc(l: ^Lowering, c: ^kernel.Collapse) -> int {
 	this, _ := lowered_for(l, c)
 	for x in l.funcs do if same_context(l, x, this) do return x.index
 	root := this.root
-	results := make([dynamic]Machine)
-	results_of(l, c, &results)
-	if l.error != "" do return -1
-	f := new_clone(Func{name = root.name != "" ? root.name : "equation", pure = !root.effectful, results = results[:]})
+	f := new_clone(Func{name = root.name != "" ? root.name : "equation", pure = !root.effectful})
 	index := len(l.prog.funcs)
 	append(&l.prog.funcs, f)
 	this.index = index
@@ -716,13 +781,18 @@ function_of :: proc(l: ^Lowering, c: ^kernel.Collapse) -> int {
 	// the handlers the carve replaced answer its emissions in place of its own
 	changes := make(map[^kernel.Binding]kernel.Type)
 	for h, v in this.handlers do changes[h] = v
-	params := make([dynamic]^kernel.Unknown)
-	machines := make([dynamic]Machine)
+	params := make([dynamic]Param)
+	fields := make(map[^kernel.Binding]^Layout)
 	for b in root.bindings {
 		if !is_parameter(l, b) do continue
-		changes[b] = parameter(l, b, f.name, &params, &machines, this.through[b])
+		changes[b] = parameter(l, b, f.name, &params, this.through[b])
 		if l.error != "" do return index
+		// a field passed whole: the layout its value is given in
+		if u, is_unknown := changes[b].(^kernel.Unknown); is_unknown && len(params) > 0 && params[len(params) - 1].unknown == u do fields[b] = params[len(params) - 1].layout
 	}
+	l.fields[index] = fields
+	machines := make([dynamic]Machine)
+	for x in params do layout_machines(x.layout, &machines)
 	f.params = machines[:]
 	generic, is_scope := kernel.derive(l.k, root, changes, root.span).(^kernel.Scope)
 	if !is_scope do return int(fail(l, "the equation of %s does not take its fields as parameters", f.name))
@@ -734,19 +804,37 @@ function_of :: proc(l: ^Lowering, c: ^kernel.Collapse) -> int {
 	// program (specs/types.md §4.9)
 	for s in c.answered do body = kernel.answered(l.k, body, s)
 	body = kernel.answered_by_program(l.k, body)
+	// what it gives: a run or a tree as its body may give it, built so in each
+	// branch; otherwise what its calls give
+	results := make([dynamic]Machine)
+	gives, laid := layout_of_term(l, body)
+	if laid && (gives.kind == .Run || gives.kind == .Tree) {
+		l.results[index] = gives
+		layout_machines(gives, &results)
+	} else {
+		gives = nil
+		results_of(l, c, &results)
+	}
+	f.results = results[:]
+	if l.error != "" do return index
 	// the body, in the function
 	outer, outer_bound, outer_self, outer_insts := l.f, l.bound, l.self, l.insts
 	self := Self{lowered = this}
 	l.f, l.bound, l.self = f, make([dynamic]Bound), &self
-	values := make([]Value, len(params))
-	for u, i in params {
-		values[i] = value(f, machines[i])
-		if machines[i] == .Int do f.kinds[values[i]].bounds = term_bounds(l, u)
-		append(&l.bound, Bound{unknown = u, values = single(values[i])})
+	values := make([dynamic]Value)
+	for x in params {
+		start := len(values)
+		ms := make([dynamic]Machine)
+		layout_machines(x.layout, &ms)
+		for m in ms do append(&values, value(f, m))
+		held := values[start:]
+		if x.layout.kind == .Word && x.layout.machine == .Int do f.kinds[held[0]].bounds = term_bounds(l, x.unknown)
+		hold(l, x.layout, held)
+		append(&l.bound, Bound{unknown = x.unknown, values = held})
 	}
-	f.body = lower_body(l, body, true)
+	f.body = lower_body(l, body, true, gives)
 	if self.again {
-		loop := Loop{dst = fresh(l, f.body.values), params = values, init = values, body = f.body}
+		loop := Loop{dst = fresh(l, f.body.values), params = values[:], init = values[:], body = f.body}
 		f.body = Body{values = loop.dst}
 		append(&f.body.insts, loop)
 	}
@@ -839,7 +927,14 @@ fields_of :: proc(l: ^Lowering, s: ^kernel.Scope) -> ([]^kernel.Binding, bool) {
 // one numbered, among those x gives.
 field :: proc(l: ^Lowering, a: ^kernel.Access) -> []Value {
 	s, has := shape_of(l, a.target)
-	if !has do return fail_values(l, "%s is not a value the code computes yet", kernel.print_type(a))
+	if !has {
+		// a value held as its layout: a tree, or a scope of fields read from memory
+		x := lower_values(l, a.target)
+		if l.error != "" do return nil
+		if tree, held := held_pair(l, x); held && tree.kind == .Tree do return tree_field(l, x, tree, a.name)
+		if lay, laid := layout_of_term(l, a.target); laid && lay.kind == .Fields && layout_width(lay) == len(x) do return fields_field(l, x, lay, a.name)
+		return fail_values(l, "%s is not a value the code computes yet", kernel.print_type(a))
+	}
 	fields, _ := fields_of(l, s)
 	b, found := kernel.occurrence(fields, a.name, a.ordinal, true)
 	if !found do return fail_values(l, "%s has no field `%s`", kernel.print_type(a.target), a.name)
@@ -848,11 +943,10 @@ field :: proc(l: ^Lowering, a: ^kernel.Access) -> []Value {
 
 // item: x.#k (run_law): the values of the binding k of the run x — at a k the
 // program reads, a match on k, each arm a binding.
-item :: proc(l: ^Lowering, o: ^kernel.Operation) -> []Value {
+item :: proc(l: ^Lowering, o: ^kernel.Operation, all: []Value) -> []Value {
 	s, has := shape_of(l, o.args[0])
 	if !has do return fail_values(l, "%s is not lowered yet", kernel.print_type(o))
 	run, _ := fields_of(l, s)
-	all := lower_values(l, o.args[0])
 	if at, known := o.args[1].(kernel.Int); known {
 		if int(at) >= len(run) do return fail_values(l, "%s has no binding %d", kernel.print_type(o.args[0]), at)
 		return part(l, all, run, run[at])
@@ -880,17 +974,24 @@ part :: proc(l: ^Lowering, all: []Value, fields: []^kernel.Binding, b: ^kernel.B
 	return fail_values(l, "the field `%s` is not among the values given", b.name)
 }
 
+// Param: a parameter of a function: an unknown, and the layout of its values.
+Param :: struct {
+	unknown: ^kernel.Unknown,
+	layout:  ^Layout,
+}
+
 // parameter: the value of the field b of a function, over its parameters: an
-// unknown of its layout — its color, or else the family of its value. A scope of
-// fields is passed as its fields: its value is that scope, each field a parameter
-// in turn; its holes are its type, as they are (specs/language/09).
-parameter :: proc(l: ^Lowering, b: ^kernel.Binding, name: string, params: ^[dynamic]^kernel.Unknown, machines: ^[dynamic]Machine, through: ^kernel.Scope = nil) -> kernel.Type {
+// unknown of its layout — its color, or else the family of its value —, held by
+// the values of that layout: a word, or a run (code/layout.odin). A scope of fields
+// is passed as its fields: its value is that scope, each field a parameter in turn;
+// its holes are its type, as they are (specs/language/09).
+parameter :: proc(l: ^Lowering, b: ^kernel.Binding, name: string, params: ^[dynamic]Param, through: ^kernel.Scope = nil) -> kernel.Type {
 	// a call of the equation g: g's fields are the parameters
 	if through != nil {
 		changes := make(map[^kernel.Binding]kernel.Type)
 		for x in through.bindings {
 			if !is_parameter(l, x) do continue
-			changes[x] = parameter(l, x, name, params, machines)
+			changes[x] = parameter(l, x, name, params)
 			if l.error != "" do return nil
 		}
 		g, is_scope := kernel.derive(l.k, through, changes, through.span).(^kernel.Scope)
@@ -901,7 +1002,7 @@ parameter :: proc(l: ^Lowering, b: ^kernel.Binding, name: string, params: ^[dyna
 		changes := make(map[^kernel.Binding]kernel.Type)
 		for x in kernel.placed(l.k, s, .Value) {
 			if x.kind == .Pull do continue
-			changes[x] = parameter(l, x, name, params, machines)
+			changes[x] = parameter(l, x, name, params)
 			if l.error != "" do return nil
 		}
 		return kernel.derive(l.k, s, changes, s.span)
@@ -909,20 +1010,15 @@ parameter :: proc(l: ^Lowering, b: ^kernel.Binding, name: string, params: ^[dyna
 	layout := kernel.binding_color(l.k, b)
 	if layout == nil {
 		family, has := kernel.family_of(l.k, kernel.binding_value(l.k, b))
-		if !has {
-			fail(l, "the field `%s` of %s is not a value the code passes", b.name, name)
-			return nil
-		}
-		layout = kernel.family_term(family)
+		if has do layout = kernel.family_term(family)
 	}
-	m := machine_of_layout(l.k, layout)
-	if m == .None {
+	held, laid := layout_of_set(l, layout)
+	if !laid || held.kind == .Fields {
 		fail(l, "the field `%s` of %s is not a value the code passes", b.name, name)
 		return nil
 	}
 	u := kernel.new_unknown(l.k, layout)
-	append(params, u)
-	append(machines, m)
+	append(params, Param{u, held})
 	return u
 }
 
@@ -1192,41 +1288,136 @@ both :: proc(l: ^Lowering, op: Op, a, b: Value) -> Value {
 //   t ? {c₀ -> p₀  c₁ -> p₁ …} = t ? {c₀ -> p₀  -> t ? {c₁ -> p₁ …}}
 //
 // The last branch is not tested: the check proved that one takes every value.
-match :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool) -> []Value {
+match :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool, into: ^Layout = nil) -> []Value {
 	arms := make([dynamic]Arm)
 	for b, i in branches {
 		if i == len(branches) - 1 || b.cover == nil {
 			// t ? {-> p} = p
-			if i == 0 do return lower_values(l, b.product, tail)
-			append(&arms, Arm{body = lower_body(l, b.product, tail)})
+			if i == 0 do return held_as(l, b.product, into, tail)
+			append(&arms, Arm{body = lower_body(l, b.product, tail, into)})
 			break
 		}
 		cover, constant := cover_of(b.cover)
 		if constant {
 			if !fits(l, target, cover) do return fail_values(l, "a cover %s is not code yet", kernel.print_type(b.cover))
-			append(&arms, Arm{cover, lower_body(l, b.product, tail)})
+			append(&arms, Arm{cover, lower_body(l, b.product, tail, into)})
 			continue
 		}
 		if i > 0 {
-			append(&arms, Arm{body = rest_body(l, branches[i:], target, tail)})
+			append(&arms, Arm{body = rest_body(l, branches[i:], target, tail, into)})
 			break
 		}
 		tested := member(l, target, b.cover)
 		if l.error != "" do return nil
 		taken := make([]Bounds, 1)
 		taken[0] = {1, 1}
-		append(&arms, Arm{Cover{ints = taken}, lower_body(l, b.product, tail)})
-		append(&arms, Arm{body = rest_body(l, branches[1:], target, tail)})
+		append(&arms, Arm{Cover{ints = taken}, lower_body(l, b.product, tail, into)})
+		append(&arms, Arm{body = rest_body(l, branches[1:], target, tail, into)})
 		return close_match(l, tested, arms[:])
 	}
 	return close_match(l, target, arms[:])
 }
 
+// pattern: a pattern on its target: a match on the value, or, on a run, on what
+// its covers test of it (run_match).
+pattern :: proc(l: ^Lowering, p: ^kernel.Pattern, tail: bool, into: ^Layout = nil) -> []Value {
+	target := lower_values(l, p.target)
+	if l.error != "" do return nil
+	if lay, held := held_pair(l, target); held {
+		if lay.kind == .Run do return run_match(l, p.branches, p.target, tail, into)
+		return tree_match(l, p.branches, target[0], lay, tail, into)
+	}
+	if len(target) != 1 do return fail_values(l, "a pattern on %s, of %d values, is not code yet", kernel.print_type(p.target), len(target))
+	return match(l, p.branches, target[0], tail, into)
+}
+
+// run_match: the branches of a pattern on a run x, each tested in turn — a run is
+// in a cover when what it says of x holds (in_run):
+//
+//   x ? {c₀ -> p₀  c₁ -> p₁ …} = (x in c₀) ? {true -> p₀  -> x ? {c₁ -> p₁ …}}
+run_match :: proc(l: ^Lowering, branches: []kernel.Branch, x: kernel.Type, tail: bool, into: ^Layout) -> []Value {
+	b := branches[0]
+	if len(branches) == 1 || b.cover == nil do return held_as(l, b.product, into, tail)
+	tested := in_run(l, x, b.cover)
+	if l.error != "" do return nil
+	arms := make([]Arm, 2)
+	taken := make([]Bounds, 1)
+	taken[0] = {1, 1}
+	arms[0] = Arm{Cover{ints = taken}, lower_body(l, b.product, tail, into)}
+	outer, bound := open_body(l, &arms[1].body)
+	arms[1].body.values = run_match(l, branches[1:], x, tail, into)
+	close_body(l, outer, bound)
+	return close_match(l, tested, arms)
+}
+
+// in_run: x in c, x a run, c a set of runs: 1 or 0. A shape takes x when its
+// length is one of those the shape admits, and each place before its runs holds
+// what the shape's place does — tested once the length holds, the places being
+// read then —; the items of its runs hold what their pieces may, proven by the
+// kernel, or it is not code yet. c | d, c & d and ~c, by their parts.
+in_run :: proc(l: ^Lowering, x: kernel.Type, c: kernel.Type) -> Value {
+	#partial switch v in c {
+	case ^kernel.Or:
+		out := NONE
+		for t in v.terms do out = both(l, .Or, out, in_run(l, x, t))
+		return out
+	case ^kernel.And:
+		out := NONE
+		for t in v.terms do out = both(l, .And, out, in_run(l, x, t))
+		return out
+	case ^kernel.Not:
+		return binary(l, .Xor, in_run(l, x, v.term), constant(l, 1), .Int)
+	}
+	lengths, read := kernel.length_image(l.k, c)
+	if !read do return fail(l, "a cover %s on a run is not code yet", kernel.print_type(c))
+	fits := member(l, lower(l, kernel.op(l.k, .Length, x)), lengths)
+	shape, is_scope := c.(^kernel.Scope)
+	if !is_scope do return fits
+	if kernel.recursive(shape) do shape = kernel.arden(l.k, shape) or_else shape
+	places := kernel.placed(l.k, shape, .Shape)
+	tests := make([dynamic]kernel.Type)
+	for p, i in places {
+		at := kernel.run_law(l.k, .Item, {x, kernel.Int(i)}, p.span, true)
+		if !kernel.is_run(p) {
+			if p.color != nil do append(&tests, kernel.normal(l.k, kernel.in_law(l.k, at, kernel.binding_color(l.k, p))))
+			continue
+		}
+		// the items of a run: each what x may hold there, proven to be of its pieces
+		items, has := kernel.item_image(l.k, kernel.binding_color(l.k, p))
+		if !has || !holds(kernel.normal(l.k, kernel.in_law(l.k, at, items))) do return fail(l, "a cover %s that tests the items of a run is not code yet", kernel.print_type(c))
+		break
+	}
+	held := make([dynamic]kernel.Type)
+	for t in tests do if !holds(t) do append(&held, t)
+	if len(held) == 0 do return fits
+	// the places are read where the length holds
+	arms := make([]Arm, 2)
+	taken := make([]Bounds, 1)
+	taken[0] = {1, 1}
+	arms[0].cover = Cover{ints = taken}
+	outer, bound := open_body(l, &arms[0].body)
+	all := NONE
+	for t in held do all = both(l, .And, all, lower(l, t))
+	arms[0].body.values = single(all)
+	close_body(l, outer, bound)
+	arms[1].body = Body{insts = make([dynamic]Inst)}
+	outer, bound = open_body(l, &arms[1].body)
+	arms[1].body.values = single(constant(l, 0))
+	close_body(l, outer, bound)
+	return close_match(l, fits, arms)[0]
+}
+
+// holds: t is true.
+holds :: proc(t: kernel.Type) -> bool {
+	b, is_bool := t.(kernel.Bool)
+	return is_bool && bool(b)
+}
+
 // rest_body: the branches from a cover the laws did not compute, as the body of
 // the arm that takes what the covers above do not.
-rest_body :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool) -> (b: Body) {
+rest_body :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool, into: ^Layout) -> (b: Body) {
 	outer, bound := open_body(l, &b)
-	b.values = match(l, branches, target, tail)
+	b.values = match(l, branches, target, tail, into)
 	close_body(l, outer, bound)
 	return
 }

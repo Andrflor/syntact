@@ -120,6 +120,12 @@ CASES := []Binary_Case {
 	{"a float beyond the registers", FOUR + "-> f{n -> ??::u32}!.c", {{args = {"0"}, stdout = "0.500000\n"}, {args = {"5"}, stdout = "1.500000\n"}}},
 	{"binding of a run", RUN + "-> f{n -> ??::u32}!.#2", {{args = {"0"}, exit = 20}, {args = {"5"}, exit = 21}}},
 	{"run read at a counter", TOTAL + "-> total{xs -> {1 2 3}  acc -> ??::u8}!", {{args = {"10"}, exit = 16}, {args = {"254"}, exit = 4}}},
+	// memory (specs/types.md §4.13): runs built by folds, reserved whole and grown
+	// in place, read by their patterns; a tree passed to a function; a run carved by
+	// place, laid out as the function that reads it holds it
+	{"runs built at run time", PRINTF + RUNS + ZIP + "-> io.printf{format -> \"%lld\\n\"  n -> zip{a -> items{n -> ??::u32}!  b -> items{n -> 5  r -> 777}!}!}!", {{args = {"5"}, stdout = "1565295\n", exit = 8}, {args = {"0"}, stdout = "0\n", exit = 2}, {args = {"3"}, stdout = "660519\n", exit = 7}}},
+	{"run carved by place", PRINTF + RUNS + ZIP + "bump -> {\n  Array{u32}:xs -> {}\n  -> xs ? {\n    {u32(h) u32(g) ...Array{u32}:(t)} -> xs{#1 -> h}\n    -> xs\n  }\n}\n-> io.printf{format -> \"%lld\\n\"  n -> zip{a -> bump{xs -> items{n -> ??::u32}!}!  b -> items{n -> 10  r -> 777}!}!}!", {{args = {"10"}, stdout = "3563956\n", exit = 8}}},
+	{"tree passed to a function", PRINTF + ENV + "-> io.printf{format -> \"%lld\\n\"  n -> lookup{env -> {key -> 1  val -> 10  next -> {key -> 2  val -> 20  next -> {}}}  want -> ??::i64}!}!", {{args = {"1"}, stdout = "10\n", exit = 3}, {args = {"2"}, stdout = "20\n", exit = 3}, {args = {"3"}, stdout = "0\n", exit = 2}}},
 	{
 		"handler of a recursion",
 		LIBC + "count -> {\n  Tick -> {}\n  Tick -< e { -> 0 }\n  u8:n -> ??\n  t >- Tick{}\n  -> n ? {0 -> 0  -> count{n -> n - 1}!}\n}\nmain -> {count.Tick -< e { r -> libc.puts{s -> \"tick\"}!  -> 1 }  -> count{n -> ??::u8}!}\n-> main!",
@@ -234,3 +240,12 @@ run_memory :: proc(t: ^testing.T, build: Build) {
 	if !testing.expectf(t, failed == nil, "memory: does not run: %v", failed) do return
 	testing.expectf(t, state.exit_code == MEMORY_EXIT, "memory: exited %d, expected %d", state.exit_code, MEMORY_EXIT)
 }
+
+// RUNS: n numbers of a xorshift chain, a run its fold builds
+RUNS :: "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nxs -> {\n  u64:x\n  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff\n  b -> a ^ (a >> 7)\n  -> (b ^ (b << 17)) [&] 0xffffffffffffffff\n}\nitems -> {\n  u32:n -> ??\n  u32:i -> 0\n  u64:r -> 12345\n  -> i ? {\n    >=n -> {}\n    -> {xs{x -> r}! % 1000 ...items{n -> n  i -> i + 1  r -> xs{x -> r}!}!}\n  }\n}\n"
+
+// ZIP: the sum of the products of two runs, place by place
+ZIP :: "zip -> {\n  Array{u32}:a -> {}\n  Array{u32}:b -> {}\n  acc -> 0\n  -> a ? {\n    {u32(h) ...Array{u32}:(t)} -> b ? {\n      {u32(g) ...Array{u32}:(u)} -> zip{a -> t  b -> u  acc -> acc + h * g}!\n      -> acc\n    }\n    -> acc\n  }\n}\n"
+
+// ENV: a tree of two shapes, read by a recursion
+ENV :: "Env -> {\n  -> {}\n  -> {i64:key  i64:val  Env:next}\n}\nlookup -> {\n  Env:env -> {}\n  i64:want -> 0\n  -> env ? {\n    {i64:key  i64:val  Env:next} -> key = want ? {\n      true -> val\n      -> lookup{env -> next  want -> want}!\n    }\n    -> 0\n  }\n}\n"
