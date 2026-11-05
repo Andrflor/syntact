@@ -23,3 +23,9 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - 4e5588e narrowing kept in a branch nested in another branch's scope.
 - e4c110d field of a recursive call's result, by induction on that field.
 - container restarted; agent resumed on steps 5–6 (call in a union of shapes; bounds as functions of what a call carves).
+- a897589 a call in a union of shapes (Parsed); exhaustiveness read as the target in the union of the covers.
+- 7cfd7c2 bounds of a call as linear functions of the measures of what it carves (strlist's sum of word lengths).
+- 55fa317 steps of a fold along any orbit; length of a run a fold builds.
+- 23:20 check at 55fa317: kernel types sum tree interp bintrees records push strlist scene (outputs of the six identical to Goose);
+  still failing in the kernel: respond (3 errors), sexp (22), calc (32), lru (3), graph (3), words (3), blur (18), particles (6).
+  strlist and scene typed but not compiled yet (backend: layout of split's result; f32). Backend agent launched on them.
