@@ -5,15 +5,20 @@ import "core:slice"
 
 // THE PLACE OF EACH REGISTER
 //
-// The instructions are numbered in the order the blocks are laid out: an
-// instruction reads at its position and writes just after, so that what it writes
-// may take the register of what it last reads. A register lives from where it is
-// first written to where it is last read, across the blocks it is live into or
-// out of — by the dataflow of liveness, to a fixed point. Over these ranges, a
-// linear scan gives each register a register of the machine: one the calls keep
-// when the range spans a call, any free one otherwise — the register of what it
-// is copied from first, so that the copy goes —, or a slot of the frame when none
-// is left: the range that ends last is the one that goes to the frame. Floats and
+// Two registers interfere when one is written where the other lives on: they need
+// two places. Where each lives is the dataflow of liveness, backward to a fixed
+// point; an instruction reads before it writes, so that what it writes may take
+// the register of what it last reads, and a copy's destination does not interfere
+// with its source, which holds the same value. Over this graph, the registers are
+// coloured by the registers of the machine (Chaitin, Briggs): a copy whose two
+// sides do not interfere is one register, when that leaves the graph colourable
+// (Briggs' test); then, one by one, a register with fewer neighbours than the
+// colours it may take goes, or else the one whose frame slot would cost least —
+// its reads and writes, ten times more for each loop around them, by its
+// neighbours —, and they are coloured back in the reverse order, each by a colour
+// no neighbour took: that of a register it is copied from or to, or of the
+// argument a call takes it as, when free; a slot of the frame when none is. A
+// register living across a call takes only a register the call keeps. Floats and
 // vectors have registers of their own, none of which a call keeps: across a call,
 // they are in the frame, a slot for each lane.
 
@@ -43,12 +48,6 @@ Allocation :: struct {
 	places: []Place, // per register; nil for one never written nor read
 	used:   []int, // the registers the calls keep that the function uses
 	slots:  int,
-}
-
-Range :: struct {
-	reg:        Reg,
-	start, end: int,
-	spans_call: bool,
 }
 
 // uses: the registers an instruction reads.
@@ -145,23 +144,280 @@ successors :: proc(t: Terminator) -> []Block_Id {
 // allocate: the place of each register of f, on the target.
 allocate :: proc(f: ^Func, target: Target) -> Allocation {
 	n := len(f.kinds)
-	blocks := len(f.blocks)
-	// the positions, in the order the blocks are placed: two per instruction, the
-	// terminator last
-	first := make([]int, blocks)
-	last := make([]int, blocks)
-	position := 0
-	calls := make([dynamic]int)
-	for i in f.order {
-		first[i] = position
-		for inst in f.blocks[i].insts {
-			if is_call(inst) do append(&calls, position)
-			position += 2
-		}
-		last[i] = position
-		position += 2
+	live_out := liveness(f)
+	depth := loop_depths(f)
+	g := Interference {
+		edges = make([]u64, (n * n + 63) / 64),
+		adjacent = make([][dynamic]Reg, n),
+		seen = make([]int, n),
+		n = n,
 	}
-	// liveness, backward to a fixed point
+	cost := make([]f64, n)
+	present := make([]bool, n)
+	crosses := make([]bool, n)
+	copies := make([][dynamic]Reg, n) // the registers each is copied from or to
+	hints := make([][dynamic]Reg, n) // and those an operation computes it from or in
+	argument := make([]int, n)
+	for &a in argument do a = -1
+	same_bank :: proc(f: ^Func, a, b: Reg) -> bool {return wide(f.kinds[a]) == wide(f.kinds[b])}
+	regs := make([dynamic]Reg)
+	defs := make([dynamic]Reg)
+	for b, id in f.blocks {
+		weight := 1.0
+		for _ in 0 ..< min(depth[id], 6) do weight *= 10
+		live := slice.clone(live_out[id])
+		clear(&regs)
+		end_uses(b.end, &regs)
+		for r in regs {
+			live[r] = true
+			present[r] = true
+			cost[r] += weight
+		}
+		#reverse for inst in b.insts {
+			clear(&defs)
+			writes(inst, &defs)
+			source := NO_REG
+			#partial switch i in inst {
+			case Copy:
+				if src, from_reg := i.src.(Reg); from_reg {
+					source = src
+					if same_bank(f, i.dst, src) {
+						append(&copies[i.dst], src)
+						append(&copies[src], i.dst)
+					}
+				}
+			case Unary:
+				hinted(f, hints, i.dst, i.a)
+			case Binary:
+				// the machine computes in the register of the first operand; of either,
+				// when the operation commutes
+				hinted(f, hints, i.dst, i.a)
+				if b, is_reg := i.b.(Reg); is_reg && commutes(i.op) do hinted(f, hints, i.dst, b)
+			case Select:
+				hinted(f, hints, i.dst, i.no)
+			}
+			if is_call(inst) do for r in 0 ..< n do if live[r] && !slice.contains(defs[:], Reg(r)) do crosses[r] = true
+			for d, k in defs {
+				for r in 0 ..< n do if live[r] && Reg(r) != d && Reg(r) != source && same_bank(f, d, Reg(r)) do interfere(&g, d, Reg(r))
+				for e in defs[k + 1:] do if same_bank(f, d, e) do interfere(&g, d, e)
+			}
+			for d in defs {
+				live[d] = false
+				present[d] = true
+				cost[d] += weight
+			}
+			clear(&regs)
+			uses(inst, &regs)
+			for r in regs {
+				live[r] = true
+				present[r] = true
+				cost[r] += weight
+			}
+			// an integer a call takes, hinted to the register it takes it in
+			args: []Operand
+			#partial switch i in inst {
+			case Foreign:
+				args = i.args
+			case Call:
+				args = i.args
+			}
+			k := 0
+			for a in args {
+				r, is_reg := a.(Reg)
+				if is_reg && f.kinds[r].machine == .Real do continue
+				if is_reg && k < len(target.arguments) && argument[r] < 0 do argument[r] = target.arguments[k]
+				k += 1
+			}
+		}
+		if id == 0 {
+			// the parameters, and what lives into the entry, are all there at once
+			for i in 0 ..< len(f.source.params) do if present[i] do live[i] = true
+			for r in 0 ..< n do if live[r] do for q in r + 1 ..< n do if live[q] && same_bank(f, Reg(r), Reg(q)) do interfere(&g, Reg(r), Reg(q))
+		}
+	}
+	// the colours each register may take
+	colours :: proc(f: ^Func, target: Target, r: Reg, crosses: bool) -> int {
+		if wide(f.kinds[r]) do return crosses ? 0 : len(target.wide)
+		return crosses ? len(target.kept) : len(target.kept) + len(target.spent)
+	}
+	// coalescing: a copy's two sides, one register, when they do not interfere and
+	// the neighbours of the two with as many neighbours as colours are fewer than
+	// the colours (Briggs)
+	group := make([]Reg, n)
+	for &x, i in group do x = Reg(i)
+	for changed := true; changed; {
+		changed = false
+		for a in 0 ..< n do for p in copies[a] {
+			x, y := find_group(group, Reg(a)), find_group(group, p)
+			if x == y || connected(&g, x, y) do continue
+			k := colours(f, target, x, crosses[x] || crosses[y])
+			if k == 0 do continue
+			significant := 0
+			counted := make(map[Reg]bool)
+			defer delete(counted)
+			for side in ([]Reg{x, y}) do for q in g.adjacent[side] {
+				z := find_group(group, q)
+				if z == x || z == y || counted[z] do continue
+				counted[z] = true
+				if neighbours(&g, group, nil, z) >= colours(f, target, z, crosses[z]) do significant += 1
+			}
+			if significant >= k do continue
+			// y into x
+			group[y] = x
+			crosses[x] ||= crosses[y]
+			cost[x] += cost[y]
+			present[x] ||= present[y]
+			for q in g.adjacent[y] do interfere(&g, x, find_group(group, q))
+			changed = true
+		}
+	}
+	// simplify: a register with fewer neighbours left than its colours goes; when
+	// none has, the one whose slot costs least for its neighbours
+	removed := make([]bool, n)
+	stack := make([dynamic]Reg)
+	left := make([dynamic]Reg)
+	for r in 0 ..< n do if present[r] && find_group(group, Reg(r)) == Reg(r) do append(&left, Reg(r))
+	for len(left) > 0 {
+		chosen := -1
+		for r, j in left do if neighbours(&g, group, removed, r) < colours(f, target, r, crosses[r]) {
+			chosen = j
+			break
+		}
+		if chosen < 0 {
+			best := max(f64)
+			for r, j in left {
+				c := cost[r] / f64(neighbours(&g, group, removed, r) + 1)
+				if c < best {
+					best = c
+					chosen = j
+				}
+			}
+		}
+		r := left[chosen]
+		unordered_remove(&left, chosen)
+		removed[r] = true
+		append(&stack, r)
+	}
+	// select: back in the reverse order, each a colour no neighbour has
+	out := Allocation{places = make([]Place, n)}
+	colour := make([]int, n)
+	for &c in colour do c = -1
+	used := make(map[int]bool)
+	members := make([][dynamic]Reg, n)
+	for r in 0 ..< n do append(&members[find_group(group, Reg(r))], Reg(r))
+	#reverse for r in stack {
+		is_wide := wide(f.kinds[r])
+		taken: [64]bool
+		for q in g.adjacent[r] {
+			z := find_group(group, q)
+			if z != r && colour[z] >= 0 do taken[colour[z]] = true
+		}
+		allowed := make([dynamic]int)
+		defer delete(allowed)
+		if is_wide {
+			if !crosses[r] do append(&allowed, ..target.wide)
+		} else {
+			if !crosses[r] do append(&allowed, ..target.spent)
+			append(&allowed, ..target.kept)
+		}
+		// the colours a copy or a call would have it in, first
+		preferred := make([dynamic]int)
+		defer delete(preferred)
+		for m in members[r] {
+			for p in copies[m] do if c := colour[find_group(group, p)]; c >= 0 do append(&preferred, c)
+			for p in hints[m] do if c := colour[find_group(group, p)]; c >= 0 do append(&preferred, c)
+			if argument[m] >= 0 do append(&preferred, argument[m])
+		}
+		chosen := -1
+		for c in preferred do if !taken[c] && slice.contains(allowed[:], c) {
+			chosen = c
+			break
+		}
+		if chosen < 0 do for c in allowed do if !taken[c] {
+			chosen = c
+			break
+		}
+		if chosen < 0 {
+			out.places[r] = Slot(out.slots)
+			out.slots += max(f.kinds[r].lanes, 1)
+		} else {
+			colour[r] = chosen
+			out.places[r] = is_wide ? Place(Wide_Reg(chosen)) : Place(Machine_Reg(chosen))
+			if !is_wide && slice.contains(target.kept, chosen) do used[chosen] = true
+		}
+	}
+	for r in 0 ..< n do if present[r] do out.places[r] = out.places[find_group(group, Reg(r))]
+	kept := make([dynamic]int)
+	for x in target.kept do if used[x] do append(&kept, x)
+	out.used = kept[:]
+	return out
+}
+
+// hinted: a and b are better in one register, when it is free.
+hinted :: proc(f: ^Func, hints: [][dynamic]Reg, a, b: Reg) {
+	if wide(f.kinds[a]) != wide(f.kinds[b]) do return
+	append(&hints[a], b)
+	append(&hints[b], a)
+}
+
+// commutes: a op b = b op a.
+commutes :: proc(op: code.Op) -> bool {
+	#partial switch op {
+	case .Add, .Mul, .And, .Or, .Xor:
+		return true
+	}
+	return false
+}
+
+// Interference: which registers interfere, as a matrix of bits, and the
+// neighbours of each.
+Interference :: struct {
+	edges:    []u64,
+	adjacent: [][dynamic]Reg,
+	seen:     []int, // a stamp per register, to count each group once
+	stamp:    int,
+	n:        int,
+}
+
+interfere :: proc(g: ^Interference, a, b: Reg) {
+	if a == b || connected(g, a, b) do return
+	for e in ([][2]Reg{{a, b}, {b, a}}) {
+		k := int(e[0]) * g.n + int(e[1])
+		g.edges[k / 64] |= 1 << uint(k % 64)
+	}
+	append(&g.adjacent[a], b)
+	append(&g.adjacent[b], a)
+}
+
+connected :: proc(g: ^Interference, a, b: Reg) -> bool {
+	k := int(a) * g.n + int(b)
+	return g.edges[k / 64] & (1 << uint(k % 64)) != 0
+}
+
+// neighbours: the groups next to r, each once, but those removed.
+neighbours :: proc(g: ^Interference, group: []Reg, removed: []bool, r: Reg) -> int {
+	g.stamp += 1
+	count := 0
+	for q in g.adjacent[r] {
+		z := find_group(group, q)
+		if z == r || g.seen[z] == g.stamp || removed != nil && removed[z] do continue
+		g.seen[z] = g.stamp
+		count += 1
+	}
+	return count
+}
+
+// find_group: the register a register is one with, by coalescing.
+find_group :: proc(group: []Reg, r: Reg) -> Reg {
+	r := r
+	for group[r] != r do r = group[r]
+	return r
+}
+
+// liveness: the registers live out of each block, backward to a fixed point.
+liveness :: proc(f: ^Func) -> [][]bool {
+	n := len(f.kinds)
+	blocks := len(f.blocks)
 	live_in := make([][]bool, blocks)
 	live_out := make([][]bool, blocks)
 	for i in 0 ..< blocks {
@@ -177,6 +433,7 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 				changed = true
 			}
 			live := slice.clone(live_out[i])
+			defer delete(live)
 			clear(&read)
 			end_uses(b.end, &read)
 			for r in read do live[r] = true
@@ -194,142 +451,39 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 			}
 		}
 	}
-	// the range of each register: the hull of where it is written, read or live
-	ranges := make([]Range, n)
-	for &r, i in ranges do r = Range{Reg(i), max(int), -1, false}
-	cover :: proc(r: ^Range, p: int) {
-		r.start = min(r.start, p)
-		r.end = max(r.end, p)
-	}
-	for i in 0 ..< len(f.source.params) do cover(&ranges[i], -1)
-	for i in f.order {
-		b := f.blocks[i]
-		p := first[i]
-		for r in 0 ..< n {
-			if live_in[i][r] do cover(&ranges[r], first[i])
-			if live_out[i][r] do cover(&ranges[r], last[i])
-		}
-		for inst in b.insts {
-			clear(&read)
-			uses(inst, &read)
-			for r in read do cover(&ranges[r], p)
-			clear(&read)
-			writes(inst, &read)
-			for w in read do cover(&ranges[w], p + 1)
-			p += 2
-		}
-		clear(&read)
-		end_uses(b.end, &read)
-		for r in read do cover(&ranges[r], last[i])
-	}
-	for &r in ranges do for c in calls do r.spans_call ||= r.start <= c && c < r.end
-	// a copy's destination is hinted to its source's register; an integer a call
-	// takes, to the register it takes it in
-	hint := make([]Reg, n)
-	for &h in hint do h = NO_REG
-	argument := make([]int, n)
-	for &a in argument do a = -1
-	for b in f.blocks do for inst in b.insts {
-		args: []Operand
-		#partial switch i in inst {
-		case Copy:
-			if src, is_reg := i.src.(Reg); is_reg do hint[i.dst] = src
-		case Foreign:
-			args = i.args
-		case Call:
-			args = i.args
-		}
-		k := 0
-		for a in args {
-			r, is_reg := a.(Reg)
-			if !is_reg {
-				k += 1
-				continue
-			}
-			if f.kinds[r].machine == .Real do continue
-			if k < len(target.arguments) && argument[r] < 0 do argument[r] = target.arguments[k]
-			k += 1
-		}
-	}
-	// the scan, in the order the ranges start, each bank on its own: the integers;
-	// the floats and the vectors, in registers no call keeps
-	order := make([dynamic]Range)
-	for r in ranges do if r.end >= 0 do append(&order, r)
-	slice.sort_by(order[:], proc(a, b: Range) -> bool {return a.start < b.start})
-	out := Allocation{places = make([]Place, n)}
-	banks: [2]Bank
-	for &b in banks do b.free = make(map[int]bool)
-	for x in target.kept do banks[0].free[x] = true
-	for x in target.spent do banks[0].free[x] = true
-	for x in target.wide do banks[1].free[x] = true
-	number := make([]int, n) // the register of the machine each register is in
-	used := make(map[int]bool)
-	to_frame :: proc(out: ^Allocation, f: ^Func, r: Reg) {
-		out.places[r] = Slot(out.slots)
-		out.slots += max(f.kinds[r].lanes, 1)
-	}
-	for r in order {
-		// the ranges that ended free their registers
-		for &b in banks {
-			for j := 0; j < len(b.active); {
-				if b.active[j].end < r.start {
-					b.free[number[b.active[j].reg]] = true
-					ordered_remove(&b.active, j)
-				} else do j += 1
-			}
-		}
-		is_wide := wide(f.kinds[r.reg])
-		bank := &banks[is_wide ? 1 : 0]
-		// what a register of the bank may hold this range
-		fits :: proc(target: Target, r: Range, is_wide: bool, x: int) -> bool {
-			return is_wide || !r.spans_call || slice.contains(target.kept, x)
-		}
-		if is_wide && r.spans_call {
-			to_frame(&out, f, r.reg)
-			continue
-		}
-		chosen := -1
-		if h := hint[r.reg]; h != NO_REG && wide(f.kinds[h]) == is_wide && in_register(out.places[h]) {
-			if x := number[h]; bank.free[x] && fits(target, r, is_wide, x) do chosen = x
-		}
-		if is_wide {
-			if chosen < 0 do chosen = first_free(target.wide, bank.free)
-		} else {
-			if a := argument[r.reg]; chosen < 0 && a >= 0 && bank.free[a] && !r.spans_call do chosen = a
-			if chosen < 0 && !r.spans_call do chosen = first_free(target.spent, bank.free)
-			if chosen < 0 do chosen = first_free(target.kept, bank.free)
-		}
-		if chosen < 0 {
-			// the range that ends last, among those whose register fits, goes to the frame
-			victim := -1
-			for a, j in bank.active {
-				if fits(target, r, is_wide, number[a.reg]) && a.end > r.end && (victim < 0 || a.end > bank.active[victim].end) do victim = j
-			}
-			if victim < 0 {
-				to_frame(&out, f, r.reg)
-				continue
-			}
-			chosen = number[bank.active[victim].reg]
-			to_frame(&out, f, bank.active[victim].reg)
-			ordered_remove(&bank.active, victim)
-		}
-		bank.free[chosen] = false
-		number[r.reg] = chosen
-		out.places[r.reg] = is_wide ? Place(Wide_Reg(chosen)) : Place(Machine_Reg(chosen))
-		if !is_wide && slice.contains(target.kept, chosen) do used[chosen] = true
-		append(&bank.active, r)
-	}
-	kept := make([dynamic]int)
-	for x in target.kept do if used[x] do append(&kept, x)
-	out.used = kept[:]
-	return out
+	return live_out
 }
 
-// Bank: the registers of one kind the scan gives: those free, and the ranges in
-// them.
-Bank :: struct {
-	free:   map[int]bool,
-	active: [dynamic]Range,
+// loop_depths: how many loops each block is in: a jump back to a block placed
+// before, or to itself, closes a loop of the blocks that reach its source without
+// passing through its target.
+loop_depths :: proc(f: ^Func) -> []int {
+	depth := make([]int, len(f.blocks))
+	position := make([]int, len(f.blocks))
+	for &p in position do p = -1
+	for b, k in f.order do position[b] = k
+	preds := make([][dynamic]Block_Id, len(f.blocks))
+	for b, id in f.blocks do for s in successors(b.end) do append(&preds[s], Block_Id(id))
+	for b, id in f.blocks {
+		if position[id] < 0 do continue
+		for h in successors(b.end) {
+			if position[h] < 0 || position[h] > position[id] do continue
+			inside := make([]bool, len(f.blocks))
+			defer delete(inside)
+			inside[h] = true
+			work := make([dynamic]Block_Id)
+			defer delete(work)
+			append(&work, Block_Id(id))
+			for len(work) > 0 {
+				x := pop(&work)
+				if inside[x] do continue
+				inside[x] = true
+				for p in preds[x] do append(&work, p)
+			}
+			for in_loop, x in inside do if in_loop do depth[x] += 1
+		}
+	}
+	return depth
 }
 
 // wide: a float, or a vector: in the registers of floats and vectors.
@@ -337,15 +491,3 @@ wide :: proc(k: code.Kind) -> bool {
 	return k.machine == .Real || k.lanes > 0
 }
 
-in_register :: proc(p: Place) -> bool {
-	#partial switch _ in p {
-	case Machine_Reg, Wide_Reg:
-		return true
-	}
-	return false
-}
-
-first_free :: proc(regs: []int, free: map[int]bool) -> int {
-	for x in regs do if free[x] do return x
-	return -1
-}

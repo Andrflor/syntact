@@ -457,6 +457,16 @@ int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 		#partial switch i.op {
 		case .Add, .Mul, .And, .Or, .Xor:
 			a, b = b, a
+		case .Sub:
+			// a - b = -b + a
+			if place_of(fr, i.a) != Place(x) {
+				enc.neg_r64(x)
+				i := i
+				i.op, i.b = .Add, i.a
+				i.a = i.dst
+				return int_binary(fr, i)
+			}
+			x = .RAX
 		case:
 			x = .RAX
 		}

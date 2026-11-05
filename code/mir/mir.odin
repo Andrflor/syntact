@@ -9,8 +9,8 @@ import "core:slice"
 // virtual registers, each ending in a jump, a branch or a return. A match becomes
 // the tests of its covers, a loop a block each Again jumps back to, after the
 // parameters take their values all at once. Then each register gets a place: a
-// register of the machine or a slot of the frame, by a linear scan over the ranges
-// where the registers live (alloc.odin). A backend (code/x64) says what registers
+// register of the machine or a slot of the frame, by colouring the graph of the
+// registers that live at once (alloc.odin). A backend (code/x64) says what registers
 // it has and turns each instruction into its own.
 
 Reg :: distinct int
@@ -206,6 +206,7 @@ layout_func :: proc(src: ^code.Func) -> ^Func {
 	body(&b, src.body)
 	finish(&b, Return{registers(src.body.values)})
 	constants(f)
+	kept_bits(f)
 	fused(f)
 	unread(f)
 	coalesced(f)
@@ -487,6 +488,29 @@ constants :: proc(f: ^Func) {
 	}
 }
 
+// kept_bits: an operation on a word by an integer that leaves its bits as they
+// are is a copy of them — x op e, e the neutral of op on its right, and x & ~0,
+// the mask of every bit of the word —, whatever the reading of either word.
+kept_bits :: proc(f: ^Func) {
+	for &b in f.blocks do for &inst in b.insts {
+		i, is_binary := inst.(Binary)
+		if !is_binary || f.kinds[i.a].machine != .Int || f.kinds[i.a].lanes > 0 do continue
+		e, constant := i.b.(i64)
+		if !constant do continue
+		#partial switch i.op {
+		case .Add, .Sub, .Or, .Xor, .Shl, .Shr:
+			if e != 0 do continue
+		case .Mul, .Div:
+			if e != 1 do continue
+		case .And:
+			if e != -1 do continue
+		case:
+			continue
+		}
+		inst = Copy{i.dst, i.a}
+	}
+}
+
 // register: a new register of the machine m.
 register :: proc(f: ^Func, m: code.Machine) -> Reg {
 	append(&f.kinds, code.Kind{m, code.EVERY, 0, 0})
@@ -543,6 +567,12 @@ body :: proc(b: ^Builder, src: code.Body) {
 				emit(b, Binary{i.op, Reg(i.dst), Reg(i.a), Reg(i.b)})
 			}
 		case code.In:
+			// one comparison, when the cover is one cell of integers tested by one
+			if c, single := single_test(b, Reg(i.x), i.cover); single {
+				set_dst(&c, NO_REG, Reg(i.dst))
+				emit(b, c)
+				break
+			}
 			// 1, unless the cover does not take x
 			yes, no, done := new_block(b), new_block(b), new_block(b)
 			test(b, Reg(i.x), i.cover, yes, no)
@@ -678,28 +708,61 @@ test :: proc(b: ^Builder, x: Reg, c: code.Cover, yes, no: Block_Id) {
 			}
 			if !above && !below do finish(b, Jump{yes})
 		} else {
-			cell := c.ints[j]
-			lo_test := cell.lo > known.lo && cell.lo > i128(min(i64))
-			hi_test := cell.hi < known.hi && cell.hi < i128(max(i64))
+			t := cell_test(known, c.ints[j])
 			switch {
-			case cell.lo == cell.hi:
-				finish(b, Branch{.Eq, x, i64(cell.lo), yes, next})
-			case lo_test && hi_test:
-				// lo ≤ x ≤ hi: x - lo ≤ hi - lo, unsigned
-				shifted := x
-				if cell.lo != 0 {
-					shifted = register(b.f, .Int)
-					emit(b, Binary{.Sub, shifted, x, i64(cell.lo)})
-				}
-				finish(b, Branch{.Below_Eq, shifted, i64(cell.hi - cell.lo), yes, next})
-			case lo_test:
-				finish(b, Branch{.Ge, x, i64(cell.lo), yes, next})
-			case hi_test:
-				finish(b, Branch{.Le, x, i64(cell.hi), yes, next})
-			case:
+			case t.always:
 				finish(b, Jump{yes})
+			case t.shift != 0:
+				shifted := register(b.f, .Int)
+				emit(b, Binary{.Sub, shifted, x, t.shift})
+				finish(b, Branch{t.cond, shifted, t.bound, yes, next})
+			case:
+				finish(b, Branch{t.cond, x, t.bound, yes, next})
 			}
 		}
 		if j < count - 1 do start(b, next)
 	}
+}
+
+// Cell_Test: a cell of integers, tested of x: taken always — the bounds x has are
+// in it —, or when x - shift cond bound.
+Cell_Test :: struct {
+	always: bool,
+	cond:   Cond,
+	shift:  i64,
+	bound:  i64,
+}
+
+// cell_test: one comparison where the bounds x has already imply one side, or one
+// unsigned comparison of x - lo with hi - lo.
+cell_test :: proc(known, cell: code.Bounds) -> Cell_Test {
+	lo_test := cell.lo > known.lo && cell.lo > i128(min(i64))
+	hi_test := cell.hi < known.hi && cell.hi < i128(max(i64))
+	switch {
+	case cell.lo == cell.hi:
+		return {cond = .Eq, bound = i64(cell.lo)}
+	case lo_test && hi_test:
+		// lo ≤ x ≤ hi: x - lo ≤ hi - lo, unsigned
+		return {cond = .Below_Eq, shift = i64(cell.lo), bound = i64(cell.hi - cell.lo)}
+	case lo_test:
+		return {cond = .Ge, bound = i64(cell.lo)}
+	case hi_test:
+		return {cond = .Le, bound = i64(cell.hi)}
+	}
+	return {always = true}
+}
+
+// single_test: x in a cover of one cell of integers, as one comparison — its
+// destination left to the caller —, or as a constant when the cell holds the
+// bounds x has.
+single_test :: proc(b: ^Builder, x: Reg, c: code.Cover) -> (out: Inst, ok: bool) {
+	if b.f.kinds[x].machine != .Int || len(c.ints) != 1 do return
+	t := cell_test(b.f.kinds[x].bounds, c.ints[0])
+	if t.always do return Copy{src = i64(c.negated ? 0 : 1)}, true
+	tested := x
+	if t.shift != 0 {
+		tested = register(b.f, .Int)
+		emit(b, Binary{.Sub, tested, x, t.shift})
+	}
+	return Compare{cond = c.negated ? CONTRARY[t.cond] : t.cond, a = tested, b = t.bound}, true
 }
