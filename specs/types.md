@@ -667,7 +667,13 @@ Its size is known before it is built, as a term over what it depends on (§4.11)
 its place is reserved whole. Only a resonant binding whose size changes with its
 state (`{...value element}`) grows after it is built: it is placed last in a memory
 of its own, where growing moves nothing. The compiler gives each one such a memory,
-as registers are given: two that live at once never share one.
+as registers are given: two that live at once never share one. So does a value
+whose size is only known as it is built — a run or a tree its effects build, read
+from an input: it grows while it is built, placed last in a memory of its own.
+
+The memory of a scope is in its frame when the size the kernel gives is bounded and
+small, in pages the system gives otherwise. Neither is a heap: nothing is freed
+alone; the memory of a scope is freed at its end, all at once.
 
 A value placed in another is laid out inside it, unless it grows after it is
 placed: then it is in a memory of its own, and the value that holds it holds its
@@ -793,6 +799,14 @@ x.a, x one of s₁ | … | sₙ    the field a of those that have it, its values
                              of theirs; invalid for the values of x that reach one
                              without a
 ({id -> 1  dx -> 2} | {id -> 3  code -> 4}).id = 1 | 3
+```
+
+A run is carved by place: `x{#k -> v}` is the run x with its binding k carved to
+v, k proven a place of x (k < |x|). It is a new value; made in place when x is
+read for the last time (§4.13):
+
+```text
+|x{#k -> v}| = |x|        x{#k -> v}.#k = v        x{#k -> v}.#j = x.#j, j ≠ k
 ```
 
 A carve replaces an equation. Everything that names x follows, since its equation
