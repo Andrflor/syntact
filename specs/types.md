@@ -604,7 +604,8 @@ run L at a time in the lanes of the machine: `x_{n+L} = M^L·x_n + b_L`, each la
 one of L interleaved orbits, recombined by the law of their monoid. A fold of N
 steps that compose is also the fold of its blocks: its orbit cut into L runs of
 B = ⌈N/L⌉ steps, run k starting at x_{k·B} = M^{k·B}·x₀ (the closed form of the
-orbit, M^n by squares), each run in a lane by M itself; what the fold gathers along
+orbit, M^n by squares, or r(M) for r = tⁿ mod the characteristic polynomial of M
+(Cayley–Hamilton)), each run in a lane by M itself; what the fold gathers along
 the orbit is recombined by the law of its monoid, in the order of the runs. A computation
 equal to the machine's own, bit for bit, is a choice the program states (open: a
 flag of exact machine arithmetic).
