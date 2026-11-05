@@ -39,7 +39,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		// (t::L) in S: true when S holds L, false when they are apart
 		if !is_constant(x) {
 			if image, known := values(k, x); known {
-				if included(k, image, s) do return Bool(true)
+				if included(k, image, s) || shape_in(k, image, s) do return Bool(true)
 				if apart(k, image, s) do return Bool(false)
 			}
 		}
@@ -268,4 +268,33 @@ fold_induction :: proc(k: ^Kernel, f: ^Fold, c: Type) -> bool {
 	for t in f.inits do if !holds(k, t, c) do return false
 	for t in f.updates do if !holds(k, rewrite(k, t, assumed), c) do return false
 	return holds(k, rewrite(k, f.value, assumed), c)
+}
+
+// shape_in: every scope the shape l admits is in s: shapes of one structure are
+// products (§5.4), included place by place — in s itself, or in a production of s.
+shape_in :: proc(k: ^Kernel, l: Type, s: ^Scope) -> bool {
+	shape, is_scope := l.(^Scope)
+	if !is_scope || !is_shape(k, shape) do return false
+	places := placed(k, shape, .Shape)
+	for p in placed(k, s, .Shape) {
+		if p.kind != .Product || p.value == nil do continue
+		target, is_shape_value := binding_type(k, p).(^Scope)
+		if !is_shape_value || !is_shape(k, target) do continue
+		others := placed(k, target, .Shape)
+		if len(others) != len(places) do continue
+		holds := true
+		for x, i in places {
+			y := others[i]
+			if x.name != y.name || x.kind != y.kind || is_run(x) || is_run(y) {
+				holds = false
+				break
+			}
+			cy := binding_color(k, y)
+			if cy == nil do continue
+			cx := binding_color(k, x)
+			holds &&= cx != nil && (same(k, cx, cy) || included(k, cx, cy))
+		}
+		if holds do return true
+	}
+	return false
 }

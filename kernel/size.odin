@@ -330,6 +330,8 @@ format_ordinal :: proc(r: Real, f: Real_Format) -> i128 {
 scope_count :: proc(k: ^Kernel, s: ^Scope) -> Count {
 	if !is_shape(k, s) {
 		if solution, solved := arden(k, s); solved && solution != s do return scope_count(k, solution)
+		// an equation that holds itself unsolved, as a tree: no bound on its values
+		if recursive(s) do return Infinite{}
 		total := Count(Type(Int(0)))
 		for b in placed(k, s, .Value) {
 			if b.kind != .Product do continue

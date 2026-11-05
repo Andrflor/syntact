@@ -959,6 +959,18 @@ count -> {u32:n -> ??  u64:r -> ??  -> n ? {0 -> r  -> count{n -> n - 1  r -> r 
 count{n -> 3  r -> 0}!   = ⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ y ^ (3 - x); y)
 ```
 
+**A recursion over what a fold builds** is the fold of the recursion:
+`f{t -> ⟳(…; y: c ↦ u(y); y)}! = ⟳(…; w: f{t -> c}! ↦ f{t -> u(z)}!; w)`, where the
+production of f at u(z) reads z only through f{t -> z}!, which is w; z is a state
+after the first, of the shape of u, in the color of t. Nothing is built:
+
+```text
+check{t -> make{depth -> d}!}!   = 2 * 2 ** d - 1      make: y ↦ {l -> y  r -> y}
+```
+
+An unknown whose layout is a shape is in a scope one of whose productions has its
+structure, place by place (§5.4): `?::{Node:l Node:r}` is in Node.
+
 **Tupling.** A fold along a counter i over lo..hi known that reads calls of an
 equation that differ by one field only, `f{x  p -> i}!`, f keeping p in its calls,
 reads the bindings of one call: `f{x  p -> i}! = T{x}!.#(i - lo)`. T is f where each

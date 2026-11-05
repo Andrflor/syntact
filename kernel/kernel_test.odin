@@ -256,6 +256,8 @@ SPEC_CASES := []Spec_Case {
 	// an access on a fold is the fold of the access; a fold is in what its value is in
 	{"P -> {u8:a  u8:b}\ng -> {u8:n -> ??  u8:s -> 0  -> n ? {0 -> P{s  s}  -> g{n -> n - 1  s -> (s * 3 + 1) % 256}!}}\nx -> g{n -> 3}!.a", "⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ (3 * y + 1) % 256; y)", {}},
 	{"f -> {u32:n -> ??  u16:acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> (acc + 1) % 1000}!}}\ni64:x -> f{n -> ??::u32}!", "⟳(x: 0 ↦ x + 1 until ?1..; y: 0 ↦ (y + 1) % 1000; y)", {}},
+	// a recursion over what a fold builds is the fold of the recursion
+	{"Node -> {\n  -> {}\n  -> {Node:l  Node:r}\n}\nmake -> {(0..30):depth -> ??  -> depth ? {0 -> {l -> {}  r -> {}}  -> {l -> make{depth -> depth - 1}!  r -> make{depth -> depth - 1}!}}}\ncheck -> {\n  Node:t -> {}\n  -> t ? {\n    {Node:l  Node:r} -> 1 + check{t -> l}! + check{t -> r}!\n    -> 0\n  }\n}\nx -> check{t -> make{depth -> ??::(0..30)}!}!", "2 * 2 ** ?0 - 1", {}},
 	// a fold that starts where it stops is its inits
 	{"make -> {(0..30):depth -> ??  -> depth ? {0 -> {l -> {}  r -> {}}  -> {l -> make{depth -> depth - 1}!  r -> make{depth -> depth - 1}!}}}\nx -> make{depth -> 0}!", "{l -> {}  r -> {}}", {}},
 	// a recursion reads the fields of its own calls: the hypothesis, by induction

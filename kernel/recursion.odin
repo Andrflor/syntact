@@ -116,6 +116,12 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 		defer pop(&k.asking)
 		if v, asked := call_production(k, out); asked && solved(v, root) do return v
 	}
+	// a recursion over what a fold builds is the fold of the recursion
+	if s != root do for b, v in s.changes {
+		f, is_fold := v.(^Fold)
+		if !is_fold do continue
+		if x, folded := over_fold(k, s, b, f, span); folded do return x
+	}
 	return out
 }
 
@@ -2076,4 +2082,78 @@ tupled :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
 	parts := fold_parts(f)
 	for &t in parts do t = rewrite(k, t, reading)
 	return with_parts(f, parts)
+}
+
+// over_fold: f{t -> ⟳(…; y: c ↦ u(y); y)}! = ⟳(…; w: f{t -> c}! ↦ f{t -> u(y)}!; w),
+// where the production of f{t -> u(y)}! reads y only through f{t -> y}!, which is
+// w: the recursion follows the fold that builds what it reads, and nothing is
+// built (§5.6). y takes the structure of u(y), as every state after the first.
+over_fold :: proc(k: ^Kernel, s: ^Scope, field: ^Binding, f: ^Fold, span: syn.Span) -> (out: Type, ok: bool) {
+	root := origin(s)
+	if !is_none(f.effects) || asked(k, root) do return
+	at := -1
+	for z, i in f.states do if same(k, f.value, z) do at = i
+	if at < 0 do return
+	y := f.states[at]
+	step := f.updates[at].(^Scope) or_return
+	for t, j in f.updates do if j != at && reads(k, t, y) do return
+	giving(k, root)
+	defer pop(&k.asking)
+	// y as every state after the first: of the structure of u
+	// y as every state after the first: the shape of u, a place holding y in the
+	// color of the field, as the states are (fold_induction)
+	shape := new_scope(nil, step.span)
+	shape.source, shape.complete, shape.reached = shape, true, true
+	for x in placed(k, step, .Value) {
+		if x.kind != .Push do return
+		place := new_binding(shape, .Push, x.span)
+		place.name = x.name
+		if u, is_y := binding_value(k, x).(^Unknown); is_y && same_unknown(u, y) do place.color = binding_color(k, field)
+		else if image, known := layout_image(k, binding_value(k, x)); known do place.color = image
+		place.typed_color = place.color
+	}
+	z := new_unknown(k, nil)
+	z.layout = shape
+	call :: proc(k: ^Kernel, s, root: ^Scope, field: ^Binding, v: Type, span: syn.Span) -> (c: ^Collapse, ok: bool) {
+		changes := make(map[^Binding]Type)
+		for b, x in s.changes do changes[b] = x
+		changes[field] = v
+		// v is a state of the fold, in the color of the field as the fold is (fold_induction)
+		carve := carved_copy(k, root, changes)
+		c = new(Collapse)
+		c.target, c.recursive, c.span = carve, true, span
+		return c, true
+	}
+	first := call(k, s, root, field, f.inits[at], span) or_return
+	next := call(k, s, root, field, rewrite(k, step, rewriting(nil, y, z)), span) or_return
+	init := call_production(k, first) or_return
+	value := call_production(k, next) or_return
+	// f{t -> y}!, the other fields as in s: w
+	w := new_unknown(k, nil)
+	family := family_of(k, init) or_return
+	w.layout = family_term(family)
+	back: Rewrite
+	for c in calls_in(k, value, root) {
+		target := c.target.(^Scope)
+		matches := len(target.changes) == len(s.changes)
+		for b, x in target.changes {
+			if b == field {
+				u, is_z := x.(^Unknown)
+				matches &&= is_z && same_unknown(u, z)
+			} else {
+				matches &&= b in s.changes && same(k, x, s.changes[b])
+			}
+		}
+		if !matches do return
+		back = rewriting_call(back, c, w)
+	}
+	value = rewrite(k, value, back)
+	if reads(k, value, z) || !solved(init, root) || !solved(value, root) do return
+	g := new(Fold)
+	g^ = f^
+	g.states = slice.clone(f.states)
+	g.inits = slice.clone(f.inits)
+	g.updates = slice.clone(f.updates)
+	g.states[at], g.inits[at], g.updates[at], g.value = w, init, value, w
+	return fold_law(k, g), true
 }
