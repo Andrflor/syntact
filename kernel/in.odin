@@ -296,14 +296,14 @@ holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: bool) -> bool {
 		verdict, _ := prove(k, in_law(k, given(k, v), c))
 		return verdict == .Proven
 	}
-	leaves := make([dynamic]Type)
+	leaves := make([dynamic]Product)
 	products(k, given(k, v), &leaves)
 	for leaf in leaves {
-		if is_none(leaf) do continue
-		shape := leaf.(^Scope) or_return
+		if is_none(leaf.term) do continue
+		shape := leaf.term.(^Scope) or_return
 		for b in placed(k, shape, .Value) {
 			if b.kind != .Push && b.kind != .Expand do continue
-			verdict, _ := prove(k, in_law(k, given(k, binding_value(k, b)), c))
+			verdict, _ := prove(k, in_law(k, given(k, read_in(k, leaf, binding_value(k, b))), c))
 			if verdict != .Proven do return false
 		}
 	}

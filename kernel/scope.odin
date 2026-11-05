@@ -1514,7 +1514,7 @@ produced_items :: proc(k: ^Kernel, s: ^Scope) -> (c: Type, ok: bool) {
 	if reading(k, root) do return
 	for x in k.equations do if x.generic == s do x.read = true
 	defer for x in k.equations do if x.generic == s do x.read = false
-	leaves := make([dynamic]Type)
+	leaves := make([dynamic]Product)
 	for p in placed(k, s, .Shape) do if p.kind == .Product && p.value != nil do products(k, binding_type(k, p), &leaves)
 	own :: proc(t: Type, root: ^Scope) -> bool {
 		c, is_call := as_call(t)
@@ -1524,10 +1524,10 @@ produced_items :: proc(k: ^Kernel, s: ^Scope) -> (c: Type, ok: bool) {
 	}
 	items := make([dynamic]Type)
 	for leaf in leaves {
-		if own(leaf, root) do continue
-		run := given(k, leaf).(^Scope) or_return
+		if own(leaf.term, root) do continue
+		run := given(k, leaf.term).(^Scope) or_return
 		for b in run_data(k, run) {
-			v := binding_value(k, b)
+			v := read_in(k, leaf, binding_value(k, b))
 			if b.kind == .Push {
 				append(&items, values(k, given(k, v)) or_return)
 				continue

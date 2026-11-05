@@ -1934,10 +1934,10 @@ measured :: proc(k: ^Kernel, t: Type, root: ^Scope, measure: Measure, to: Type) 
 
 // at_bound: the products of t, each call of root in it taken at y.
 at_bound :: proc(k: ^Kernel, t: Type, root: ^Scope, measure: Measure, y: ^Unknown) -> (out: []Bound_Product, ok: bool) {
-	leaves := make([dynamic]Type)
+	leaves := make([dynamic]Product)
 	products(k, measured(k, t, root, measure, y) or_return, &leaves)
 	parts := make([dynamic]Bound_Product)
-	for x in leaves do append(&parts, bound_product(k, x, y) or_return)
+	for x in leaves do append(&parts, bound_product(k, x.term, y) or_return)
 	return parts[:], true
 }
 
@@ -2106,19 +2106,36 @@ counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure
 }
 
 // products: the products t may give: a pattern without effects, those of its
-// branches; otherwise t.
-products :: proc(k: ^Kernel, t: Type, out: ^[dynamic]Type) {
+// branches, each read in its branch, where its reach holds — t & S there (§6) —;
+// otherwise t. Each comes with the rewrite its reach makes: what is read inside it
+// — the bindings of a scope it gives — is read under that rewrite too.
+Product :: struct {
+	term:    Type,
+	rewrite: Rewrite,
+}
+
+products :: proc(k: ^Kernel, t: Type, out: ^[dynamic]Product, r: Rewrite = nil) {
 	if p, is_pattern := t.(^Pattern); is_pattern && !has_effect(p) {
-		// each product in its branch, where its reach holds: t & S there (§6)
 		reached, _, invalid := reaches(k, p.target, p.branches)
 		if invalid != nil {
-			append(out, invalid)
+			append(out, Product{invalid, r})
 			return
 		}
-		for r in reached do products(k, branch_product(k, p.branches[r.branch], r.rewrite, p.target), out)
+		for x in reached {
+			inner := make([dynamic]Rewriting)
+			append(&inner, ..r)
+			append(&inner, ..x.rewrite)
+			products(k, branch_product(k, p.branches[x.branch], x.rewrite, p.target), out, inner[:])
+		}
 		return
 	}
-	append(out, t)
+	append(out, Product{t, r})
+}
+
+// read_in: what a product holds, read under the rewrite of its branch.
+read_in :: proc(k: ^Kernel, p: Product, t: Type) -> Type {
+	if len(p.rewrite) == 0 do return t
+	return rewrite(k, t, p.rewrite)
 }
 
 // Summed: the equation F of Σ(p: lo..hi, f{… p -> p}!), f linear in its calls.
