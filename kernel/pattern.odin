@@ -136,23 +136,52 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 			atom = n.args[0]
 		}
 		o, is_op := atom.(^Operation)
+		// a disjunction — or the negation of a conjunction, [~](a [&] b) = [~]a [|] [~]b —:
+		// each unknown in the union of what each side narrows it to
+		if is_op && (o.op == .Bit_Or && positive || o.op == .Bit_And && !positive) {
+			unsaid = bool_and(k, unsaid, l)
+			sides := make([]Type, len(o.args))
+			for a, i in o.args do sides[i] = positive ? a : bool_not(k, a)
+			either, any := narrow_either(k, out, sides)
+			if !any do return nil, false, nil
+			out = either
+			continue
+		}
 		if !is_op || o.op != .In {
 			unsaid = bool_and(k, unsaid, l)
 			continue
 		}
-		u, is_unknown := o.args[0].(^Unknown)
-		if !is_unknown || !is_constant(o.args[1]) {
+		targets: []Narrowed
+		if u, is_unknown := o.args[0].(^Unknown); is_unknown {
+			targets = []Narrowed{{u, o.args[1]}}
+		} else {
+			// a·u + t in S, t not reading u: each unknown in the preimage of S, bounded
+			// by what t may be
 			unsaid = bool_and(k, unsaid, l)
-			continue
+			targets = bounded_preimage(k, o.args[0], o.args[1], positive)
 		}
-		current := layout_of(k, u)
-		if x, found := rewritten(out, u); found {
-			current = x
-			if w, ok := x.(^Unknown); ok do current = layout_of(k, w)
+		for target in targets {
+			u, set := target.unknown, target.set
+			if !is_constant(set) {
+				// a set over unknowns: u is in what it may hold, out of what it always
+				// holds — said by its bounds; the literal stays unsaid
+				unsaid = bool_and(k, unsaid, l)
+				bound: Type
+				known: bool
+				if positive do bound, known = outer_set(k, set)
+				else do bound, known = inner_set(k, set)
+				if !known do continue
+				set = bound
+			}
+			current := layout_of(k, u)
+			if x, found := rewritten(out, u); found {
+				current = x
+				if w, ok := x.(^Unknown); ok do current = layout_of(k, w)
+			}
+			layout := and_law(k, {current, positive ? set : not_law(k, set)})
+			if is_none(layout) do return nil, false, nil
+			out = rewriting(out, u, narrowing(u, layout))
 		}
-		layout := and_law(k, {current, positive ? o.args[1] : not_law(k, o.args[1])})
-		if is_none(layout) do return nil, false, nil
-		out = rewriting(out, u, narrowing(u, layout))
 	}
 	return out, true, unsaid
 }
@@ -269,4 +298,138 @@ holds_invalid :: proc(t: Type) -> bool {
 	}
 	for x in parts(t) do if holds_invalid(x) do return true
 	return false
+}
+
+// outer_set: a constant set that holds every value s may hold, whatever its
+// unknowns: a range from the least of its lower bound to the greatest of its upper.
+outer_set :: proc(k: ^Kernel, s: Type) -> (out: Type, ok: bool) {
+	if is_constant(s) do return s, true
+	#partial switch v in s {
+	case ^Range:
+		lo, hi: Type
+		if v.lo != nil do lo = term_bound(k, v.lo, true) or_return
+		if v.hi != nil do hi = term_bound(k, v.hi, false) or_return
+		return range_law(k, lo, hi, .Int, v.span), true
+	case ^And:
+		terms := make([]Type, len(v.terms))
+		for t, i in v.terms do terms[i] = outer_set(k, t) or_return
+		return and_law(k, terms), true
+	case ^Or:
+		terms := make([]Type, len(v.terms))
+		for t, i in v.terms do terms[i] = outer_set(k, t) or_return
+		return or_law(k, terms), true
+	case ^Not:
+		inner := inner_set(k, v.term) or_return
+		return not_law(k, inner), true
+	case ^Is:
+		// =t: one of the values t may be
+		return layout_image(k, v.term)
+	}
+	// a value over unknowns: what it may be
+	return layout_image(k, s)
+}
+
+// inner_set: a constant set of values s holds whatever its unknowns: a range from
+// the greatest of its lower bound to the least of its upper.
+inner_set :: proc(k: ^Kernel, s: Type) -> (out: Type, ok: bool) {
+	if is_constant(s) do return s, true
+	#partial switch v in s {
+	case ^Range:
+		lo, hi: Type
+		if v.lo != nil do lo = term_bound(k, v.lo, false) or_return
+		if v.hi != nil do hi = term_bound(k, v.hi, true) or_return
+		return range_law(k, lo, hi, .Int, v.span), true
+	case ^And:
+		terms := make([]Type, len(v.terms))
+		for t, i in v.terms do terms[i] = inner_set(k, t) or_return
+		return and_law(k, terms), true
+	case ^Or:
+		terms := make([]Type, len(v.terms))
+		for t, i in v.terms do terms[i] = inner_set(k, t) or_return
+		return or_law(k, terms), true
+	case ^Not:
+		outer := outer_set(k, v.term) or_return
+		return not_law(k, outer), true
+	}
+	// =t, or a value over unknowns: none of its values is it whatever the unknowns
+	return None{}, true
+}
+
+// term_bound: the least (or greatest) integer the term t may be.
+term_bound :: proc(k: ^Kernel, t: Type, least: bool) -> (out: Type, ok: bool) {
+	image := layout_image(k, t) or_return
+	lo, hi := int_bounds(k, image) or_return
+	b := (least ? lo : hi).? or_return
+	return Int(b), true
+}
+
+// Narrowed: an unknown, and the set a literal puts it in.
+Narrowed :: struct {
+	unknown: ^Unknown,
+	set:     Type,
+}
+
+// bounded_preimage: e = a·u + t, t a term not reading u, in the constant set s,
+// for each unknown u of degree 1 in e: u is in the preimage of s by a·u + b for some
+// b t may be (positive: the hull of the preimages at the bounds of t), or for every
+// one (negated: their meet) — the law of the preimage (in.odin) at the bounds of t.
+bounded_preimage :: proc(k: ^Kernel, e, s: Type, positive: bool) -> []Narrowed {
+	out := make([dynamic]Narrowed)
+	if !is_constant(s) do return nil
+	ms, d, ring := monomials(e)
+	if !ring || d != 1 do return nil
+	one: [1]Type
+	cells, negated := cells_in(s, &one)
+	if negated do return nil
+	for m in ms {
+		fs := factors(m)
+		if len(fs) != 1 do continue
+		x := fs[0]
+		alpha, t, affine := affine_in(k, e, x)
+		a, constant := alpha.(Int)
+		if !affine || !constant || a == 0 do continue
+		image := layout_image(k, t) or_continue
+		tl, th := int_bounds(k, image) or_continue
+		low := tl.? or_continue
+		high := th.? or_continue
+		at_low := preimage(k, cells, i128(a), low) or_continue
+		at_high := preimage(k, cells, i128(a), high) or_continue
+		if !positive {
+			append(&out, Narrowed{x, and_law(k, {at_low, at_high})})
+			continue
+		}
+		lo1, hi1 := int_bounds(k, at_low) or_continue
+		lo2, hi2 := int_bounds(k, at_high) or_continue
+		// the hull: a missing bound is unbounded
+		lo, hi: Maybe(i128)
+		if l1, has1 := lo1.?; has1 do if l2, has2 := lo2.?; has2 do lo = min(l1, l2)
+		if h1, has1 := hi1.?; has1 do if h2, has2 := hi2.?; has2 do hi = max(h1, h2)
+		append(&out, Narrowed{x, discrete_cell(.Int, lo, hi)})
+	}
+	return out[:]
+}
+
+// narrow_either: the rewrite a disjunction makes: each side narrows on its own; an
+// unknown is in the union of what the sides it reaches narrow it to; a side that
+// no value reaches adds nothing. Not reached when no side is.
+narrow_either :: proc(k: ^Kernel, base: Rewrite, sides: []Type) -> (out: Rewrite, reached: bool) {
+	rewrites := make([dynamic]Rewrite)
+	for side in sides {
+		r, side_reached, _ := narrow(k, base, side)
+		if side_reached do append(&rewrites, r)
+	}
+	if len(rewrites) == 0 do return nil, false
+	out = base
+	first: for x in rewrites[0] {
+		if x.unknown == nil do continue
+		layouts := make([dynamic]Type)
+		for r in rewrites {
+			t, found := rewritten(r, x.unknown)
+			if !found do continue first
+			w, narrowed := t.(^Unknown)
+			append(&layouts, narrowed ? layout_of(k, w) : t)
+		}
+		out = rewriting(out, x.unknown, narrowing(x.unknown, or_law(k, layouts[:])))
+	}
+	return out, true
 }

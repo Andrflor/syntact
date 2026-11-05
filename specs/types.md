@@ -1171,6 +1171,13 @@ calls itself where that one calls itself: what is built is never built.
 sum{t -> build{d -> m  s -> a}!}!    an equation in m and a: no tree
 ```
 
+A branch narrows the unknowns its reach speaks of: `u in S` gives `?ₖ::(L & S)`,
+`[~](u in S)` gives `?ₖ::(L & ~S)`. A set over unknowns narrows by its bounds: u is
+in what S may hold when the literal holds, out of what S always holds when it does
+not. `a·u + t in S`, t not reading u, narrows each such u to the preimage of S at the
+bounds of t. A disjunction narrows each unknown to the union of what its sides
+narrow it to. What the reach says beyond that stays its guard.
+
 What a branch types holds for the values of the target that reach it. Its checks
 are guarded by the branch: with `reach` the target in its cover and in none of the
 covers above, a check `r` inside it is `[~]reach [|] r`. A branch that no value
