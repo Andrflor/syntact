@@ -1,7 +1,10 @@
-// sexp (Goose bench/goose/sexp.goose): generate N s-expression forms as text
-// (symbols of 3..14 letters, numbers below 100000, lists of 2..5), parse the text
-// into a tree, walk it four times. Here: the generator, which returns the text
-// and the next state of xorshift64, and the parser's first step, on characters.
+// sexp (Goose bench/goose/sexp.goose): generate N s-expression forms of depth 4 as
+// one text of bytes -- symbols of 3..14 letters, numbers below 100000, lists of
+// 2..5 forms --, parse the text into trees, walk them four times. The children of
+// a list are linked first-child / previous-sibling, so every node is complete when
+// it is built and the walk sees them in reverse source order. Prints the length of
+// the text, the count of nodes, the count of roots, the length of the error and
+// the total of the walks.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
@@ -10,6 +13,7 @@ Array -> {
   -> {}
   -> {T: ...Array{T}:}
 }
+A -> Array{u8}
 // xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
 xs -> {
   u64:x
@@ -17,68 +21,264 @@ xs -> {
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-// a letter from 0..25: there is no operator from an integer to a character
-// (specs/language/02), so it is a pattern
-letter -> {
-  (0..25):k
-  -> k ? {0 -> "a"  1 -> "b"  2 -> "c"  3 -> "d"  4 -> "e"  5 -> "f"  6 -> "g"  7 -> "h"  8 -> "i"  9 -> "j"  10 -> "k"  11 -> "l"  12 -> "m"  13 -> "n"  14 -> "o"  15 -> "p"  16 -> "q"  17 -> "r"  18 -> "s"  19 -> "t"  20 -> "u"  21 -> "v"  22 -> "w"  23 -> "x"  24 -> "y"  -> "z"}
-}
-Gen -> {string:text  u64:r}
-sym -> {
-  u8:n -> ??
-  u64:r -> 12345
-  string:acc -> ""
-  -> n ? {
-    0 -> Gen{acc  r}
-    -> sym{n -> n - 1  r -> xs{x -> r}!  acc -> acc + letter{k -> xs{x -> r}! % 26}!}!
-  }
-}
-digit -> {
-  (0..9):d
-  -> d ? {0 -> "0"  1 -> "1"  2 -> "2"  3 -> "3"  4 -> "4"  5 -> "5"  6 -> "6"  7 -> "7"  8 -> "8"  -> "9"}
-}
-num -> {
-  u32:v -> 0
-  -> v ? {<10 -> digit{d -> v}!  -> num{v -> v / 10}! + digit{d -> v % 10}!}
-}
-gen -> {
-  (0..8):depth -> 4
-  u64:seed -> 12345
-  -> {
-    r -> xs{x -> seed}!
-    -> (depth = 0) [|] (r % 4 = 0) ? {
-      true -> (r >> 8) % 2 ? {
-        0 -> {g -> sym{n -> 3 + r % 12  r -> r}!  -> Gen{g.text + " "  r}}!
-        -> Gen{num{v -> (r >> 16) % 100000}! + " "  r}
-      }
-      -> kids{depth -> depth - 1  n -> 2 + (r >> 24) % 4  g -> Gen{"("  r}}!
-    }
-  }!
-}
-kids -> {
-  (0..8):depth -> 0
+DEPTH -> 4
+PASSES -> 4
+
+// --- generation --------------------------------------------------------------
+// The text is carried through the generator, which gives it back extended with
+// the state of the chain. Bytes are written by their codes: there is no operator
+// from a character to an integer (specs/language/02).
+
+// the n letters of a symbol, each from the next state of the chain
+letters -> {
+  u64:r -> ??
   u8:n -> 0
-  Gen:g -> Gen
   -> n ? {
-    0 -> Gen{g.text + ") "  g.r}
+    0 -> {}
     -> {
-      c -> gen{depth -> depth  seed -> g.r}!
-      -> kids{depth -> depth  n -> n - 1  g -> Gen{g.text + c.text  c.r}}!
+      r1 -> xs{x -> r}!
+      -> {97 + r1 % 26  ...letters{r -> r1  n -> n - 1}!}
     }!
   }
 }
-// parse: the first token of a text, read on its characters
-Token -> {string:token  string:rest}
-token -> {
-  string:t -> ""
+// the decimal digits of v, lowest first, each put before those already read
+digits_of -> {
+  i64:v -> 0
+  A:tmp -> {}
+  -> v ? {
+    0 -> tmp
+    -> digits_of{v -> v / 10  tmp -> {48 + v % 10  ...tmp}}!
+  }
+}
+// format_int(text, v, 10, 0, ' '): the decimal text of v
+format_int -> {
+  i64:v -> 0
+  -> v ? {
+    0 -> {48}
+    -> digits_of{v -> v}!
+  }
+}
+// an atom and its space: a symbol of 3..14 letters or a number below 100000
+atom -> {
+  A:text -> {}
+  u64:r -> ??
+  -> (r >> 8) % 2 ? {
+    0 -> {...text  ...letters{r -> r  n -> 3 + r % 12}!  32}
+    -> {...text  ...format_int{v -> (r >> 16) % 100000}!  32}
+  }
+}
+Gen -> {A:text  u64:r}
+// one form of the given depth after text, with the state of the chain after it;
+// kids > 0 writes instead the kids forms left in a list of forms of that depth,
+// then closes it
+gen -> {
+  A:text -> {}
+  (0..4):depth -> DEPTH
+  u64:seed -> 12345
+  (0..5):kids -> 0
+  -> kids ? {
+    0 -> {
+      r -> xs{x -> seed}!
+      -> depth ? {
+        0 -> Gen{atom{text -> text  r -> r}!  r}
+        -> r % 4 ? {
+          0 -> Gen{atom{text -> text  r -> r}!  r}
+          -> gen{text -> {...text  40}  depth -> depth - 1  seed -> r  kids -> 2 + (r >> 24) % 4}!
+        }
+      }
+    }!
+    -> {
+      c -> gen{text -> text  depth -> depth  seed -> seed}!
+      -> kids ? {
+        1 -> Gen{{...c.text  41 32}  c.r}
+        -> gen{text -> c.text  depth -> depth  seed -> c.r  kids -> kids - 1}!
+      }
+    }!
+  }
+}
+// the text of n forms
+forms -> {
+  u32:n -> ??
+  Gen:g -> Gen{{}  12345}
+  -> n ? {
+    0 -> g.text
+    -> forms{n -> n - 1  g -> gen{text -> g.text  seed -> g.r}!}!
+  }
+}
+
+// --- the tree ----------------------------------------------------------------
+
+// a symbol's text: one byte at least
+Name -> {u8: ...A:}
+// a node and the sibling before it; {} ends a chain
+Sexp -> {
+  -> {}
+  -> {Name:name  Sexp:next}
+  -> {i64:v  Sexp:next}
+  -> {Sexp:first  Sexp:next}
+}
+
+// --- parsing -----------------------------------------------------------------
+// The cursor is the text from it on.
+
+skip_space -> {
+  A:t -> {}
   -> t ? {
-    ("(" + string:(rest)) -> Token{"("  rest}
-    (")" + string:(rest)) -> Token{")"  rest}
-    -> Token{""  t}
+    {32  ...A:(rest)} -> skip_space{t -> rest}!
+    -> t
+  }
+}
+// a number read from the front of t, after the digits v read so far
+Number -> {i64:v  A:rest}
+number -> {
+  A:t -> {}
+  i64:v -> 0
+  -> t ? {
+    {(48..57):(c)  ...A:(rest)} -> number{t -> rest  v -> v * 10 + (c - 48)}!
+    -> Number{v -> v  rest -> t}
+  }
+}
+// the bytes of a symbol after its first, from the front of t, up to a space or
+// a parenthesis
+Symbol -> {A:name  A:rest}
+symbol -> {
+  A:t -> {}
+  A:name -> {}
+  -> t ? {
+    {32  ...A:} -> Symbol{name -> name  rest -> t}
+    {40  ...A:} -> Symbol{name -> name  rest -> t}
+    {41  ...A:} -> Symbol{name -> name  rest -> t}
+    {u8(c)  ...A:(rest)} -> symbol{t -> rest  name -> {...name  c}}!
+    -> Symbol{name -> name  rest -> t}
+  }
+}
+// a node read from t, or the error that stops the parse
+Parsed -> {
+  -> {Sexp:node  A:rest}
+  -> {A:err}
+}
+// "eof"
+EOF -> {101 111 102}
+// "unclosed"
+UNCLOSED -> {117 110 99 108 111 115 101 100}
+// the node at the front of t, linked to prev; open, the children of a list read
+// so far, last first, until its ')' closes it as the node linked to prev
+parse_node -> {
+  A:t -> {}
+  Sexp:prev -> {}
+  bool:open -> false
+  Sexp:chain -> {}
+  -> open ? {
+    true -> skip_space{t -> t}! ? {
+      {41  ...A:(rest)} -> {node -> {first -> chain  next -> prev}  rest -> rest}
+      {u8:  ...A:} -> {
+        Parsed:c -> parse_node{t -> skip_space{t -> t}!  prev -> chain}!
+        -> c ? {
+          {Sexp:node  A:rest} -> parse_node{t -> rest  prev -> prev  open -> true  chain -> node}!
+          -> c
+        }
+      }!
+      -> {err -> UNCLOSED}
+    }
+    -> skip_space{t -> t}! ? {
+      {40  ...A:(rest)} -> parse_node{t -> rest  prev -> prev  open -> true  chain -> {}}!
+      {(48..57):  ...A:} -> {
+        num -> number{t -> skip_space{t -> t}!}!
+        -> {node -> {v -> num.v  next -> prev}  rest -> num.rest}
+      }!
+      {u8(c)  ...A:(rest)} -> {
+        sym -> symbol{t -> rest}!
+        -> {node -> {name -> {c  ...sym.name}  next -> prev}  rest -> sym.rest}
+      }!
+      -> {err -> EOF}
+    }
+  }
+}
+// every root of the text, in order, and the error that stopped the parse
+Roots -> {Array{Sexp}:roots  A:err}
+parse_all -> {
+  A:t -> {}
+  Array{Sexp}:roots -> {}
+  -> skip_space{t -> t}! ? {
+    {u8:  ...A:} -> {
+      Parsed:p -> parse_node{t -> t}!
+      -> p ? {
+        {Sexp:node  A:rest} -> parse_all{t -> rest  roots -> {...roots  node}}!
+        {A:err} -> Roots{roots -> roots  err -> err}
+      }
+    }!
+    -> Roots{roots -> roots  err -> {}}
+  }
+}
+
+// --- walking -----------------------------------------------------------------
+
+size -> {
+  A:s -> {}
+  -> s ? {
+    {u8(b)  ...A:(t)} -> 1 + size{s -> t}!
+    -> 0
+  }
+}
+// a node and the siblings it links to; a root links to none. The pass index
+// rides along, so the four walks are four different computations
+walk -> {
+  Sexp:c -> {}
+  i64:p -> 0
+  -> c ? {
+    {Name:name  Sexp:next} -> size{s -> name}! + name.#0 + p + walk{c -> next  p -> p}!
+    {i64:v  Sexp:next} -> (v ^ p) + walk{c -> next  p -> p}!
+    {Sexp:first  Sexp:next} -> 1 + walk{c -> first  p -> p}! + walk{c -> next  p -> p}!
+    -> 0
+  }
+}
+// the nodes of a chain, those of the lists in it included
+nodes -> {
+  Sexp:c -> {}
+  -> c ? {
+    {Name:name  Sexp:next} -> 1 + nodes{c -> next}!
+    {i64:v  Sexp:next} -> 1 + nodes{c -> next}!
+    {Sexp:first  Sexp:next} -> 1 + nodes{c -> first}! + nodes{c -> next}!
+    -> 0
+  }
+}
+pool -> {
+  Array{Sexp}:roots -> {}
+  -> roots ? {
+    {Sexp(r)  ...Array{Sexp}:(t)} -> nodes{c -> r}! + pool{roots -> t}!
+    -> 0
+  }
+}
+count -> {
+  Array{Sexp}:roots -> {}
+  -> roots ? {
+    {Sexp(r)  ...Array{Sexp}:(t)} -> 1 + count{roots -> t}!
+    -> 0
+  }
+}
+pass -> {
+  Array{Sexp}:roots -> {}
+  i64:p -> 0
+  -> roots ? {
+    {Sexp(r)  ...Array{Sexp}:(t)} -> walk{c -> r  p -> p}! + pass{roots -> t  p -> p}!
+    -> 0
+  }
+}
+passes -> {
+  Array{Sexp}:roots -> {}
+  (0..4):p -> 0
+  -> p ? {
+    >=PASSES -> 0
+    -> pass{roots -> roots  p -> p}! + passes{roots -> roots  p -> p + 1}!
   }
 }
 -> {
   u32:n -> ??
-  g -> gen{seed -> n}!
-  -> io.printf{format -> "%lld\n"  n -> 0}!
+  text -> forms{n -> n}!
+  parsed -> parse_all{t -> text}!
+  a -> io.printf{format -> "%lld\n"  n -> size{s -> text}!}!
+  b -> io.printf{format -> "%lld\n"  n -> pool{roots -> parsed.roots}!}!
+  c -> io.printf{format -> "%lld\n"  n -> parsed.err ? {{} -> count{roots -> parsed.roots}!  -> 0}}!
+  d -> io.printf{format -> "%lld\n"  n -> size{s -> parsed.err}!}!
+  -> io.printf{format -> "%lld\n"  n -> passes{roots -> parsed.roots}!}!
 }!

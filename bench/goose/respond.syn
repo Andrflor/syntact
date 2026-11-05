@@ -1,14 +1,21 @@
-// respond (Goose bench/goose/respond.goose): N JSON responses rendered to text,
-// each hashed with FNV-1a over its bytes. Here: the hash of a rendered string,
-// which reads the code of each character of the string.
+// respond (Goose bench/goose/respond.goose): a web service's hot loop. For each of
+// N requests, build the typed response -- an id, a user name, a list of line items
+// each with a sku, a qty and a price -- render it as JSON into an output buffer of
+// bytes, and hash the buffer with FNV-1a. Prints N, the bytes rendered and the
+// hash, h ^ (fnv * 31 + i) over the requests.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
+}
+// the hash is a u64 and printed as one
+iou -> <libc.so.6>{
+  printf -> {string:format, u64:n, -> !?::i32}
 }
 Array -> {
   T -> {}
   -> {}
   -> {T: ...Array{T}:}
 }
+A -> Array{u8}
 // xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
 xs -> {
   u64:x
@@ -16,29 +23,201 @@ xs -> {
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-fnv -> {
-  string:s -> ""
-  u64:h -> 0xcbf29ce484222325
-  -> s ? {
-    "" -> h
-    (char:(c) + string:(rest)) -> fnv{s -> rest  h -> ((h ^ c) * 0x100000001b3) [&] 0xffffffffffffffff}!
+Item -> {A:sku  (1..5):qty  (100..99999):price}
+Resp -> {u32:id  A:user  Array{Item}:items}
+
+// --- the response ------------------------------------------------------------
+
+// the letters of a user name: n of them, each from the next state of the chain;
+// when odd, the second one is a quote or a backslash, so the escaping is real
+letters -> {
+  u64:r -> ??
+  u8:n -> 0
+  u8:i -> 0
+  bool:odd -> false
+  -> i ? {
+    >=n -> {}
+    -> {
+      r1 -> xs{x -> r}!
+      c -> (odd [&] (i = 1)) ? {
+        true -> r1 % 2 ? {0 -> 34  -> 92}
+        -> 97 + r1 % 26
+      }
+      -> {c  ...letters{r -> r1  n -> n  i -> i + 1  odd -> odd}!}
+    }!
   }
 }
-digit -> {
-  (0..9):d
-  -> d ? {0 -> "0"  1 -> "1"  2 -> "2"  3 -> "3"  4 -> "4"  5 -> "5"  6 -> "6"  7 -> "7"  8 -> "8"  -> "9"}
+// a user name of 3..10 letters; one in eight carries a quote or a backslash
+name_of -> {
+  u64:seed -> ??
+  r -> xs{x -> seed}!
+  -> letters{r -> r  n -> 3 + r % 8  odd -> (r >> 8) % 8 = 0}!
 }
-// the decimal text of v: there is no operator from an integer to a string
-num -> {
-  u32:v -> 0
-  -> v ? {<10 -> digit{d -> v}!  -> num{v -> v / 10}! + digit{d -> v % 10}!}
+// the n digits of a sku, each from the next state of the chain
+digits -> {
+  u64:r -> ??
+  u8:n -> 0
+  -> n ? {
+    0 -> {}
+    -> {
+      r1 -> xs{x -> r}!
+      -> {48 + r1 % 10  ...digits{r -> r1  n -> n - 1}!}
+    }!
+  }
+}
+// a stock keeping unit: two capital letters and four digits
+sku_of -> {
+  u64:seed -> ??
+  r -> xs{x -> seed}!
+  -> {65 + r % 26  65 + (r >> 8) % 26  ...digits{r -> r  n -> 4}!}
+}
+// the n line items, each from the next state of the chain
+make_items -> {
+  u64:r -> ??
+  u8:n -> 0
+  -> n ? {
+    0 -> {}
+    -> {
+      r1 -> xs{x -> r}!
+      -> {
+        Item{sku -> sku_of{seed -> r1}!  qty -> 1 + (r1 >> 8) % 5  price -> 100 + (r1 >> 16) % 99900}
+        ...make_items{r -> r1  n -> n - 1}!
+      }
+    }!
+  }
+}
+
+// --- rendering ---------------------------------------------------------------
+// The buffer out is carried through every emitter, which gives it back extended.
+// Bytes are written by their codes: there is no operator from a character to an
+// integer (specs/language/02).
+
+// the decimal digits of v, lowest first, each put before those already read:
+// tmp holds them in the order they are written
+digits_of -> {
+  i64:v -> 0
+  A:tmp -> {}
+  -> v ? {
+    0 -> tmp
+    -> digits_of{v -> v / 10  tmp -> {48 + v % 10  ...tmp}}!
+  }
+}
+// the decimal text of v, after out
+emit_int -> {
+  A:out -> {}
+  i64:v -> 0
+  -> v ? {
+    0 -> {...out  48}
+    -> {...out  ...digits_of{v -> v}!}
+  }
+}
+// the bytes of s, a backslash before each quote and backslash
+escape -> {
+  A:out -> {}
+  A:s -> {}
+  -> s ? {
+    {34  ...A:(t)} -> escape{out -> {...out  92 34}  s -> t}!
+    {92  ...A:(t)} -> escape{out -> {...out  92 92}  s -> t}!
+    {u8(c)  ...A:(t)} -> escape{out -> {...out  c}  s -> t}!
+    -> out
+  }
+}
+// s quoted, after out
+emit_str -> {
+  A:out -> {}
+  A:s -> {}
+  -> {...escape{out -> {...out  34}  s -> s}!  34}
+}
+// the buffer after the items, and the total of qty * price they add up
+Rendered -> {A:out  int:total}
+emit_items -> {
+  A:out -> {}
+  Array{Item}:items -> {}
+  bool:first -> true
+  int:total -> 0
+  -> items ? {
+    {Item(it)  ...Array{Item}:(t)} -> {
+      sep -> first ? {true -> out  -> {...out  44}}
+      // {"sku":
+      o1 -> emit_str{out -> {...sep  123 34 115 107 117 34 58}  s -> it.sku}!
+      // ,"qty":
+      o2 -> emit_int{out -> {...o1  44 34 113 116 121 34 58}  v -> it.qty}!
+      // ,"price":
+      o3 -> emit_int{out -> {...o2  44 34 112 114 105 99 101 34 58}  v -> it.price}!
+      -> emit_items{out -> {...o3  125}  items -> t  first -> false  total -> total + it.qty * it.price}!
+    }!
+    -> Rendered{out -> out  total -> total}
+  }
 }
 render -> {
-  u32:id -> 0
-  string:user -> ""
-  -> "{\"id\":" + num{v -> id}! + ",\"user\":\"" + user + "\"}"
+  Resp:r -> Resp
+  // {"id":
+  o1 -> emit_int{out -> {123 34 105 100 34 58}  v -> r.id}!
+  // ,"user":
+  o2 -> emit_str{out -> {...o1  44 34 117 115 101 114 34 58}  s -> r.user}!
+  // ,"items":[
+  its -> emit_items{out -> {...o2  44 34 105 116 101 109 115 34 58 91}  items -> r.items}!
+  // ],"total":
+  o3 -> emit_int{out -> {...its.out  93 44 34 116 111 116 97 108 34 58}  v -> its.total}!
+  -> {...o3  125}
+}
+
+// FNV-1a over the bytes, the checksum every row of the benchmark computes
+fnv -> {
+  A:s -> {}
+  u64:h -> 0xcbf29ce484222325
+  -> s ? {
+    {u8(b)  ...A:(t)} -> fnv{s -> t  h -> ((h ^ b) * 0x100000001b3) [&] 0xffffffffffffffff}!
+    -> h
+  }
+}
+size -> {
+  A:s -> {}
+  -> s ? {
+    {u8(b)  ...A:(t)} -> 1 + size{s -> t}!
+    -> 0
+  }
+}
+
+// --- the service -------------------------------------------------------------
+
+// one request: the response object and its rendering
+Handled -> {u64:hash  i64:len}
+handle -> {
+  u64:seed -> ??
+  r -> xs{x -> seed}!
+  resp -> Resp{
+    id -> (r >> 4) % 1000000
+    user -> name_of{seed -> r >> 8}!
+    items -> make_items{r -> r >> 16  n -> 1 + r % 8}!
+  }
+  out -> render{r -> resp}!
+  -> Handled{hash -> fnv{s -> out}!  len -> size{s -> out}!}
+}
+Served -> {u64:h  i64:bytes}
+serve -> {
+  u32:n -> ??
+  u32:i -> 0
+  u64:seed -> 12345
+  u64:h -> 0
+  i64:bytes -> 0
+  -> i ? {
+    >=n -> Served{h -> h  bytes -> bytes}
+    -> {
+      s -> xs{x -> seed}!
+      d -> handle{seed -> s}!
+      -> serve{
+        n -> n  i -> i + 1  seed -> s
+        h -> h ^ ((d.hash * 31 + i) [&] 0xffffffffffffffff)
+        bytes -> bytes + d.len
+      }!
+    }!
+  }
 }
 -> {
   u32:n -> ??
-  -> io.printf{format -> "%lld\n"  n -> fnv{s -> render{id -> n  user -> "ab"}!}! % 4611686018427387904}!
+  s -> serve{n -> n}!
+  a -> io.printf{format -> "%lld\n"  n -> n}!
+  b -> io.printf{format -> "%lld\n"  n -> s.bytes}!
+  -> iou.printf{format -> "%llu\n"  n -> s.h}!
 }!
