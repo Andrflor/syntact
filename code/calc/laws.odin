@@ -22,10 +22,13 @@ import code ".."
 //   a ◁ b = b ▷ a               ▷ the converse of ◁: < >, <= >=
 //   x + c ◁ k = x ◁ k - c       ◁ a comparison, x + c not wrapping
 //   t ? {c -> a  -> b} = (t in c) ? a : b       selects (selects.odin)
+//   mulhi(a, b) = hh + lh₁ + hl₁ + (ll₁ + lh₀ + hl₀) >> 32   by halves of 32 bits:
+//                 a = a₁·2³² + a₀, ll = a₀·b₀, lh = a₀·b₁, hl = a₁·b₀, hh = a₁·b₁,
+//                 t₁ = t >> 32, t₀ = t & (2³² - 1)                       (halved)
 
 Law :: proc(g: ^Graph, c: Class, n: Node)
 
-LAWS := [?]Law{known, neutral, absorbing, strength, divided, commuted, conversed, shifted, gathered, chained, selected, cells}
+LAWS := [?]Law{known, neutral, absorbing, strength, divided, halved, commuted, conversed, shifted, gathered, chained, selected, cells}
 
 // saturate: the laws on every node and those of the loops (loops.odin), until none
 // adds a node nor merges two classes, or the graph holds budget nodes; then the law
@@ -222,6 +225,23 @@ divided :: proc(g: ^Graph, c: Class, n: Node) {
 		if n.op == .Div do merge(g, c, q)
 		else do equal(g, c, binary(g, .Sub, x, add(g, binary(g, .Mul, q, add(g, int_node(d))))))
 	}
+}
+
+// halved: the high half of a product of two words, from the products of their
+// halves of 32 bits, each exact in a word: what a machine without the product of
+// two words computes it by.
+halved :: proc(g: ^Graph, c: Class, n: Node) {
+	if n.kind != .Binary || n.op != .Mul_High || g.facts[find(g, n.args[0])].machine != .Int do return
+	constant :: proc(g: ^Graph, v: i128) -> Class {return add(g, int_node(v))}
+	low :: proc(g: ^Graph, x: Class) -> Class {return add(g, binary(g, .And, x, constant(g, 1 << 32 - 1)))}
+	high :: proc(g: ^Graph, x: Class) -> Class {return low(g, add(g, binary(g, .Shr, x, constant(g, 32))))}
+	product :: proc(g: ^Graph, x, y: Class) -> Class {return add(g, binary(g, .Mul, x, y))}
+	a, b := n.args[0], n.args[1]
+	a0, a1, b0, b1 := low(g, a), high(g, a), low(g, b), high(g, b)
+	ll, lh, hl, hh := product(g, a0, b0), product(g, a0, b1), product(g, a1, b0), product(g, a1, b1)
+	middle := add(g, binary(g, .Add, high(g, ll), add(g, binary(g, .Add, low(g, lh), low(g, hl)))))
+	top := add(g, binary(g, .Add, hh, add(g, binary(g, .Add, high(g, lh), high(g, hl)))))
+	merge(g, c, add(g, binary(g, .Add, top, high(g, middle))))
 }
 
 // commuted: a ⊕ b = b ⊕ a — a vector first, before what is in each of its lanes.
