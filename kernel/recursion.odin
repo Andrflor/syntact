@@ -792,6 +792,7 @@ calls_in :: proc(k: ^Kernel, t: Type, root: ^Scope) -> []^Collapse {
 		case ^Not:
 			visit(k, v.term, root, found)
 		case ^Effect:
+			if v.call != nil do visit(k, v.call, root, found)
 			if v.choice != nil do visit(k, v.choice, root, found)
 			visit(k, v.then, root, found)
 		case ^Scope:
