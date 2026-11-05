@@ -62,6 +62,7 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 	reached, rest, invalid := reaches(k, target, p.branches)
 	if invalid != nil do return invalid
 	out := make([dynamic]Branch)
+	rewrites := make([dynamic]Rewrite)
 	for r in reached {
 		b := p.branches[r.branch]
 		// what the reach says beyond the rewrite holds in the product
@@ -70,6 +71,7 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 		pop(&k.reached)
 		if r.all && len(out) == 0 do return product
 		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
+		append(&rewrites, r.rewrite)
 	}
 	// taken by every value: t ? {c -> p  -> p} = p; otherwise the check proves that
 	// every value is taken (check.odin)
@@ -77,10 +79,27 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 		all_same := true
 		for b in out[1:] do all_same &&= same(k, b.product, out[0].product)
 		if all_same do return out[0].product
+		// the same product in each branch, read where its reach holds: p(t) where
+		// t in c gives what the branch gives
+		if whole, agrees := agreeing(k, out[:], rewrites[:]); agrees do return whole
 	}
 	r := new(Pattern)
 	r.target, r.branches, r.span = target, out[:], p.span
 	return r
+}
+
+// agreeing: the product of the last branch, its unknowns as they are outside it,
+// when every branch gives it rewritten as that branch narrows them: then the
+// pattern is that product (t ? {c -> p -> p} = p, read in each branch).
+agreeing :: proc(k: ^Kernel, out: []Branch, rewrites: []Rewrite) -> (Type, bool) {
+	if len(out) < 2 do return nil, false
+	last := len(out) - 1
+	back: Rewrite
+	for x in rewrites[last] do if x.unknown != nil do back = rewriting(back, x.unknown, x.unknown)
+	whole := rewrite(k, out[last].product, back)
+	if has_effect(whole) || is_invalid(whole) do return nil, false
+	for b, i in out[:last] do if !same(k, b.product, rewrite(k, whole, rewrites[i])) do return nil, false
+	return whole, true
 }
 
 // covered: the pattern t, on its target and its first cover, both computed.

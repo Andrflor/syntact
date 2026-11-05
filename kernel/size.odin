@@ -199,9 +199,32 @@ reached_set :: proc(k: ^Kernel, t: Type, set: Type) -> Type {
 			atom := l
 			if n, negated := l.(^Operation); negated && n.op == .Bit_Not do positive, atom = false, n.args[0]
 			o, is_in := atom.(^Operation)
-			if !is_in || o.op != .In || !same(k, o.args[0], t) do continue
+			if !is_in || o.op != .In do continue
 			if _, is_scope := o.args[1].(^Scope); !is_scope && !is_constant(o.args[1]) do continue
-			set = and_law(k, {set, positive ? o.args[1] : not_law(k, o.args[1])})
+			said := positive ? o.args[1] : not_law(k, o.args[1])
+			if same(k, o.args[0], t) {
+				set = and_law(k, {set, said})
+				k.narrowed += 1
+				continue
+			}
+			// g in S says t = g + d is in S + d, t = e - g in e - S
+			if !is_constant(said) || !integer_set(said) do continue
+			// on the ring, its atoms shared: no image is asked
+			atoms: Rewrite
+			x, g := atomized(k, t, &atoms), atomized(k, o.args[0], &atoms)
+			if diff, ring := ring_law(.Sub, {x, g}); ring {
+				if d, shifted := diff.(Int); shifted {
+					set = and_law(k, {set, exact_law(k, .Add, {said, d}, {})})
+					k.narrowed += 1
+					continue
+				}
+			}
+			if sum, ring := ring_law(.Add, {x, g}); ring {
+				if e, mirrored := sum.(Int); mirrored {
+					set = and_law(k, {set, exact_law(k, .Sub, {e, said}, {})})
+					k.narrowed += 1
+				}
+			}
 		}
 	}
 	return set

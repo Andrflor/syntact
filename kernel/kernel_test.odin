@@ -98,6 +98,10 @@ SPEC_CASES := []Spec_Case {
 	{"a -> ??::u8\nx -> a * 2 + a", "3 * ?0", {}},
 	{"u8:n -> ??\nn:x -> n", "?0", {}},
 	{"u8:n -> ??\nm -> n * 2\nn:x -> m / 2", "?0", {}},
+	// an integer / rounds toward 0: only an exact division is read by the ring
+	{"u8:a -> ??\nx -> (a / 4) * 4", "4 * (?0 / 4)", {}},
+	{"u8:a -> ??\nx -> 3 * (a / 4) - 1", "3 * (?0 / 4) - 1", {}},
+	{"u8:a -> ??\nx -> (a * (a + 1) / 2) * 2 - a", "?0 * ?0", {}},
 	{"u8:n -> ??\nu16:x -> n + 1", "?0 + 1", {}},
 	{"u8:n -> ??\nu8:x -> n + 1", "", {.Constraint_Mismatch}},
 	{"u8:n -> ??\n(0..n):x -> ??", "", {}},

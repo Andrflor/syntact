@@ -82,14 +82,66 @@ monomials :: proc(t: Type) -> (terms: []Type, divisor: i128, ok: bool) {
 			}
 			return out, d, true
 		case .Div:
+			// (k * a) / k = a: a division the ring reads is exact — the polynomial over
+			// the divisor takes integer values; otherwise / rounds, and stays an atom
 			ms, d := monomials(v.args[0]) or_return
 			c, constant := v.args[1].(Int)
 			if !constant || c <= 0 do return
 			e := mul_checked(d, i128(c)) or_return
+			if !v.exact && !integer_valued(ms, e) do return
 			return ms, e, true
 		}
 	}
 	return
+}
+
+// integer_valued: the polynomial ms / e takes an integer at every integer point of
+// its unknowns: it does when it does on the grid 0..dᵢ of each unknown, dᵢ its
+// degree in that unknown (the binomial basis of integer-valued polynomials).
+integer_valued :: proc(ms: []Type, e: i128) -> bool {
+	if e == 1 do return true
+	us := make([dynamic]^Unknown)
+	degrees := make([dynamic]int)
+	for m in ms {
+		counts := make(map[int]int)
+		for u in factors(m) do counts[u.id] += 1
+		for u in factors(m) {
+			at := -1
+			for x, i in us do if x.id == u.id do at = i
+			if at < 0 {
+				append(&us, u)
+				append(&degrees, 0)
+				at = len(us) - 1
+			}
+			degrees[at] = max(degrees[at], counts[u.id])
+		}
+	}
+	point := make([]i128, len(us))
+	for {
+		// the numerator at this point
+		sum: i128 = 0
+		for m in ms {
+			term := coefficient(m)
+			for u in factors(m) {
+				for x, i in us do if x.id == u.id {
+					ok: bool
+					term, ok = mul_checked(term, point[i])
+					if !ok do return false
+				}
+			}
+			sum += term
+		}
+		if sum % e != 0 do return false
+		// the next point of the grid
+		i := 0
+		for i < len(us) {
+			point[i] += 1
+			if point[i] <= i128(degrees[i]) do break
+			point[i] = 0
+			i += 1
+		}
+		if i == len(us) do return true
+	}
 }
 
 // coefficient, factors: the integer and the unknowns of a monomial.
@@ -213,7 +265,12 @@ ring_term :: proc(ms: []Type, divisor: i128) -> (t: Type, ok: bool) {
 			t = new_operation(.Add, t, magnitude)
 		}
 	}
-	if d != 1 do t = new_operation(.Div, t, Int(d))
+	// over a divisor, the ring divides exactly: what it reads divides so, and its
+	// laws keep it so
+	if d != 1 {
+		t = new_operation(.Div, t, Int(d))
+		t.(^Operation).exact = true
+	}
 	return t, true
 }
 

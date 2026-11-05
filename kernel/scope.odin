@@ -109,6 +109,11 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 		return pattern_law(k, branching(v, branches))
 	case Invalid:
 		return target
+	case ^Operation:
+		// x.#t.a, x a run a fold builds: the field a that the step t places
+		if v.op == .Item {
+			if f, is_fold := v.args[0].(^Fold); is_fold do if out, read := built_field(k, f, v.args[1], a); read do return out
+		}
 	}
 	// a scope not known yet, or a call being given (the hypothesis): the access stays
 	if gives_scope(k, target) || is_pending_call(k, target) {
@@ -1204,9 +1209,19 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 // x longer than a: the binding j = a % c that the step i = a / c places, its states
 // those of step i — the inits, each update applied i times.
 built_item :: proc(k: ^Kernel, f: ^Fold, a: Type) -> (value: Type, read: bool) {
-	at := a.(Int) or_return
 	_, es, builds := built(k, f)
-	if !builds || at < 0 do return nil, false
+	if !builds do return nil, false
+	// what a step places reading only the step: at any place, that step's
+	if len(es) == 1 {
+		read_state := false
+		for z in f.states do read_state ||= reads(k, es[0], z)
+		if !read_state {
+			lo, _ := counter_range(k, f) or_return
+			return rewrite(k, es[0], rewriting(nil, f.index, op(k, .Add, lo, a))), true
+		}
+	}
+	at := a.(Int) or_return
+	if at < 0 do return nil, false
 	c := Int(len(es))
 	step, j := at / c, at % c
 	if step > 64 do return nil, false
@@ -1224,6 +1239,19 @@ built_item :: proc(k: ^Kernel, f: ^Fold, a: Type) -> (value: Type, read: bool) {
 	r := rewriting(nil, f.index, op(k, .Add, lo, step))
 	for z, i in f.states do r = rewriting(r, z, states[i])
 	return rewrite(k, es[j], r), true
+}
+
+// built_field: x.#t.a, x a run the fold f builds one binding a step, the field a of
+// what it places reading only the step: that field at the step t (§5.6).
+built_field :: proc(k: ^Kernel, f: ^Fold, t: Type, a: ^Access) -> (value: Type, read: bool) {
+	_, es, builds := built(k, f)
+	if !builds || len(es) != 1 do return
+	placed_scope := given(k, es[0]).(^Scope) or_return
+	b := occurrence(placed(k, placed_scope, .Value), a.name, a.ordinal, true) or_return
+	value = binding_value(k, b)
+	for z in f.states do if reads(k, value, z) do return nil, false
+	lo, _ := counter_range(k, f) or_return
+	return rewrite(k, value, rewriting(nil, f.index, op(k, .Add, lo, t))), true
 }
 
 // length_image: the lengths of the runs a layout admits: a place one binding, a

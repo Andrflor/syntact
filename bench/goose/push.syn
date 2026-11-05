@@ -23,22 +23,29 @@ items -> {
   u32:i -> 0
   u64:r -> 12345
   -> i ? {
-    =n -> {}
+    >=n -> {}
     -> {Item{key -> xs{x -> r}! % 1000000  val -> i % 97} ...items{n -> n  i -> i + 1  r -> xs{x -> r}!}!}
   }
 }
 // the positions of every 64th item
 marks -> {
   u32:n -> ??
-  u32:i -> 0
+  u64:i -> 0
   -> i ? {
     >=n -> {}
     -> {i ...marks{n -> n  i -> i + 64}!}
   }
 }
+count -> {
+  Array{u64}:xs -> {}
+  -> xs ? {
+    {u64(h) ...Array{u64}:(t)} -> 1 + count{xs -> t}!
+    -> 0
+  }
+}
 total -> {
   Array{Item}:xs -> {}
-  i64:acc -> 0
+  acc -> 0
   -> xs ? {
     {Item(h) ...Array{Item}:(t)} -> total{xs -> t  acc -> acc + h.key}!
     -> acc
@@ -47,19 +54,19 @@ total -> {
 // the vals read back by position: xs.#m
 mt -> {
   Array{Item}:xs -> {}
-  Array{u32}:ms -> {}
-  i64:acc -> 0
+  Array{u64}:ms -> {}
+  acc -> 0
   -> ms ? {
-    {u32(m) ...Array{u32}:(t)} -> mt{xs -> xs  ms -> t  acc -> acc + xs.#m.val}!
+    {u64(m) ...Array{u64}:(t)} -> mt{xs -> xs  ms -> t  acc -> acc + xs.#m.val}!
     -> acc
   }
 }
 -> {
   u32:n -> ??
   Array{Item}:its -> items{n -> n}!
-  Array{u32}:ms -> marks{n -> n}!
+  Array{u64}:ms -> marks{n -> n}!
   a -> io.printf{format -> "%lld\n"  n -> n}!
-  b -> io.printf{format -> "%lld\n"  n -> (n + 63) / 64}!
+  b -> io.printf{format -> "%lld\n"  n -> count{xs -> ms}!}!
   c -> io.printf{format -> "%lld\n"  n -> total{xs -> its}!}!
   -> io.printf{format -> "%lld\n"  n -> mt{xs -> its  ms -> ms}!}!
 }!

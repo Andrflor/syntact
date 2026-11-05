@@ -205,6 +205,7 @@ Operation :: struct {
 	op:          Operator,
 	args:        []Type,
 	span:        syn.Span, // as written: where an illegal operator is reported
+	exact:       bool, // a / k known to divide exactly: what the ring gives over a divisor (ring.odin)
 	using known: Known,
 }
 

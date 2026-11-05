@@ -300,8 +300,10 @@ layout_image_of :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if is_string_value(t) do return t, true
 		if v.op == .In do return family_term(.Bool), true
 		if v.op == .Length || v.op == .Item || v.op == .From do return run_image(k, v)
+		// computed once, when no reach of a branch narrowed what it reads
 		known, plain := plain_of(k, v)
 		if plain && known.imaged do return known.image, known.image != nil
+		narrowed := k.narrowed
 		args := make([]Type, len(v.args))
 		image: Type
 		computed := true
@@ -316,7 +318,7 @@ layout_image_of :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 			if v.op == .Round do image = round_law(k, args[0], bits_format(args[1]), v.span)
 			else do image = euclid_image(k, t, related_image(k, t, exact_law(k, v.op, args, v.span)))
 		}
-		if plain {
+		if plain && k.narrowed == narrowed {
 			known, _ = plain_of(k, v)
 			known.imaged, known.image = true, image
 			k.plain[v] = known

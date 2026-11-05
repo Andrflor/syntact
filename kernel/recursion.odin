@@ -730,7 +730,8 @@ orbit :: proc(k: ^Kernel, s: Type, x: ^Unknown, m: Type, i: ^Unknown) -> (Type, 
 
 // least_law: μ(i: t). When t is kᵢ in B, kᵢ moving by one — down into B = ..b, or
 // onto its point b from above; up into b.. —, μ is where it crosses in: the
-// distance m - b, or 0 when m is in B already.
+// distance m - b, or 0 when m is in B already. Moving by c into a half-line, it
+// crosses in ⌈distance / c⌉ steps.
 least_law :: proc(k: ^Kernel, i: ^Unknown, holds: Type, span: syn.Span) -> Type {
 	if is_bool(holds, true) do return Int(0)
 	out := new(Least)
@@ -745,23 +746,31 @@ least_law :: proc(k: ^Kernel, i: ^Unknown, holds: Type, span: syn.Span) -> Type 
 	}
 	alpha, beta, affine := affine_in(k, o.args[0], i)
 	slope, is_int := alpha.(Int)
-	if !affine || !is_int || slope != 1 && slope != -1 do return out
+	if !affine || !is_int || slope == 0 do return out
 	one: [1]Type
 	cells, negated := cells_in(o.args[1], &one)
 	if negated || len(cells) != 1 do return out
 	lo, hi := discrete_bounds(cells[0])
 	l, has_lo := lo.?
 	h, has_hi := hi.?
+	// onto a point: only by steps of one
+	if has_lo && has_hi && (l != h || slope != 1 && slope != -1) do return out
 	gap: Type
 	switch {
-	case slope < 0 && has_hi && (!has_lo || l == h):
+	case slope < 0 && has_hi:
 		gap = op(k, .Sub, beta, Int(h))
 		if has_lo && !proven_in(k, gap, COUNTS) do return out // onto the point
-	case slope > 0 && has_lo && (!has_hi || l == h):
+	case slope > 0 && has_lo:
 		gap = op(k, .Sub, Int(l), beta)
 		if has_hi && !proven_in(k, gap, COUNTS) do return out
 	case:
 		return out
+	}
+	// by steps of c: the gap in steps, ⌈gap / c⌉ = (gap + c - 1) / c for gap ≥ 0
+	c := abs(slope)
+	if c != 1 {
+		if !proven_in(k, gap, COUNTS) do return out
+		return op(k, .Div, op(k, .Add, gap, Int(c - 1)), Int(c))
 	}
 	// max(gap, 0)
 	if proven_in(k, gap, COUNTS) do return gap
