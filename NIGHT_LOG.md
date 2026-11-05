@@ -32,3 +32,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - kernel agent done (8 commits, green each): strlist types. Remaining: respond 1 error (buffer length; 60 s kernel time — regression),
   calc 32 / sexp 22 (fields read in their colour, not at the values the call gives: nodes + 1, v*10 + d), lru 3 ((a*a)/keys < keys),
   graph/words: my ports are incomplete (no main). Weak point to fix: linear bounds not re-proven by induction.
+
+## Step: faithful ports (acc3391)
+- graph, words, blur, particles rewritten as faithful ports; Python mirrors match Goose outputs at two sizes.
+- None type yet. Kernel gaps (s % v symbolic, count-down run length, captured-unknown fold bound, expansion inclusion, narrow rest cover, product places, particles stack overflow, f32 laws) queued to kernel round 2.
+- Linear bounds now proven by induction (2d8b71a).
