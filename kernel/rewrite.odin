@@ -404,10 +404,15 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return or_law(k, terms), true
 	case ^And:
 		// what each says: a value its image, a set itself; a term whose values are not
-		// read bounds nothing, ~none, and a & ~none = a (§4.1): x & C lies in C
+		// read, the family it is proven in, or nothing, ~none: a & ~none = a (§4.1),
+		// x & C lies in C
 		terms := make([dynamic]Type, 0, len(v.terms))
 		for a in v.terms {
-			set := values(k, a) or_continue
+			set, read := values(k, a)
+			if !read {
+				f := family_of(k, a) or_continue
+				set = family_term(f)
+			}
 			// a set the laws keep written, u8 % 3: the range that bounds it
 			if _, written := set.(^Operation); written do set = int_hull(k, set)
 			append(&terms, set)

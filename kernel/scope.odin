@@ -101,6 +101,10 @@ occurrence :: proc(bindings: []^Binding, name: string, ordinal: int, last: bool)
 access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 	#partial switch v in target {
 	case ^Scope:
+		// #k, the place k of a run: past a run it expands, read by place (§5.3)
+		if a.name == "" && a.ordinal >= 0 {
+			for b in run_data(k, v) do if b.kind == .Expand do return run_law(k, .Item, {v, Int(i128(a.ordinal))}, a.span)
+		}
 		if b, found := occurrence(placed(k, v, .Value), a.name, a.ordinal, true); found do return binding_value(k, b)
 		return problem(.Invalid_Property_Access, a.span, fmt.tprintf("%s has no binding `%s`", print_type(v), a.name))
 	case ^Fold:
@@ -1213,8 +1217,14 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	if !proven_in(k, i, COUNTS) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a place of a run, and %s is not proven to be one", operator_text[o], print_type(i)))
 	// x.#k, x not known: a binding of the run, k < |x| — proven on x as it is read
 	s, known := x.(^Scope)
-	at, placed_at := i.(Int)
-	if (o == .Item || o == .Put) && !checked && !(known && placed_at) && !is_pending_call(k, x) {
+	// a known place of a scope that expands no run before it: read by its bindings
+	single := false
+	if at, placed_at := i.(Int); known && placed_at {
+		xs := run_data(k, s)
+		single = true
+		for b in xs[:min(int(at) + 1, len(xs))] do single &&= b.kind != .Expand
+	}
+	if (o == .Item || o == .Put) && !checked && !single && !is_pending_call(k, x) {
 		{
 			// by the length of x as a term, or by the least length its values have
 			past := op(k, .Sub, i, run_law(k, .Length, {x}, span))
@@ -1224,6 +1234,8 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 					if least, bounded := term_bound(k, n, true); bounded do verdict, _ = prove(k, in_law(k, i, range_law(k, nil, op(k, .Sub, least, Int(1)), .Int, span)))
 				}
 			}
+			// or by what follows k: x from k is not {}
+			if verdict != .Proven do verdict, _ = prove(k, in_law(k, run_law(k, .From, {x, i}, span, true), not_law(k, run_scope(k, {}))))
 			if verdict != .Proven {
 				return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a place of %s, and %s is not proven to be one", operator_text[o], print_type(x), print_type(i)))
 			}
@@ -1258,15 +1270,44 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	if is_from do return run_law(k, o, {from.args[0], op(k, .Add, from.args[1], i)}, span, true)
 	if o == .From && is_int(i, 0) do return x
 	if f, is_fold := x.(^Fold); is_fold && o == .Item do if v, read := built_item(k, f, i); read do return v
-	if !known || !placed_at do return new_operation(o, x, i)
-	xs := run_data(k, s)
-	for b in xs[:min(int(at) + 1, len(xs))] do if b.kind == .Expand do return new_operation(o, x, i)
-	if o == .Item {
-		if int(at) >= len(xs) do return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %d", print_type(x), at))
-		return binding_value(k, xs[at])
+	if !known do return new_operation(o, x, i)
+	return by_place(k, o, x, run_data(k, s), i, span)
+}
+
+// by_place: x.#k and x from k, k known, x a scope, read by the places of its run
+// (§5.3): a binding before k is passed; a run X it expands is not known yet: it is
+// {}, or its first binding then the rest, {X.#0  ...X from 1} — a pattern on X (§6),
+// in whose branch X is X & ~{}.
+by_place :: proc(k: ^Kernel, o: Operator, x: Type, xs: []^Binding, i: Type, span: syn.Span) -> Type {
+	if _, placed_at := i.(Int); !placed_at do return new_operation(o, x, i)
+	at := i.(Int)
+	for b, n in xs {
+		if b.kind != .Expand {
+			if at == 0 do return o == .Item ? binding_value(k, b) : Type(run_scope(k, xs[n:]))
+			at -= 1
+			continue
+		}
+		run := binding_value(k, b)
+		empty := run_scope(k, {})
+		after := run_scope(k, xs[n + 1:])
+		none_of := in_law(k, run, empty)
+		if is_bool(none_of, true) do return by_place(k, o, after, xs[n + 1:], at, span)
+		some := is_bool(none_of, false) ? run : and_law(k, {run, not_law(k, empty)})
+		head := new(Binding)
+		head.kind, head.span, head.value = .Push, span, run_law(k, .Item, {some, Int(0)}, span)
+		tail := new(Binding)
+		tail.kind, tail.span, tail.value = .Expand, span, run_law(k, .From, {some, Int(1)}, span)
+		split := make([dynamic]^Binding)
+		append(&split, head, tail)
+		append(&split, ..xs[n + 1:])
+		if is_bool(none_of, false) do return by_place(k, o, run_scope(k, split[:]), split[:], at, span)
+		m := new(Pattern)
+		m.target, m.span = run, span
+		m.branches = slice.clone([]Branch{{cover = empty, product = by_place(k, o, after, xs[n + 1:], at, span)}, {product = by_place(k, o, run_scope(k, split[:]), split[:], at, span)}})
+		return pattern_law(k, m)
 	}
-	if int(at) > len(xs) do return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %d", print_type(x), at))
-	return run_scope(k, xs[at:])
+	if o == .From && at == 0 do return run_scope(k, {})
+	return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %s", print_type(x), print_type(i)))
 }
 
 // fold_length: |⟳(…; z: s ↦ {...z ...Q}; z)| = ⟳(…; ℓ: |s| ↦ ℓ + |Q|; ℓ): each step
@@ -1573,19 +1614,22 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		return repeated(k, piece, n, o.span), true
 	}
 	if s, known := given(k, o.args[0]).(^Scope); known {
+		if o.op != .Item && o.op != .Length do return nil, false
+		// its bindings, and those of the runs it expands; its length, the sum (§5.3)
 		xs := run_data(k, s)
-		items := make([]Type, len(xs))
+		images := make([]Type, len(xs))
 		for b, i in xs {
-			if b.kind == .Expand do return nil, false
-			items[i] = binding_value(k, b)
+			if b.kind != .Expand {
+				images[i] = o.op == .Item ? binding_value(k, b) : Int(1)
+				continue
+			}
+			inner := o.op == .Item ? new_operation(.Item, binding_value(k, b), o.args[1]) : new_operation(.Length, binding_value(k, b))
+			images[i] = layout_image(k, inner) or_return
 		}
-		#partial switch o.op {
-		case .Length:
-			return Int(len(xs)), true
-		case .Item:
-			return or_law(k, items), true
-		}
-		return nil, false
+		if o.op == .Item do return or_law(k, images), true
+		n: Type = Int(0)
+		for x in images do n = exact_law(k, .Add, {n, x}, o.span)
+		return n, true
 	}
 	// a run a fold builds: its bindings are what each step places
 	if f, is_fold := o.args[0].(^Fold); is_fold && o.op == .Item {

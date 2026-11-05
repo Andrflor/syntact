@@ -263,9 +263,11 @@ cover_pieces :: proc(k: ^Kernel, b: Branch, target: Type) -> map[^Binding]Type {
 	pieces := make(map[^Binding]Type)
 	if b.view == nil do return pieces
 	s, known := target.(^Scope)
+	// a scope expanding a run: its places are not its bindings, but read by place (§5.3)
+	if known do for b in run_data(k, s) do known &&= b.kind != .Expand
 	if !known {
 		// a scope not known yet: its pieces are terms, x.name for a named place, x.#k for
-		// another, and x from k for a last run
+		// another, and x from k for a last run (§5.6)
 		if written, structural := b.cover.(^Scope); structural && gives_scope(k, target) {
 			shape := placed(k, written, .Shape)
 			at: Type = Int(0)
