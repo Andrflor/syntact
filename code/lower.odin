@@ -1393,11 +1393,11 @@ in_run :: proc(l: ^Lowering, x: kernel.Type, c: kernel.Type) -> Value {
 		}
 		// the items of a run: each what x may hold there, proven to be of its pieces
 		items, has := kernel.item_image(l.k, kernel.binding_color(l.k, p))
-		if !has || !holds(kernel.normal(l.k, kernel.in_law(l.k, at, items))) do return fail(l, "a cover %s that tests the items of a run is not code yet", kernel.print_type(c))
+		if !has || !kernel_proves(l, kernel.in_law(l.k, at, items)) do return fail(l, "a cover %s that tests the items of a run is not code yet", kernel.print_type(c))
 		break
 	}
 	held := make([dynamic]kernel.Type)
-	for t in tests do if !holds(t) do append(&held, t)
+	for t in tests do if !holds(t) && !kernel_proves(l, t) do append(&held, t)
 	if len(held) == 0 do return fits
 	// the places are read where the length holds
 	arms := make([]Arm, 2)
@@ -1414,6 +1414,12 @@ in_run :: proc(l: ^Lowering, x: kernel.Type, c: kernel.Type) -> Value {
 	arms[1].body.values = single(constant(l, 0))
 	close_body(l, outer, bound)
 	return close_match(l, fits, arms)[0]
+}
+
+// kernel_proves: the kernel proves t, for every value of its unknowns.
+kernel_proves :: proc(l: ^Lowering, t: kernel.Type) -> bool {
+	verdict, _ := kernel.prove(l.k, t)
+	return verdict == .Proven
 }
 
 // holds: t is true.

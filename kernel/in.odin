@@ -307,9 +307,6 @@ built_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) 
 	if !is_shape(k, shape) do return
 	_, es, builds := built(k, f)
 	if !builds do return
-	images := make([]Type, len(es))
-	for e, i in es do images[i] = values(k, given(k, e)) or_return
-	placed_values := or_law(k, images)
 	places := placed(k, shape, .Shape)
 	fixed, runs := 0, false
 	colors := make([dynamic]Type)
@@ -337,7 +334,18 @@ built_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) 
 		runs = true
 		if c := binding_color(k, inner[0]); c != nil do append(&colors, c)
 	}
-	for c in colors do if !included(k, placed_values, c) do return
+	// each binding a step places, in each color: what it may hold within the color;
+	// a scope, by `in` on its fields
+	for c in colors do for e in es {
+		x := given(k, e)
+		set := values(k, x) or_return
+		if _, is_scope := set.(^Scope); !is_scope {
+			if !included(k, set, c) do return
+			continue
+		}
+		verdict, _ := prove(k, in_law(k, x, c))
+		if verdict != .Proven do return
+	}
 	length := run_law(k, .Length, {x}, f.span)
 	if !runs do return in_law(k, length, Int(i128(fixed))), true
 	return in_law(k, length, range_law(k, Int(i128(fixed)), nil, .Int, f.span)), true

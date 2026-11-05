@@ -51,22 +51,26 @@ total -> {
     -> acc
   }
 }
-// the vals read back by position: xs.#m
-mt -> {
-  Array{Item}:xs -> {}
-  Array{u64}:ms -> {}
-  acc -> 0
-  -> ms ? {
-    {u64(m) ...Array{u64}:(t)} -> mt{xs -> xs  ms -> t  acc -> acc + xs.#m.val}!
-    -> acc
+push -> {
+  (1..4294967295):n -> ??
+  // n items; a mark, the position of one of them
+  Items -> {...({Item:} * n):}
+  Mark -> 0..(n - 1)
+  // the vals read back by position: xs.#m
+  mt -> {
+    Items:xs -> ??
+    Array{Mark}:ms -> {}
+    acc -> 0
+    -> ms ? {
+      {Mark(m) ...Array{Mark}:(t)} -> mt{xs -> xs  ms -> t  acc -> acc + xs.#m.val}!
+      -> acc
+    }
   }
-}
--> {
-  u32:n -> ??
-  Array{Item}:its -> items{n -> n}!
-  Array{u64}:ms -> marks{n -> n}!
+  Items:its -> items{n -> n}!
+  Array{Mark}:ms -> marks{n -> n}!
   a -> io.printf{format -> "%lld\n"  n -> n}!
   b -> io.printf{format -> "%lld\n"  n -> count{xs -> ms}!}!
   c -> io.printf{format -> "%lld\n"  n -> total{xs -> its}!}!
   -> io.printf{format -> "%lld\n"  n -> mt{xs -> its  ms -> ms}!}!
-}!
+}
+-> push{n -> ??::(1..4294967295)}!

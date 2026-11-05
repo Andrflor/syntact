@@ -425,8 +425,8 @@ unread :: proc(f: ^Func) {
 				case Foreign:
 					if i.dst != NO_REG && !read[i.dst] do i.dst = NO_REG
 				case Memory:
-					// what it reads or reserves, not read, goes; a store stays
-					if i.dst != NO_REG && !read[i.dst] {
+					// what it reads or reserves, not read, goes; a store and a free stay
+					if i.op != .Store && i.op != .Free && (i.dst == NO_REG || !read[i.dst]) {
 						changed = true
 						continue
 					}

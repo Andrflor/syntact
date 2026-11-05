@@ -1197,7 +1197,11 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 			}
 		}
 		s, known := x.(^Scope)
-		if !known do return new_operation(o, x)
+		if !known {
+			// every run x may be has length n: |x| = n
+			if set, read := values(k, x); read do if n, fixed := length_image(k, set); fixed && is_value(k, n) do return n
+			return new_operation(o, x)
+		}
 		n: Type = Int(0)
 		for b in run_data(k, s) do n = op(k, .Add, n, b.kind == .Expand ? run_law(k, .Length, {binding_value(k, b)}, span) : Int(1))
 		return n

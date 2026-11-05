@@ -58,7 +58,8 @@ Signature :: struct {
 signatures :: proc(op: Operator) -> []Signature {
 	@(static) add := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .String}, .String}}
 	@(static) sub := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}}
-	@(static) mul := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .Count}, .String}}
+	// a string or a shape repeated a count of times (§4.6, specs/language/08)
+	@(static) mul := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .Count}, .String}, {{.Scope, .Count}, .Scope}}
 	@(static) div := []Signature{{{.Int, .Nonzero_Int}, .Int}, {{.Real, .Nonzero_Real}, .Real}}
 	@(static) modulo := []Signature{{{.Int, .Nonzero_Int}, .Int}}
 	@(static) power := []Signature{{{.Int, .Count}, .Int}, {{.Real, .Count}, .Real}}

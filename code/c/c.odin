@@ -424,6 +424,8 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 			declare(w, i.dst, call)
 			assume(w, i.dst, answer_bounds(w.p.imports[i.symbol]))
 		case code.Memory:
+			// what it reads or reserves, not read, gives nothing
+			if i.op != .Store && i.op != .Free && i.dst == code.NONE do continue
 			// a word of bits bits at an address of the arena
 			at := fmt.tprintf("(%sint%d_t *)(intptr_t)(%s + %d)", i.signed ? "" : "u", i.bits, name(w, i.a), i.offset)
 			switch i.op {

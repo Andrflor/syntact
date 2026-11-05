@@ -51,8 +51,13 @@ PAIR_BYTES :: 16
 
 // layout_of_set: the layout of the values of a set; false when the code holds
 // none of it.
-layout_of_set :: proc(l: ^Lowering, set: kernel.Type) -> (lay: ^Layout, ok: bool) {
+layout_of_set :: proc(l: ^Lowering, written: kernel.Type) -> (lay: ^Layout, ok: bool) {
+	set := written
 	if set == nil do return nil, false
+	// a set over unknowns: laid out as what it may hold, a set of constants
+	if !kernel.is_constant(set) {
+		if image, read := kernel.layout_image(l.k, set); read && kernel.is_constant(image) do set = image
+	}
 	if m := machine_of_layout(l.k, set); m != .None {
 		bits, signed := 64, m == .Int
 		if m == .Int do bits, signed = int_width(l.k, kernel.int_hull(l.k, set))
