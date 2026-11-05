@@ -1434,6 +1434,13 @@ item_image :: proc(k: ^Kernel, layout: Type) -> (c: Type, ok: bool) {
 		if !is_shape(k, shape) do return
 		items := make([dynamic]Type)
 		for p in placed(k, shape, .Shape) {
+			// a binding written with its value: what that value may be
+			if p.value != nil {
+				v := values(k, binding_value(k, p)) or_return
+				if p.kind == .Expand do v = item_image(k, v) or_return
+				append(&items, v)
+				continue
+			}
 			if p.color == nil do return // `...` or a place without color: any value
 			color := binding_color(k, p)
 			if !is_run(p) {
@@ -1500,6 +1507,8 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 	if o.op == .Item {
 		if set, known := values(k, o.args[0]); known do if c, read := item_image(k, set); read do return c, true
 	}
+	// x from k: the runs of what follows the place k
+	if o.op == .From do return suffix(k, values(k, o.args[0]) or_return, o.args[1])
 	pieces, m := run_pieces(k, o.args[0]) or_return
 	shape := pieces.(^Scope) or_return
 	places := placed(k, shape, .Shape)
@@ -1511,6 +1520,5 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		c := binding_color(k, places[0])
 		return c, c != nil
 	}
-	// x from k: the runs of what follows the place k
-	return suffix(k, values(k, o.args[0]) or_return, o.args[1])
+	return nil, false
 }

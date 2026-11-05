@@ -44,6 +44,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 			}
 		}
 		if verdict, read := built_in(k, x, s); read do return verdict
+		if runs_in(k, x, s) do return Bool(true)
 		return admits(k, x, s)
 	}
 	if o, ok := c.(^Operation); ok && o.op == .Mul && of_values(o.args[0]) do return repeated_in(k, x, o.args[0], o.args[1])
@@ -308,6 +309,21 @@ built_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) 
 	length := run_law(k, .Length, {x}, f.span)
 	if !runs do return in_law(k, length, Int(i128(fixed))), true
 	return in_law(k, length, range_law(k, Int(i128(fixed)), nil, .Int, f.span)), true
+}
+
+// runs_in: x, a run, in a run of pieces P * m: true when each of its bindings is
+// in P and its length in m — read on what x may be (§5.3).
+runs_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> bool {
+	pieces, m := layout_pieces(k, s) or_return
+	piece := pieces.(^Scope) or_return
+	inner := placed(k, piece, .Shape)
+	if len(inner) != 1 || is_run(inner[0]) do return false
+	set := values(k, x) or_return
+	if _, same_scope := set.(^Scope); same_scope && set == Type(s) do return false
+	items := item_image(k, set) or_return
+	length := length_image(k, set) or_return
+	if c := binding_color(k, inner[0]); c != nil && !included(k, items, c) do return false
+	return included(k, length, layout_image(k, m) or_return)
 }
 
 // fold_induction: a fold is in c when the states its value reads start in c, stay
