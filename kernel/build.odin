@@ -562,12 +562,23 @@ cover_bindings :: proc(t: Type, written: bool) -> []^Binding {
 build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) -> Type {
 	ast := k.ast
 	args := make([dynamic]Carve_Arg)
+	// `#k -> v`: the binding k of the run carved, x{#k -> v} (§5.3), after the others
+	places := make([dynamic][2]Type)
 	for child in syn.node_carve_children(ast, idx) {
 		a := Carve_Arg{ordinal = -1, span = node_span(k, child)}
 		#partial switch ast.node_kinds[child] {
 		case .Pointing, .PointingPull:
 			a.pull = ast.node_kinds[child] == .PointingPull
 			left := ast.node_data[child].binary.left
+			if !a.pull && left != syn.INVALID_NODE {
+				at: Type
+				if ast.node_kinds[left] == .Index && ast.node_data[left].binary.left == syn.INVALID_NODE do at = build_term(k, s, ast.node_data[left].binary.right)
+				else if ast.node_kinds[left] == .Identifier && syn.node_name_str(ast, left) == "" && ast.node_data[left].identifier.ordinal >= 0 do at = Int(i128(ast.node_data[left].identifier.ordinal))
+				if at != nil {
+					append(&places, [2]Type{at, build_term(k, s, ast.node_data[child].binary.right)})
+					continue
+				}
+			}
 			if left == syn.INVALID_NODE || ast.node_kinds[left] != .Identifier do return unsupported(k, child, "a carve argument whose name is not an identifier")
 			a.name = syn.node_name_str(ast, left)
 			a.ordinal = int(ast.node_data[left].identifier.ordinal)
@@ -603,7 +614,10 @@ build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) ->
 	}
 	c := new(Carve)
 	c.target, c.args, c.span = target, args[:], node_span(k, idx)
-	return c
+	if len(places) == 0 do return c
+	out: Type = len(args) == 0 ? target : c
+	for p in places do out = new_operation(.Put, out, p[0], current_is(p[1], s, target))
+	return out
 }
 
 // bare_capture: `(t)`, a capture without a name.

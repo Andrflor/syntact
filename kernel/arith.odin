@@ -165,7 +165,7 @@ operation_family :: proc(k: ^Kernel, v: ^Operation) -> (Family, bool) {
 	#partial switch v.op {
 	case .Length:
 		return .Count, true
-	case .From:
+	case .From, .Put:
 		return .Scope, true
 	case .Item:
 		if set, known := values(k, v); known do return layout_family(k, set)
@@ -254,7 +254,7 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Type {
 	for a in args do if is_invalid(a) do return a
 	if op == .Round do return round_law(k, args[0], bits_format(args[1]), span)
-	if op == .Length || op == .Item || op == .From do return run_law(k, op, args, span)
+	if reads_run(op) do return run_law(k, op, args, span)
 	if f := operands_format(k, op, args); f != .Exact {
 		// on values of a format, what the machine computes: the exact result, rounded
 		// to the widest; a known operand is first rounded to it (format.odin)

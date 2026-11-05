@@ -806,6 +806,7 @@ init_parse_tables :: proc "contextless" () {
 	prefix_table[.LeftBrace] = parse_scope
 	prefix_table[.LeftBraceCarve] = parse_scope
 	prefix_table[.LeftParen] = parse_grouping
+	prefix_table[.Hash] = parse_place
 	prefix_table[.LeftParenNoSpace] = parse_grouping
 	prefix_table[.At] = parse_reference
 
@@ -1528,6 +1529,24 @@ parse_carve :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 
 // Spaced `( … )`. A lone `(x)` is a capture (empty-name identifier), checked first;
 // otherwise the parens contribute no node of their own. `()` → INVALID_NODE.
+// `#k`, `#(…)` alone, as the key of a carve argument: the place k of the run carved,
+// an Index without a run before it.
+parse_place :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
+	at := parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
+	if at == INVALID_NODE {
+		error_at_current(parser, "Expected a name or `(…)` after `#`")
+		return INVALID_NODE
+	}
+	data: Node_Data
+	data.binary = Binary_Data {
+		left  = INVALID_NODE,
+		right = at,
+	}
+	return add_node(parser, .Index, data, Span{span_start, parser.node_spans[at].end})
+}
+
 parse_grouping :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	advance_token(parser)

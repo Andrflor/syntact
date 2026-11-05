@@ -98,6 +98,12 @@ SPEC_CASES := []Spec_Case {
 	{"a -> ??::u8\nx -> a * 2 + a", "3 * ?0", {}},
 	{"u8:n -> ??\nn:x -> n", "?0", {}},
 	{"u8:n -> ??\nm -> n * 2\nn:x -> m / 2", "?0", {}},
+	// a run carved by place (§5.3)
+	{"xs -> {1 2 3}\nx -> xs{#1 -> 9}", "{1  9  3}", {}},
+	{"xs -> {1 2 3}\nx -> xs{#1 -> 9}.#1", "9", {}},
+	{ARRAY + "A -> Array{u8}\nA:y -> ??\nA:x -> y ? {\n  {u8(h) ...A:(t)} -> y{#0 -> 5}\n  -> y\n}", "", {}},
+	{ARRAY + "A -> Array{u8}\nA:y -> ??\nA:x -> y ? {\n  {u8(h) ...A:(t)} -> y{#0 -> 300}\n  -> y\n}", "", {.Constraint_Mismatch}},
+	{ARRAY + "A -> Array{u8}\nA:y -> ??\nx -> y{#0 -> 5}", "", {.Invalid_operator}},
 	// an integer / rounds toward 0: only an exact division is read by the ring
 	{"u8:a -> ??\nx -> (a / 4) * 4", "4 * (?0 / 4)", {}},
 	{"u8:a -> ??\nx -> 3 * (a / 4) - 1", "3 * (?0 / 4) - 1", {}},

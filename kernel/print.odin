@@ -68,6 +68,7 @@ operator_text := [Operator]string {
 	.Length     = "|…|",
 	.Item       = ".#",
 	.From       = "from",
+	.Put        = "{#…}",
 }
 
 operator_prec :: proc(op: Operator) -> int {
@@ -84,7 +85,7 @@ operator_prec :: proc(op: Operator) -> int {
 		return PREC_PREFIX
 	case .Bit_And, .Bit_Or, .Xor, .Less, .Less_Eq, .Greater, .Greater_Eq, .In:
 		return PREC_COMPARE
-	case .Round, .Length, .Item:
+	case .Round, .Length, .Item, .Put:
 		return PREC_ATOM
 	case .From:
 		return PREC_COMPARE
@@ -507,6 +508,14 @@ write_operation :: proc(b: ^Printer, o: ^Operation) {
 		write_type(b, o.args[0], PREC_ADD)
 		strings.write_string(b, " from ")
 		write_type(b, o.args[1], PREC_ADD)
+		return
+	case .Put:
+		write_type(b, o.args[0], PREC_ATOM)
+		strings.write_string(b, "{#")
+		write_type(b, o.args[1], PREC_ATOM)
+		strings.write_string(b, " -> ")
+		write_type(b, o.args[2], 0)
+		strings.write_byte(b, '}')
 		return
 	}
 	if o.op == .Neg || o.op == .Bit_Not {

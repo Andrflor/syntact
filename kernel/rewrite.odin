@@ -370,7 +370,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Operation:
 		if is_string_value(t) do return t, true
 		if v.op == .In do return family_term(.Bool), true
-		if v.op == .Length || v.op == .Item || v.op == .From do return run_image(k, v)
+		if reads_run(v.op) do return run_image(k, v)
 		// computed once
 		known, plain := plain_of(k, v)
 		if plain && known.imaged do return known.image, known.image != nil

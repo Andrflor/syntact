@@ -1145,6 +1145,15 @@ same_scope :: proc(k: ^Kernel, a, b: ^Scope) -> bool {
 // and values (§5.3) — as terms, the same colors too: `{u8:}` and `{i8:}` give the
 // same value, not the same set.
 same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
+	// the places of their shapes: a run without a value places no value, but it is
+	// a place, compared by its color
+	ps, qs := placed(k, a, .Shape), placed(k, b, .Shape)
+	if len(ps) != len(qs) do return false
+	for p, i in ps {
+		q := qs[i]
+		if p.name != q.name || p.kind != q.kind || (p.value == nil) != (q.value == nil) do return false
+		if p.value == nil && !same(k, binding_color(k, p), binding_color(k, q)) do return false
+	}
 	xs := placed(k, a, .Value)
 	ys := placed(k, b, .Value)
 	if len(xs) != len(ys) do return false
@@ -1175,8 +1184,11 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	if !gives_scope(k, x) && !is_pending_call(k, x) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a run, not %s", operator_text[o], print_type(x)))
 	from, is_from := x.(^Operation)
 	is_from &&= from.op == .From
+	put, is_put := x.(^Operation)
+	is_put &&= put.op == .Put
 	if o == .Length {
 		if is_from do return op(k, .Sub, run_law(k, .Length, from.args[:1], span), from.args[1]) // |x from k| = |x| - k
+		if is_put do return run_law(k, .Length, put.args[:1], span) // |x{#k -> v}| = |x|
 		// a run a fold builds, a binding a step: its number of steps
 		if f, is_fold := x.(^Fold); is_fold {
 			if _, es, builds := built(k, f); builds {
@@ -1195,7 +1207,7 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	// x.#k, x not known: a binding of the run, k < |x| — proven on x as it is read
 	s, known := x.(^Scope)
 	at, placed_at := i.(Int)
-	if o == .Item && !checked && !(known && placed_at) && !is_pending_call(k, x) {
+	if (o == .Item || o == .Put) && !checked && !(known && placed_at) && !is_pending_call(k, x) {
 		{
 			// by the length of x as a term, or by the least length its values have
 			past := op(k, .Sub, i, run_law(k, .Length, {x}, span))
@@ -1209,6 +1221,31 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 				return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a place of %s, and %s is not proven to be one", operator_text[o], print_type(x), print_type(i)))
 			}
 		}
+	}
+	// x{#k -> v}.#j = j ? {=k -> v  -> x.#j}
+	if is_put && o == .Item {
+		m := new(Pattern)
+		m.target, m.span = i, span
+		m.branches = slice.clone([]Branch{{cover = new_is(put.args[1]), product = put.args[2]}, {product = run_law(k, .Item, {put.args[0], i}, span, true)}})
+		return pattern_law(k, m)
+	}
+	// a run known, carved at a known place: the run with that binding carved
+	if o == .Put {
+		if s, known := x.(^Scope); known {
+			if at, placed := i.(Int); placed {
+				xs := run_data(k, s)
+				expanded := false
+				for b in xs[:min(int(at) + 1, len(xs))] do expanded ||= b.kind == .Expand
+				if !expanded && int(at) < len(xs) {
+					out := slice.clone(xs)
+					carved := new(Binding)
+					carved.kind, carved.span, carved.value = .Push, span, args[2]
+					out[at] = carved
+					return run_scope(k, out)
+				}
+			}
+		}
+		return new_operation(.Put, x, i, args[2])
 	}
 	// (x from a).#b = x.#(a + b), (x from a) from b = x from (a + b)
 	if is_from do return run_law(k, o, {from.args[0], op(k, .Add, from.args[1], i)}, span, true)
@@ -1484,6 +1521,19 @@ run_data :: proc(k: ^Kernel, s: ^Scope) -> []^Binding {
 
 // run_image: the values |x|, x.#k, x from k may take.
 run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
+	// x{#k -> v}: runs of the length of x, each binding what x may hold, or v
+	if o.op == .Put {
+		set := values(k, o.args[0]) or_return
+		items := item_image(k, set) or_return
+		n := length_image(k, set) or_return
+		piece := new_scope(nil, o.span)
+		piece.source, piece.complete, piece.reached = piece, true, true
+		place := new_binding(piece, .Push, o.span)
+		place.color = or_law(k, {items, values(k, o.args[2]) or_return})
+		if _, written := place.color.(^Operation); written do place.color = int_hull(k, place.color)
+		place.typed_color = place.color
+		return repeated(k, piece, n, o.span), true
+	}
 	if s, known := given(k, o.args[0]).(^Scope); known {
 		xs := run_data(k, s)
 		items := make([]Type, len(xs))
@@ -1513,6 +1563,13 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		if c, is_call := as_call(o.args[0]); is_call do if n, read := call_length(k, c); read do return n, true
 		// otherwise a count of bindings: 0..
 		if _, _, pieces := run_pieces(k, o.args[0]); !pieces do return COUNTS, true
+	}
+	// x{#k -> v}: the runs of x, and v at one place
+	if put, is_put := o.args[0].(^Operation); is_put && put.op == .Put {
+		inner := new_operation(o.op, ..slice.concatenate([][]Type{{put.args[0]}, o.args[1:]}))
+		image := run_image(k, inner.(^Operation)) or_return
+		if o.op == .Item do return or_law(k, {image, values(k, put.args[2]) or_return}), true
+		return image, true
 	}
 	if o.op == .Item {
 		if set, known := values(k, o.args[0]); known do if c, read := item_image(k, set); read do return c, true

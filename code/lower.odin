@@ -1086,6 +1086,7 @@ OPS := [kernel.Operator]Op {
 	.Length     = .Add, // not used: not lowered yet
 	.Item       = .Add,
 	.From       = .Add,
+	.Put        = .Add, // runs: read by their own lowering (kernel.reads_run)
 }
 
 operation :: proc(l: ^Lowering, o: ^kernel.Operation) -> Value {
@@ -1095,7 +1096,7 @@ operation :: proc(l: ^Lowering, o: ^kernel.Operation) -> Value {
 		if bits, is_int := o.args[1].(kernel.Int); is_int && bits == 64 do return lower(l, o.args[0])
 		return fail(l, "%s: the reals of 16 and 32 bits are not lowered yet", kernel.print_type(o))
 	}
-	if o.op == .Length || o.op == .Item || o.op == .From do return fail(l, "%s is not lowered yet", kernel.print_type(o))
+	if kernel.reads_run(o.op) do return fail(l, "%s is not lowered yet", kernel.print_type(o))
 	args := make([dynamic]Value)
 	for a in o.args {
 		append(&args, lower(l, a))

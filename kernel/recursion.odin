@@ -436,7 +436,7 @@ operations_on_calls :: proc(t: Type, root: ^Scope) -> []^Operation {
 // calls being of the family f.
 legal_on_call :: proc(k: ^Kernel, o: ^Operation, f: Family) -> bool {
 	// a read of a run is legal on what gives scopes (run_law)
-	if o.op == .Length || o.op == .Item || o.op == .From do return f == .Scope
+	if reads_run(o.op) do return f == .Scope
 	next: for sig in signatures(o.op) {
 		for a, i in o.args {
 			if _, is_call := as_call(a); is_call {

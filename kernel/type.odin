@@ -206,6 +206,12 @@ Operator :: enum u8 {
 	Length, // |x|: the number of bindings of the run x (§5.3)
 	Item, // x.#k: its binding k
 	From, // x from k: the run of its bindings from k on
+	Put, // x{#k -> v}: the run x, its binding k carved to v
+}
+
+// reads_run: an operator on runs (§5.3).
+reads_run :: proc(op: Operator) -> bool {
+	return op == .Length || op == .Item || op == .From || op == .Put
 }
 
 Operation :: struct {
