@@ -1177,18 +1177,26 @@ in c. While the equation is read, where what is carved is unknown or at the valu
 of a call, its calls are the hypothesis: they stay calls, and nothing is proven of
 them yet.
 
-The values of a call that stays are bounded by the recursion of its bounds: each
-call taken at the bound y of the step after, the rest at its own bounds, the
-greatest is `y ↦ α·y + max(g)` from `max(c)`, the least likewise — folds, solved by
-their laws. A field the call gives a call of another equation keeps it, over that
-equation's own fields, each an unknown of its color: the recursion follows what the
-other builds. A step that is a pattern gives one of its products, `αᵢ·y + gᵢ`:
-when no value is negative, the greatest follows the greatest αᵢ and gᵢ, the least
-the least:
+The values of a call that stays are bounded by the recursion of its bounds. The
+bounds lo, hi of what it gives are unknowns: its equation, each call in it taken in
+lo..hi and every other term at its own image, gives `hi = max(…)` and `lo = min(…)`
+over its products, solved in closed form. A product reading no call is a constant
+bound; `x % m`, m > 0 constant, lies in -(m - 1)..m - 1, and in 0..m - 1 when x ≥ 0;
+a step `α·y + g`, α ≥ 0, keeps hi when `α·hi + max(g) ≤ hi`, lo likewise, and
+otherwise leaves that side without bound. The least solution, the narrowest range,
+is proven by induction: the solving only proposes it. A field every call keeps holds
+what the call gives it. On a counter, each call taken at the bound y of the step
+after, the greatest is `y ↦ α·y + max(g)` from `max(c)`, the least likewise — folds,
+solved by their laws. Its length likewise, each call's length taken in lo..hi. A
+field the call gives a call of another equation keeps it, over that equation's own
+fields, each an unknown of its color: the recursion follows what the other builds.
+A step that is a pattern gives one of its products, `αᵢ·y + gᵢ`: when no value is
+negative, the greatest follows the greatest αᵢ and gᵢ, the least the least:
 
 ```text
 sum{t -> build{depth -> d}!}!   in 0..1022 * 2 ** d - 511      y ↦ 2·y + 511, from 511
 count{e -> build{depth -> d}!}! in d + 1..2 ** (d + 1) - 1      y ↦ 2·y + 1 above, y + 1 below
+eval{e -> build{depth -> d}!  p -> q}! in 0..m - 1               every product x % m, x ≥ 0 in 0..m - 1
 ```
 
 A recursive call whose base cases are scopes is a scope: `...` places it.
