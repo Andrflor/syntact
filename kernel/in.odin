@@ -181,7 +181,11 @@ is_value :: proc(k: ^Kernel, t: Type) -> bool {
 		return true
 	case ^Access:
 		return is_value(k, v.target) // a field of a value
-	case ^Effect, ^Or, ^And, ^Not, ^Is, ^Range, ^Name, ^Carve, ^Default:
+	case ^And:
+		// t & S, t one value: t where it is in S
+		for a in v.terms do if is_value(k, a) do return true
+		return false
+	case ^Effect, ^Or, ^Not, ^Is, ^Range, ^Name, ^Carve, ^Default:
 	}
 	return false
 }

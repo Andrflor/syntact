@@ -202,6 +202,27 @@ or_law :: proc(k: ^Kernel, terms: []Type) -> Type {
 }
 
 and_law :: proc(k: ^Kernel, terms: []Type) -> Type {
+	// t & S, t one value: t where t in S is true, none where false (§4.1)
+	at := -1
+	for t, i in terms {
+		if !is_value(k, t) || is_constant(t) && !written_value(t) do continue
+		if at >= 0 do return lattice_law(k, terms, false)
+		at = i
+	}
+	if at >= 0 && len(terms) > 1 {
+		others := make([dynamic]Type)
+		for t, i in terms do if i != at do append(&others, t)
+		set := len(others) == 1 ? others[0] : lattice_law(k, others[:], false)
+		in_s := in_law(k, terms[at], set)
+		if is_bool(in_s, true) do return terms[at]
+		if is_bool(in_s, false) do return None{}
+		// a pattern gives one of its products: (t ? {c -> p …}) & S = t ? {c -> p & S …}
+		if p, is_pattern := terms[at].(^Pattern); is_pattern && !has_effect(p) {
+			branches := make([]Branch, len(p.branches))
+			for b, i in p.branches do branches[i] = with_product(b, and_law(k, {b.product, set}))
+			return pattern_law(k, branching(p, branches))
+		}
+	}
 	return lattice_law(k, terms, false)
 }
 
@@ -477,6 +498,15 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 // by the scope that holds it (§4.8).
 binding_value :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	return given(k, binding_type(k, b))
+}
+
+// written_value: a scope without production each of whose bindings is written
+// with its value: one value, not a set of them (a shape, a scope that produces).
+written_value :: proc(t: Type) -> bool {
+	s, is_scope := t.(^Scope)
+	if !is_scope || len(s.bindings) == 0 do return false
+	for b in s.bindings do if b.kind == .Product || b.value == nil || b.color != nil do return false
+	return true
 }
 
 // --- defaults (§5.5) ---

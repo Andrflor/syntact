@@ -139,11 +139,16 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		return family_of(k, v.term)
 	case ^Recurrent:
 		return .Int, true
-	case ^Or, ^And, ^Not, ^Range:
+	case ^And:
+		if is_constant(t) do return layout_family(k, t)
+		// t & S, t one value: the family of t
+		for a in v.terms do if is_value(k, a) do return family_of(k, a)
+	case ^Or, ^Not, ^Range:
 		if is_constant(t) do return layout_family(k, t)
 	case ^Pattern:
 		f: Maybe(Family)
 		for b in v.branches {
+			if is_none(b.product) do continue // none is in every family
 			g, ok := family_of(k, b.product)
 			if !ok do return {}, false
 			if current, set := f.?; set && current != g do return {}, false
@@ -206,6 +211,14 @@ family_holds :: proc(f, of: Family) -> bool {
 
 // layout_family: the one family the elements of a layout are in.
 layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
+	#partial switch v in layout {
+	case ^Operation:
+		// a set the laws keep written, u8 % 3: the family its signature gives
+		if is_constant(layout) do return operation_family(k, v)
+	case ^And:
+		// what each term holds: the family of one that has one
+		for t in v.terms do if f, one := layout_family(k, t); one do return f, true
+	}
 	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) {
 		if proven_in(k, layout, family_term(f)) do return f, true
 	}

@@ -96,6 +96,10 @@ a & ~a = none                    a | ~a = ~none
 ?₁ & 5      stays: ?₁ may be 5
 ```
 
+A value over unknowns meets a set by `in`: `t & S` is t when `t in S` is true, none
+when it is false, and otherwise stays, t where it is in S (§6). A pattern gives one
+of its products: `(t ? {c -> p …}) & S = t ? {c -> p & S …}`.
+
 This is the only law that makes `&` compute on values. The rest follows by
 distributivity:
 
@@ -1197,7 +1201,15 @@ that set exactly, otherwise its bounds at the bounds of t. A layout never reads,
 through other layouts, its own unknown: there, a set over unknowns narrows by its
 bounds — u is in what S may hold when the literal holds, out of what S always holds
 when it does not. A disjunction narrows each unknown to the union of what its sides
-narrow it to. What the reach says beyond that stays its guard.
+narrow it to. A term t the reach speaks of, `t in S`, is `t & S` in the branch, as
+an unknown is `?ₖ::(L & S)`: one value, t where t in S (§4.1). What the reach says
+beyond that stays its guard.
+
+```text
+r % 8 ? {<4 -> (r % 8) ? {6 -> a  -> b}  -> c}
+      in the first branch r % 8 is (r % 8) & ..3: never 6, the inner pattern is b
+(t ? {c -> p  …}) & S = t ? {c -> p & S  …}        a pattern gives one of its products
+```
 
 The image of a term reads such a layout with what relates them: a·u + r, u between
 l and h, lies between a·l + r and a·h + r.

@@ -249,6 +249,9 @@ computed :: proc(t: kernel.Type) -> bool {
 
 term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> []Value {
 	#partial switch v in t {
+	case ^kernel.And:
+		// t & S, t one value where it is in S: the value t
+		for a in v.terms do if kernel.is_value(l.k, a) do return lower_values(l, a, tail)
 	case kernel.Int:
 		return single(constant(l, i128(v)))
 	case kernel.Bool:

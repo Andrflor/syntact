@@ -18,11 +18,12 @@ import "core:strings"
 
 Rewrite :: []Rewriting
 
-// Rewriting: ?ₖ ↦ t, a recursive call ↦ t, or a read of a run x.#k ↦ t.
+// Rewriting: ?ₖ ↦ t, a recursive call ↦ t, or a term ↦ t: a read of a run x.#k,
+// a term a branch narrows (t ↦ t & S, §6).
 Rewriting :: struct {
 	unknown: ^Unknown,
 	call:    ^Collapse,
-	read:    ^Operation,
+	read:    Type,
 	term:    Type,
 }
 
@@ -57,6 +58,7 @@ reads :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
 // gives it back — only what holds a rewritten unknown is computed again.
 rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	if len(r) == 0 || t == nil do return t
+	for x in r do if x.read != nil && same(k, x.read, t) do return x.term
 	switch v in t {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t
@@ -137,7 +139,6 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		return recurrent_law(k, out)
 	case ^Operation:
 		if is_string_value(t) do return t
-		for x in r do if x.read != nil && same(k, x.read, v) do return x.term
 		args := rewrite_all(k, v.args, r)
 		if identical(args, v.args) do return t
 		return as_normal(operation_law(k, v.op, args, v.span))
@@ -275,14 +276,6 @@ layout_of :: proc(k: ^Kernel, u: ^Unknown) -> Type {
 // boolean whose value the layouts do not give is false | true. A pattern, the
 // images of its products. False when the term holds what has no layout here: a scope.
 layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
-	out = layout_image_of(k, t) or_return
-	if len(k.reached) == 0 do return out, true
-	// what the reaches of the branches being typed say of t holds there (§6)
-	if _, is_unknown := t.(^Unknown); is_unknown || !is_constant(out) do return out, true
-	return reached_set(k, t, out), true
-}
-
-layout_image_of :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	switch v in t {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t, true
@@ -300,10 +293,9 @@ layout_image_of :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if is_string_value(t) do return t, true
 		if v.op == .In do return family_term(.Bool), true
 		if v.op == .Length || v.op == .Item || v.op == .From do return run_image(k, v)
-		// computed once, when no reach of a branch narrowed what it reads
+		// computed once
 		known, plain := plain_of(k, v)
 		if plain && known.imaged do return known.image, known.image != nil
-		narrowed := k.narrowed
 		args := make([]Type, len(v.args))
 		image: Type
 		computed := true
@@ -318,7 +310,7 @@ layout_image_of :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 			if v.op == .Round do image = round_law(k, args[0], bits_format(args[1]), v.span)
 			else do image = euclid_image(k, t, related_image(k, t, exact_law(k, v.op, args, v.span)))
 		}
-		if plain && k.narrowed == narrowed {
+		if plain {
 			known, _ = plain_of(k, v)
 			known.imaged, known.image = true, image
 			k.plain[v] = known
@@ -329,8 +321,13 @@ layout_image_of :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		for a, i in v.terms do terms[i] = layout_image(k, a) or_return
 		return or_law(k, terms), true
 	case ^And:
+		// what each says: a value its image, a set itself
 		terms := make([]Type, len(v.terms))
-		for a, i in v.terms do terms[i] = layout_image(k, a) or_return
+		for a, i in v.terms {
+			terms[i] = values(k, a) or_return
+			// a set the laws keep written, u8 % 3: the range that bounds it
+			if _, written := terms[i].(^Operation); written do terms[i] = int_hull(k, terms[i])
+		}
 		return and_law(k, terms), true
 	case ^Not:
 		return not_law(k, layout_image(k, v.term) or_return), true

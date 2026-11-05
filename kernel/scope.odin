@@ -109,6 +109,8 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 		return pattern_law(k, branching(v, branches))
 	case Invalid:
 		return target
+	case None:
+		return target // none op c = none (§4.5)
 	case ^Operation:
 		// x.#t.a, x a run a fold builds: the field a that the step t places
 		if v.op == .Item {
@@ -1152,6 +1154,16 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 // run_law: read on the bindings of x where they are known; otherwise it stays.
 run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked := false) -> Type {
 	x := given(k, args[0])
+	// a pattern gives one of its products: (t ? {c -> p …}).#k = t ? {c -> p.#k …}
+	if p, is_pattern := x.(^Pattern); is_pattern && !has_effect(p) {
+		branches := make([]Branch, len(p.branches))
+		for b, i in p.branches {
+			at := slice.clone(args)
+			at[0] = b.product
+			branches[i] = with_product(b, is_none(b.product) ? b.product : run_law(k, o, at, span, checked))
+		}
+		return pattern_law(k, branching(p, branches))
+	}
 	if !gives_scope(k, x) && !is_pending_call(k, x) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a run, not %s", operator_text[o], print_type(x)))
 	from, is_from := x.(^Operation)
 	is_from &&= from.op == .From

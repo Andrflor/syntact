@@ -1661,7 +1661,7 @@ Run_Read :: struct {
 	at:   int, // j: the read is of the binding c·i + j
 }
 
-append_read :: proc(r: Rewrite, read: ^Operation, t: Type) -> Rewrite {
+append_read :: proc(r: Rewrite, read: Type, t: Type) -> Rewrite {
 	out := make([dynamic]Rewriting)
 	append(&out, ..r)
 	append(&out, Rewriting{read = read, term = t})

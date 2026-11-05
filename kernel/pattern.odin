@@ -39,16 +39,8 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 	}
 	// a pattern gives one of its products: (t ? {c -> q  …}) ? B = t ? {c -> q ? B  …}
 	if q, is_pattern := target.(^Pattern); is_pattern && !has_effect(q) {
-		// each in its branch of q, where the reach of that branch holds
-		reached, _, _ := reaches(k, q.target, q.branches)
 		branches := make([]Branch, len(q.branches))
-		for b, i in q.branches {
-			said: Type = Bool(true)
-			for r in reached do if r.branch == i do said = r.unsaid
-			append(&k.reached, said)
-			branches[i] = with_product(b, pattern_on(k, b.product, p, outer))
-			pop(&k.reached)
-		}
+		for b, i in q.branches do branches[i] = with_product(b, pattern_on(k, b.product, p, outer))
 		return pattern_law(k, branching(q, branches))
 	}
 	for b, i in p.branches {
@@ -65,10 +57,7 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 	rewrites := make([dynamic]Rewrite)
 	for r in reached {
 		b := p.branches[r.branch]
-		// what the reach says beyond the rewrite holds in the product
-		append(&k.reached, r.unsaid)
 		product := branch_product(k, b, r.rewrite, target, outer)
-		pop(&k.reached)
 		if r.all && len(out) == 0 do return product
 		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
 		append(&rewrites, r.rewrite)
@@ -135,7 +124,6 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 			cond = in_law(k, target, cover)
 			if is_invalid(cover) do return out, rest, cover
 			if is_invalid(cond) do return out, rest, cond
-			cond = within(k, cond)
 		}
 		reach := bool_and(k, rest, cond)
 		rest = bool_and(k, rest, bool_not(k, cond))
@@ -146,18 +134,6 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 		if all do return out, nil, nil
 	}
 	return out, rest, nil
-}
-
-// within: cond where the reaches of the branches being typed hold: false when
-// none of their values meets it, true when each does.
-within :: proc(k: ^Kernel, cond: Type) -> Type {
-	if _, decided := cond.(Bool); decided do return cond
-	for g in k.reached {
-		if is_bool(g, true) do continue
-		if is_bool(bool_and(k, g, cond), false) do return Bool(false)
-		if is_bool(bool_and(k, g, bool_not(k, cond)), false) do return Bool(true)
-	}
-	return cond
 }
 
 // narrow: the rewrite a reach makes: through [&], `u in S` rewrites ?ₖ::L into
@@ -224,9 +200,29 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 			out = rewriting(out, u, narrowing(u, layout))
 			said ||= exact
 		}
-		if !said do unsaid = bool_and(k, unsaid, l)
+		if !said {
+			unsaid = bool_and(k, unsaid, l)
+			// a term the reach speaks of: t & S in the branch, as ?ₖ::(L & S)
+			if _, is_unknown := o.args[0].(^Unknown); !is_unknown do out = restricting(k, out, o.args[0], positive ? o.args[1] : not_law(k, o.args[1]))
+		}
 	}
 	return out, true, unsaid
+}
+
+// restricting: r, with the term t restricted to S, t & S — further, when r
+// restricts it.
+restricting :: proc(k: ^Kernel, r: Rewrite, t, s: Type) -> Rewrite {
+	out := make([dynamic]Rewriting)
+	current := t
+	for x in r {
+		if x.read != nil && same(k, x.read, t) {
+			current = x.term
+			continue
+		}
+		append(&out, x)
+	}
+	append(&out, Rewriting{read = t, term = and_law(k, {current, s})})
+	return out[:]
 }
 
 // branch_product: the product of a branch, for the values that reach it: a copy of
