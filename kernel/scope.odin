@@ -1188,7 +1188,7 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	s, known := x.(^Scope)
 	at, placed_at := i.(Int)
 	if o == .Item && !checked && !(known && placed_at) && !is_pending_call(k, x) {
-		if _, is_fold := x.(^Fold); !is_fold || !placed_at {
+		{
 			// by the length of x as a term, or by the least length its values have
 			past := op(k, .Sub, i, run_law(k, .Length, {x}, span))
 			verdict, _ := prove(k, in_law(k, past, range_law(k, nil, Int(-1), .Int, span)))
@@ -1217,40 +1217,38 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	return run_scope(k, xs[at:])
 }
 
-// built_item: x.#a, x a run the fold f builds c bindings a step, a constant and
-// x longer than a: the binding j = a % c that the step i = a / c places, its states
-// those of step i — the inits, each update applied i times.
+// built_item: x.#a, x a run the fold f builds c bindings a step: the binding
+// j = a % c that the step i = a / c places, its states those of step i — each
+// the fold itself, stopped at i (§5.6): a term, which the law of the fold reads.
+// Read at a known place, or when what the step places reads no state.
 built_item :: proc(k: ^Kernel, f: ^Fold, a: Type) -> (value: Type, read: bool) {
 	_, es, builds := built(k, f)
 	if !builds do return nil, false
-	// what a step places reading only the step: at any place, that step's
-	if len(es) == 1 {
-		read_state := false
-		for z in f.states do read_state ||= reads(k, es[0], z)
-		if !read_state {
-			lo, _ := counter_range(k, f) or_return
-			return rewrite(k, es[0], rewriting(nil, f.index, op(k, .Add, lo, a))), true
-		}
+	c := i128(len(es))
+	step, j: Type
+	if at, known := a.(Int); known {
+		if at < 0 do return nil, false
+		step, j = Int(i128(at) / c), Int(i128(at) % c)
+	} else if c == 1 {
+		step, j = a, Int(0)
+	} else {
+		return nil, false
 	}
-	at := a.(Int) or_return
-	if at < 0 do return nil, false
-	c := Int(len(es))
-	step, j := at / c, at % c
-	if step > 64 do return nil, false
-	verdict, _ := prove(k, in_law(k, run_law(k, .Length, {f}, f.span), range_law(k, Int(at + 1), nil, .Int, f.span)))
-	if verdict != .Proven do return nil, false
+	placed := es[int(j.(Int))]
+	if _, known := a.(Int); !known {
+		for z in f.states do if reads(k, placed, z) do return nil, false
+	}
 	lo, _ := counter_range(k, f) or_return
-	states := slice.clone(f.inits)
-	for t in 0 ..< int(step) {
-		r := rewriting(nil, f.index, op(k, .Add, lo, Int(i128(t))))
-		for z, i in f.states do r = rewriting(r, z, states[i])
-		next := make([]Type, len(states))
-		for u, i in f.updates do next[i] = rewrite(k, u, r)
-		states = next
+	at := op(k, .Add, lo, step)
+	r := rewriting(nil, f.index, at)
+	for z in f.states {
+		if !reads(k, placed, z) do continue
+		stopped := new(Fold)
+		stopped^ = f^
+		stopped.stop, stopped.value = new_range(at, nil, .Int), z
+		r = rewriting(r, z, fold_law(k, stopped))
 	}
-	r := rewriting(nil, f.index, op(k, .Add, lo, step))
-	for z, i in f.states do r = rewriting(r, z, states[i])
-	return rewrite(k, es[j], r), true
+	return rewrite(k, placed, r), true
 }
 
 // built_field: x.#t.a, x a run the fold f builds one binding a step, the field a of
