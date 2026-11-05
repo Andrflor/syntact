@@ -4,8 +4,11 @@ Each step: the law, the commit, the benchmarks' status. Every commit is green
 (kernel corpus 581/5 unchanged, code tests, sum tree interp bintrees records push
 identical to Goose) and can be reverted on its own.
 
-## Open questions for the morning
-(laws that would be new — nothing written for them)
+## Goal for the morning
+All 16 Goose benchmarks pass (kernel types them, they compile, outputs identical to
+Goose), each failure fixed as the existing law of the algebra that covers it, at the
+place it lives in the kernel. No blockers: what looks like a new law is an existing
+one applied too narrowly — find which.
 
 ## At the end
 The artifact (https://claude.ai/artifact/UZ83prVCcesGtNnHbmweyo) updated with all 16 Goose
