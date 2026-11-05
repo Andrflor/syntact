@@ -409,6 +409,8 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t
 	case ^Unknown:
+		// a copy for a branch: a value from outside, as the reach narrows it (§6)
+		if m.substitute && m.instance == nil do return rewrite(k, v, m.outer)
 		// ?ₖ whose layout names what the copy changes: ?ₖ read in the carve
 		if !mentions(m, v.written) || m.instance == nil do return v
 		u := new(Unknown)
