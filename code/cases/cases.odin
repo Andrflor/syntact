@@ -125,6 +125,7 @@ CASES := []Binary_Case {
 	// place, laid out as the function that reads it holds it
 	{"runs built at run time", PRINTF + RUNS + ZIP + "-> io.printf{format -> \"%lld\\n\"  n -> zip{a -> items{n -> ??::u32}!  b -> items{n -> 5  r -> 777}!}!}!", {{args = {"5"}, stdout = "1565295\n", exit = 8}, {args = {"0"}, stdout = "0\n", exit = 2}, {args = {"3"}, stdout = "660519\n", exit = 7}}},
 	{"run carved by place", PRINTF + RUNS + ZIP + "bump -> {\n  Array{u32}:xs -> {}\n  -> xs ? {\n    {u32(h) u32(g) ...Array{u32}:(t)} -> xs{#1 -> h}\n    -> xs\n  }\n}\n-> io.printf{format -> \"%lld\\n\"  n -> zip{a -> bump{xs -> items{n -> ??::u32}!}!  b -> items{n -> 10  r -> 777}!}!}!", {{args = {"10"}, stdout = "3563956\n", exit = 8}}},
+	{"memory of a step, freed at its end", PRINTF + SMALL_ENV + "total -> {\n  u8:n -> ??\n  u8:w -> ??\n  u32:i -> 0\n  acc -> 0\n  -> i ? {\n    >=n -> acc\n    -> total{n -> n  w -> w  i -> i + 1  acc -> (acc + lookup{env -> {key -> i  val -> i * 2  next -> {key -> 7  val -> 70  next -> {}}}  want -> w}!) % 1000}!\n  }\n}\n-> io.printf{format -> \"%lld\\n\"  n -> total!}!", {{args = {"7", "200"}, stdout = "944\n", exit = 4}, {args = {"5", "7"}, stdout = "10\n", exit = 3}}},
 	{"tree passed to a function", PRINTF + ENV + "-> io.printf{format -> \"%lld\\n\"  n -> lookup{env -> {key -> 1  val -> 10  next -> {key -> 2  val -> 20  next -> {}}}  want -> ??::i64}!}!", {{args = {"1"}, stdout = "10\n", exit = 3}, {args = {"2"}, stdout = "20\n", exit = 3}, {args = {"3"}, stdout = "0\n", exit = 2}}},
 	{
 		"handler of a recursion",
@@ -249,3 +250,6 @@ ZIP :: "zip -> {\n  Array{u32}:a -> {}\n  Array{u32}:b -> {}\n  acc -> 0\n  -> a
 
 // ENV: a tree of two shapes, read by a recursion
 ENV :: "Env -> {\n  -> {}\n  -> {i64:key  i64:val  Env:next}\n}\nlookup -> {\n  Env:env -> {}\n  i64:want -> 0\n  -> env ? {\n    {i64:key  i64:val  Env:next} -> key = want ? {\n      true -> val\n      -> lookup{env -> next  want -> want}!\n    }\n    -> 0\n  }\n}\n"
+
+// SMALL_ENV: ENV, of narrow integers
+SMALL_ENV :: "Env -> {\n  -> {}\n  -> {u8:key  u16:val  Env:next}\n}\nlookup -> {\n  Env:env -> {}\n  u8:want -> 0\n  -> env ? {\n    {u8:key  u16:val  Env:next} -> key = want ? {\n      true -> val\n      -> lookup{env -> next  want -> want}!\n    }\n    -> 0\n  }\n}\n"

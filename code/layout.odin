@@ -522,3 +522,36 @@ fields_field :: proc(l: ^Lowering, x: []Value, lay: ^Layout, name: string) -> []
 	}
 	return fail_values(l, "no field `%s`", name)
 }
+
+// --- the memory of a scope (specs/types.md §4.12, §4.13) ---
+
+// holds_memory: a value of the layout holds memory: a run or a tree, in it.
+holds_memory :: proc(lay: ^Layout) -> bool {
+	switch lay.kind {
+	case .Word:
+		return false
+	case .Run, .Tree:
+		return true
+	case .Fields:
+		for f in lay.fields do if holds_memory(f.layout) do return true
+	}
+	return false
+}
+
+// scoped: the body of a scope that passes on no memory it reserves — what it gives
+// holds none, or what it holds was reserved before it —: what it reserves is freed
+// at its end, all at once (§4.13). The free end where it begins is a reservation of
+// no byte; it goes back there after its last instruction, an Again staying last.
+scoped :: proc(l: ^Lowering, b: ^Body) {
+	if !reserves(b^) do return
+	zero, mark := value(l.f, .Int), value(l.f, .Int)
+	l.f.kinds[zero].bounds = {0, 0}
+	inject_at(&b.insts, 0, Inst(Const{zero, 0}), Inst(Memory{op = .Reserve, dst = mark, a = zero, b = NONE}))
+	free := Memory{op = .Free, dst = NONE, a = mark, b = NONE}
+	last := len(b.insts) - 1
+	if _, again := b.insts[last].(Again); again {
+		inject_at(&b.insts, last, Inst(free))
+	} else {
+		append(&b.insts, free)
+	}
+}

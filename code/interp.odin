@@ -390,6 +390,10 @@ memory :: proc(m: ^Machine_State, i: Memory, regs: []Datum) -> string {
 		for len(m.memory) % 8 != 0 do append(&m.memory, 0)
 		regs[i.dst].int = i64(len(m.memory) + 1)
 		resize(&m.memory, len(m.memory) + int(regs[i.a].int))
+	case .Free:
+		at := int(regs[i.a].int) - 1
+		if at < 0 || at > len(m.memory) do return "a free beyond the memory reserved"
+		resize(&m.memory, at)
 	case .Load, .Store:
 		at := int(regs[i.a].int) - 1 + int(i.offset)
 		bytes := i.bits / 8

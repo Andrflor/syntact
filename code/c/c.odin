@@ -434,6 +434,8 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 				if w.reads[i.dst] > 0 do assume(w, i.dst)
 			case .Store:
 				line(w, "*%s = (%sint%d_t)%s;", at, i.signed ? "" : "u", i.bits, name(w, i.b))
+			case .Free:
+				line(w, "arena_end = (char *)(intptr_t)%s;", name(w, i.a))
 			}
 		case code.Call:
 			args := make([dynamic]string)

@@ -120,6 +120,7 @@ lower_program :: proc(k: ^kernel.Kernel) -> (prog: Program, err: string) {
 	l.f.body = lower_body(&l, program_type(k), false)
 	if l.error != "" do return prog, l.error
 	inject_at(&l.f.body.insts, 0, ..l.entry[:])
+	impure_by_memory(&prog)
 	l.f.results = machines_of(l.f, l.f.body.values)
 	if len(l.f.results) > 1 do return prog, fmt.tprintf("the program gives %d values: a program that gives a scope is not code yet", len(l.f.results))
 	for u in l.inputs {
@@ -503,6 +504,10 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold, into: ^Layout = nil) -> []Value {
 	args[0] = lower(l, f.next)
 	emit(l, Again{args[:]})
 	close_body(l, step_outer, step_bound)
+	// a step passes on no memory it reserves: its states hold none, or grow in place
+	passes := false
+	for run, i in runs do passes ||= run != nil && !grows(l, f, i)
+	if !passes do scoped(l, &arms[1].body)
 	// where k stops: the cells of stop, or its membership
 	target := params[0]
 	if cover, constant := cover_of(f.stop); constant && fits(l, target, cover) {
@@ -838,6 +843,10 @@ function_of :: proc(l: ^Lowering, c: ^kernel.Collapse) -> int {
 		f.body = Body{values = loop.dst}
 		append(&f.body.insts, loop)
 	}
+	// a function whose values hold no memory frees what it reserves where it ends
+	passes := false
+	for v in f.body.values do passes ||= (Held{f, v} in l.held)
+	if !passes do scoped(l, &f.body)
 	if gives := machines_of(f, f.body.values); l.error == "" && !slice.equal(gives, f.results) do fail(l, "%s gives %v, its calls %v", f.name, gives, f.results)
 	l.f, l.bound, l.self, l.insts = outer, outer_bound, outer_self, outer_insts
 	return index

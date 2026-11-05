@@ -208,13 +208,16 @@ Foreign :: struct {
 //
 // A value that takes bits is placed in the arena of the scope whose collapse frees
 // it, reserved whole before it is built; then its words are stored, and read back.
-// No value is modified once built. The operations on memory run in the order they
-// are written, as effects do.
+// No value is modified once built. The memory of a scope is freed at its end, all at
+// once: the free end goes back to where it was when the scope began — a reservation
+// of no byte. The operations on memory run in the order they are written, as effects
+// do.
 
 Memory_Op :: enum u8 {
 	Reserve, // dst = the address of a bytes of the arena
 	Load, // dst = the integer of bits bits at a + offset, signed or not
 	Store, // the low bits bits of b, at a + offset
+	Free, // the free end of the arena back to a: what was reserved from a on is freed, all at once
 }
 
 Memory :: struct {
@@ -505,6 +508,8 @@ print_inst :: proc(f: ^Func, p: ^Program, inst: Inst) -> string {
 			return fmt.tprintf("%s = load %s%+d, %s%d%s", v(i.dst), v(i.a), i.offset, i.signed ? "i" : "u", i.bits, print_bounds(f, i.dst))
 		case .Store:
 			return fmt.tprintf("store %s%+d, %s%d %s", v(i.a), i.offset, "u", i.bits, v(i.b))
+		case .Free:
+			return fmt.tprintf("free from %s", v(i.a))
 		}
 	case Call:
 		return fmt.tprintf("%scall %s(%s)%s", print_dst(i.dst), p.funcs[i.func].name, list(i.args), print_all_bounds(f, i.dst))
@@ -517,19 +522,49 @@ print_inst :: proc(f: ^Func, p: ^Program, inst: Inst) -> string {
 
 // takes_memory: a value of the program takes memory: it reserves some.
 takes_memory :: proc(p: ^Program) -> bool {
-	reserves :: proc(b: Body) -> bool {
+	for f in p.funcs do if reserves(f.body) do return true
+	return false
+}
+
+// reserves: the body reserves memory.
+reserves :: proc(b: Body) -> bool {
+	for inst in b.insts {
+		#partial switch i in inst {
+		case Memory:
+			if i.op == .Reserve do return true
+		case Match:
+			for arm in i.arms do if reserves(arm.body) do return true
+		case Loop:
+			if reserves(i.body) do return true
+		}
+	}
+	return false
+}
+
+// impure_by_memory: a function that reserves, stores or reads memory, or calls one
+// that does, depends on the memory as it is where it is called: it is not pure,
+// so that its calls keep their place among the operations on memory.
+impure_by_memory :: proc(p: ^Program) {
+	touches :: proc(p: ^Program, b: Body) -> bool {
 		for inst in b.insts {
 			#partial switch i in inst {
 			case Memory:
-				if i.op == .Reserve do return true
+				return true
+			case Call:
+				if !p.funcs[i.func].pure do return true
 			case Match:
-				for arm in i.arms do if reserves(arm.body) do return true
+				for arm in i.arms do if touches(p, arm.body) do return true
 			case Loop:
-				if reserves(i.body) do return true
+				if touches(p, i.body) do return true
 			}
 		}
 		return false
 	}
-	for f in p.funcs do if reserves(f.body) do return true
-	return false
+	for changed := true; changed; {
+		changed = false
+		for f in p.funcs do if f.pure && touches(p, f.body) {
+			f.pure = false
+			changed = true
+		}
+	}
 }

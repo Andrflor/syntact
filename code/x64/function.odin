@@ -1134,6 +1134,10 @@ memory :: proc(fr: ^Frame, i: mir.Memory) {
 		enc.add_r64_r64(.RCX, .RAX)
 		enc.mov_m64_r64(absolute(.R11), .RCX)
 		put(fr, place_of(fr, i.dst), .RAX)
+	case .Free:
+		enc.movabs_r64_imm64(.R11, i64(ARENA))
+		get(fr, .RCX, place_of(fr, i.a))
+		enc.mov_m64_r64(absolute(.R11), .RCX)
 	case .Load:
 		at := enc.AddressComponents{base = in_register(fr, i.a, .RCX), displacement = i32(i.offset)}
 		switch i.bits {
