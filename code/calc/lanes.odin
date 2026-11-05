@@ -186,7 +186,8 @@ interleaved :: proc(g: ^Graph, f: ^Fold, lanes, bits: int) -> bool {
 	for r in f.reductions do append(&kinds, code.Kind{f.info.params[r.param].machine, code.EVERY, lanes, bits})
 	stops := make([]code.Bounds, 1)
 	stops[0] = {1, 1}
-	b := new_loop(g, f.info.parent, kinds[:], code.Cover{ints = stops}, .Lanes)
+	// L turns of the loop at once: its turns, over L
+	b := new_loop(g, f.info.parent, kinds[:], code.Cover{ints = stops}, .Lanes, turns_of(g, g.costs, f.l) / f64(lanes))
 	i := b.params[0]
 	// the counter of the lanes takes points of the orbit of the loop's
 	if param, is := lookup(g, Node{kind = .Param, owner = f.l, index = f.counter}); is {
