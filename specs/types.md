@@ -764,6 +764,15 @@ x from 0 = x         (x from a) from b = x from (a + b)
 (x from a).#b = x.#(a + b)                  |x from k| = |x| - k, k in 0..|x|
 ```
 
+A field of one of several scopes is the field of those that have it:
+
+```text
+x.a, x one of s₁ | … | sₙ    the field a of those that have it, its values the union
+                             of theirs; invalid for the values of x that reach one
+                             without a
+({id -> 1  dx -> 2} | {id -> 3  code -> 4}).id = 1 | 3
+```
+
 A carve replaces an equation. Everything that names x follows, since its equation
 mentions x:
 
@@ -942,6 +951,16 @@ f{n -> m}! = ⟳(k: m ↦ s(k) until B; pre(k); A: 1 ↦ A·α(k), B: 0 ↦ B + 
 
 Modulo m > 0 constant, when v = (α·y + β) % m and c, α, β ≥ 0, the maps compose
 modulo m: `A: 1 ↦ (A·α) % m, B: 0 ↦ (B + A·β) % m`, the value `(A·c + B) % m`.
+
+Runs compose likewise: when v = {...P  ...y  ...Q}, y placed once as a run and P,
+Q not reading it, `(A, B) ∘ (P, Q) = ({...A ...P}, {...Q ...B})`, and the fold goes
+down the orbit: `A: {} ↦ {...A ...P(k)}, B: {} ↦ {...Q(k) ...B}`, the value
+`{...A ...c(k) ...B}`.
+
+```text
+log{n -> m}! = m ? {0 -> {}  -> {e(m) ...log{n -> m - 1}!}}
+             = ⟳(i: 0 ↦ i + 1 until m..; A: {} ↦ {...A  e(m - i)}; A)
+```
 
 **States carried by the call.** Besides the integer it moves along the orbit, a call
 may carve other bindings of the scope: each is a state of the fold. Its init is what
