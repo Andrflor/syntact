@@ -1873,12 +1873,15 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure{}) -> (image:
 		}
 		// as functions of what the call carves: a side left open taken from them, both
 		// bounds holding
+		// — proposed by the solving, proven by the induction
 		if !ok || bounds.count == nil && (bounds.lo == nil || bounds.hi == nil) {
 			if linear, read := linear_bounds(k, eq, e, measure); read {
-				if !ok do bounds = linear
-				if bounds.lo == nil do bounds.lo = linear.lo
-				if bounds.hi == nil do bounds.hi = linear.hi
-				ok = true
+				merged := ok ? bounds : linear
+				if merged.lo == nil do merged.lo = linear.lo
+				if merged.hi == nil do merged.hi = linear.hi
+				if bounds_hold(k, eq, e, measure, merged) {
+					bounds, ok = merged, true
+				}
 			}
 		}
 	}
@@ -2265,6 +2268,30 @@ linear_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, m: Measure) -> (b
 	if u, solved := side(k, leaves[:], eq, m, fields[:], zs, as_z, false); solved do bounds.lo = term(k, u, fields[:])
 	if m.kind == .Length && bounds.lo == nil do bounds.lo = Int(0)
 	return bounds, bounds.hi != nil || bounds.lo != nil
+}
+
+// bounds_hold: the bounds of a call, functions of what it carves, proven by induction
+// (§5.6): the measure of the equation, each call in it taken within the bounds at
+// what it carves, lies within the bounds.
+bounds_hold :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, m: Measure, b: Bounds) -> bool {
+	calls, ys := make([dynamic]^Collapse), make([dynamic]^Unknown)
+	measured := measure_of(k, given(k, e), eq.root, m, &calls, &ys) or_return
+	assumed: Rewrite
+	for x, i in calls {
+		// the fields at what the call carves them to
+		at: Rewrite
+		for f, u in eq.params {
+			field := u.(^Unknown) or_continue
+			if arg, carved := x.target.(^Scope).changes[f]; carved do at = rewriting(at, field, arg)
+		}
+		lo, hi: Type
+		if b.lo != nil do lo = rewrite(k, b.lo, at)
+		if b.hi != nil do hi = rewrite(k, b.hi, at)
+		taken := new_unknown(k, nil)
+		taken.layout = range_law(k, lo, hi, .Int, {})
+		assumed = rewriting(assumed, ys[i], taken)
+	}
+	return holds_in(k, rewrite(k, measured, assumed), range_law(k, b.lo, b.hi, .Int, {}), {})
 }
 
 linear_add :: proc(a, b: Linear, by: i128) -> (out: Linear, ok: bool) {
