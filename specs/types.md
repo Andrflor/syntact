@@ -1135,15 +1135,26 @@ call; its production is asked, and typed for the values the carve gives (§7). W
 at those values, the production calls nothing, it is the value of the call:
 `sum{t -> {}}!` is 0.
 
+A call reads its equation where what it carves, and what its calls carve, are
+unknowns of their colors: never at the values its fields hold by default. What a
+call proves — by induction, a call in c when its equation is, each call it makes
+taken in c — holds for every value of those fields.
+
 The values of a call that stays are bounded by the recursion of its bounds: each
 call taken at the bound y of the step after, the rest at its own bounds, the
 greatest is `y ↦ α·y + max(g)` from `max(c)`, the least likewise — folds, solved by
-their laws:
+their laws. A field the call gives a call of another equation keeps it, over that
+equation's own fields, each an unknown of its color: the recursion follows what the
+other builds. A step that is a pattern gives one of its products, `αᵢ·y + gᵢ`:
+when no value is negative, the greatest follows the greatest αᵢ and gᵢ, the least
+the least:
 
 ```text
 sum{t -> build{depth -> d}!}!   in 0..1022 * 2 ** d - 511      y ↦ 2·y + 511, from 511
-``` A
-recursive call whose base cases are scopes is a scope: `...` places it.
+count{e -> build{depth -> d}!}! in d + 1..2 ** (d + 1) - 1      y ↦ 2·y + 1 above, y + 1 below
+```
+
+A recursive call whose base cases are scopes is a scope: `...` places it.
 
 ### 5.7 Holes
 

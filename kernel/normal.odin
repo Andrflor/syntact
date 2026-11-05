@@ -260,6 +260,12 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 	others := mark(k)
 	if !is_or do closed_bounds(k, flat)
 	for t in flat do if t != nil && !is_constant(t) && !contains_same(k, pushed(k, others), t) do push(k, t)
+	// a & ~a = none, a | ~a = ~none (§2)
+	for t in pushed(k, others) {
+		n, negated := t.(^Not)
+		if !negated || !contains_same(k, pushed(k, others), n.term) do continue
+		return is_or ? everything() : None{}
+	}
 	parts := mark(k)
 	push_all(k, k.scratch[others:parts])
 	sort_types(pushed(k, parts))
@@ -517,9 +523,10 @@ binding_value :: proc(k: ^Kernel, b: ^Binding) -> Type {
 
 // written_value: a scope without production each of whose bindings is written
 // with its value: one value, not a set of them (a shape, a scope that produces).
+// {}, the empty run, is one.
 written_value :: proc(t: Type) -> bool {
 	s, is_scope := t.(^Scope)
-	if !is_scope || len(s.bindings) == 0 do return false
+	if !is_scope do return false
 	for b in s.bindings do if b.kind == .Product || b.value == nil || b.color != nil do return false
 	return true
 }
