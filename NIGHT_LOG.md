@@ -18,3 +18,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - 2026-11-05 evening: agent on six gaps (x & C in C; head of a concatenation;
   narrowing in nested branches; field of a call's result; call in a union of
   shapes; bounds as functions of what a call carves — strlist).
+- 082af1b x & C lies in C (image of t & S).
+- c236db9 head of a concatenation read by place ({...X rest}).
+- 4e5588e narrowing kept in a branch nested in another branch's scope.
+- e4c110d field of a recursive call's result, by induction on that field.
+- container restarted; agent resumed on steps 5–6 (call in a union of shapes; bounds as functions of what a call carves).
