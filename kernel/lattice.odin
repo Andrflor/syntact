@@ -981,6 +981,19 @@ int_bounds :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128), ok: bool) {
 			return lo, hi, true
 		}
 	}
+	// a union: from the least of its terms to the greatest; a missing bound is open
+	if any, either := t.(^Or); either && is_constant(t) {
+		for x, i in any.terms {
+			l, h := int_bounds(k, x) or_return
+			if i == 0 {
+				lo, hi = l, h
+				continue
+			}
+			lo = (lo != nil && l != nil) ? min(lo.?, l.?) : nil
+			hi = (hi != nil && h != nil) ? max(hi.?, h.?) : nil
+		}
+		return lo, hi, true
+	}
 	o, is_op := t.(^Operation)
 	if !is_op || !is_constant(t) || is_text(t) do return
 	bounds := make([][2]Maybe(i128), len(o.args))

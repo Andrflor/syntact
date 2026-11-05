@@ -268,8 +268,8 @@ layout_of :: proc(k: ^Kernel, u: ^Unknown) -> Type {
 
 // layout_image: a term over unknowns, each replaced by its layout: an operator
 // distributes over |, so the term is one value of this image (§4.5, §7). A
-// boolean whose value the layouts do not give is false | true. False when the term
-// holds what has no layout here: a pattern, a scope.
+// boolean whose value the layouts do not give is false | true. A pattern, the
+// images of its products. False when the term holds what has no layout here: a scope.
 layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	switch v in t {
 	case Char, Int, Real, Bool, None, Invalid:
@@ -310,6 +310,8 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Fold:
 		// a sum along the fold: its init, and as many terms as steps
 		if image, known := sum_image(k, v); known do return image, true
+		// a run it builds: a run of what its steps place
+		if image, known := built_image(k, v); known do return image, true
 		// its value, over the layouts of its states
 		if image, known := layout_image(k, v.value); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
@@ -327,7 +329,12 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// x.a, x of a shape: the color of a in it
 		set := values(k, v.target) or_return
 		return field_color(k, set, v.name)
-	case ^Effect, ^Pattern, ^Scope, ^Name, ^Carve, ^Default:
+	case ^Pattern:
+		// a pattern gives one of its products (§6)
+		images := make([]Type, len(v.branches))
+		for b, i in v.branches do images[i] = layout_image(k, b.product) or_return
+		return or_law(k, images), true
+	case ^Effect, ^Scope, ^Name, ^Carve, ^Default:
 	}
 	return nil, false
 }
@@ -361,6 +368,26 @@ related_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 		}
 	}
 	return out
+}
+
+// built_image: the run a fold builds, {e₀ … eₙ₋₁}: the shape {...{E:} * 0..},
+// E the values its steps place.
+built_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
+	_, es, builds := built(k, f)
+	if !builds do return
+	values_of := make([]Type, len(es))
+	for e, i in es do values_of[i] = values(k, given(k, e)) or_return
+	piece := new_scope(nil, f.span)
+	piece.source, piece.complete, piece.reached = piece, true, true
+	place := new_binding(piece, .Push, f.span)
+	place.color = or_law(k, values_of)
+	place.typed_color = place.color
+	run := new_scope(nil, f.span)
+	run.source, run.complete, run.reached = run, true, true
+	all := new_binding(run, .Expand, f.span)
+	all.color = new_operation(.Mul, piece, COUNTS)
+	all.typed_color = all.color
+	return run, true
 }
 
 // sum_image: the values of a fold whose value is a state x: c ↦ x + g, g not

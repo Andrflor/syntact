@@ -181,7 +181,8 @@ domain :: proc(f: Family) -> Family {
 
 // family_holds: an atom of the family `of` is in the family `f` without more proof.
 family_holds :: proc(f, of: Family) -> bool {
-	return f == of || (f == .String && of == .Char)
+	// a count is an integer, a character a string
+	return f == of || f == domain(of) || (f == .String && of == .Char)
 }
 
 // layout_family: the one family the elements of a layout are in.
