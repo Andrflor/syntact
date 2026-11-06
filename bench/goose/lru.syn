@@ -85,7 +85,8 @@ walk -> {
   }
 }
 -> {
-  (8..4294967295):n -> ??
+  // the input Goose supports: a node's val, i32, is at most 999 + n
+  (8..2147482648):n -> ??
   s -> run{n -> n  cap -> n / 8  keys -> n / 4}!
   a -> io.printf{format -> "%lld\n"  n -> s.hits}!
   b -> io.printf{format -> "%lld\n"  n -> s.misses}!
