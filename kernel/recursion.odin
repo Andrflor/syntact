@@ -226,7 +226,7 @@ carved_by_calls :: proc(k: ^Kernel, e: Type, root: ^Scope) -> map[^Binding]Type 
 // is in the family of its value (§5.4). A binding given a call of another equation
 // keeps it, over that equation's own fields (through): the recursion follows what
 // the other builds (§5.6).
-generic_equation :: proc(k: ^Kernel, root: ^Scope, carved: ^map[^Binding]Type, through: []Through = nil) -> (^Scope, bool) {
+generic_equation :: proc(k: ^Kernel, root: ^Scope, carved: ^map[^Binding]Type, through: []Through = nil, narrowed: []Narrowing = nil) -> (^Scope, bool) {
 	for b in carved {
 		if t, kept := through_of(through, b); kept {
 			carved[b] = recursive_call(k, t.equation.generic, root.span)
@@ -238,6 +238,7 @@ generic_equation :: proc(k: ^Kernel, root: ^Scope, carved: ^map[^Binding]Type, t
 			f, known := family_of(k, binding_type(k, b))
 			u.layout = known ? family_term(f) : everything()
 		}
+		for n in narrowed do if n.field == b do u.layout = and_law(k, {u.layout, n.set})
 		carved[b] = u
 	}
 	return derive(k, root, carved^, root.span).(^Scope)
@@ -380,9 +381,11 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Th
 	}
 	params := make(map[^Binding]Type)
 	for b in given do params[b] = nil
+	narrowed: []Narrowing
 	for {
 		for b in params do params[b] = nil
-		generic := generic_equation(k, root, &params, through) or_break
+		reached := len(k.pending)
+		generic := generic_equation(k, root, &params, through, narrowed) or_break
 		p := first_production(k, generic) or_break
 		equation := binding_type(k, p)
 		more := false
@@ -390,14 +393,114 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Th
 			params[b] = nil
 			more = true
 		}
-		if !more {
-			// read through another equation, a term of no type: not read so
-			if len(through) > 0 && holds_invalid(equation) do return
-			eq.generic, eq.equation, eq.params = generic, equation, params
-			return eq, true
+		if more do continue
+		// the fields its calls move along an orbit from where the call leaves them:
+		// the equation read again, each in the values it takes. The first reading
+		// only proposed their orbits: its scopes are not the equation's, nor checked
+		if narrowed == nil {
+			narrowed = orbit_narrowings(k, root, given, generic, equation, params)
+			if len(narrowed) > 0 {
+				kept := reached
+				for s in k.pending[reached:] do if !within(s, generic) {
+					k.pending[kept] = s
+					kept += 1
+				}
+				resize(&k.pending, kept)
+				continue
+			}
 		}
+		// read through another equation, a term of no type: not read so
+		if len(through) > 0 && holds_invalid(equation) do return
+		eq.generic, eq.equation, eq.params = generic, equation, params
+		return eq, true
 	}
 	return
+}
+
+// within: s is written in g, or in a scope written in it.
+within :: proc(s, g: ^Scope) -> bool {
+	for x := s; x != nil; x = x.parent do if x == g do return true
+	return false
+}
+
+// Narrowing: a field of an equation in the values it takes, narrower than its color.
+Narrowing :: struct {
+	field: ^Binding,
+	set:   Type,
+}
+
+// orbit_narrowings: the integer fields the call leaves at their default, a constant,
+// and that every call of the equation moves by one step s: each a state of the fold
+// the equation is, its init that default, its update s (§5.6). Its values are the
+// orbit of the default by s, cut where the equation stops — kᵢ = sⁱ(a) for i in
+// 0..n, n = μ(i: kᵢ in B) —: the image of the orbit, in closed form. A field without
+// a closed orbit stays in its color.
+orbit_narrowings :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, generic: ^Scope, equation: Type, params: map[^Binding]Type) -> []Narrowing {
+	calls := calls_in(k, equation, root)
+	if len(calls) == 0 do return nil
+	// where it stops: the cover of the base case of a pattern on the field
+	target: ^Unknown
+	stop: Type
+	if p, is_pattern := equation.(^Pattern); is_pattern && len(p.branches) == 2 && p.branches[0].cover != nil && p.branches[1].cover == nil {
+		if u, on_field := p.target.(^Unknown); on_field && solved(p.branches[0].product, root) do target, stop = u, p.branches[0].cover
+	}
+	out := make([dynamic]Narrowing)
+	for b, t in params {
+		if slice.contains(given, b) || !written_constant(b.value, root) do continue
+		u := t.(^Unknown) or_continue
+		start := binding_type(k, b)
+		if !is_constant(start) || !proven_in(k, start, family_term(.Int)) do continue
+		step: Type
+		for call in calls {
+			next, _, carves := counter_next(k, generic, call, u)
+			if !carves || step != nil && !same(k, step, next) {
+				step = nil
+				break
+			}
+			step = next
+		}
+		if step == nil do continue
+		image := orbit_image(k, start, step, u, target != nil && same_unknown(target, u) ? stop : nil) or_continue
+		if included(k, layout_of(k, u), image) do continue
+		append(&out, Narrowing{b, image})
+	}
+	return out[:]
+}
+
+// written_constant: t, as written, reads no binding of root: its value is the same
+// whatever a call carves.
+written_constant :: proc(t: Type, root: ^Scope) -> bool {
+	#partial switch v in t {
+	case Int, Char, Bool:
+		return true
+	case ^Name:
+		return v.binding.scope != root
+	case ^Operation:
+		for a in v.args do if !written_constant(a, root) do return false
+		return true
+	}
+	return false
+}
+
+// orbit_image: the points of the orbit of start by step, kᵢ = stepⁱ(start) for i in
+// 0..n, n where it reaches stop — every i without one —, when the orbit has a
+// closed form (§5.6).
+orbit_image :: proc(k: ^Kernel, start, step: Type, u: ^Unknown, stop: Type) -> (image: Type, ok: bool) {
+	x := new_unknown(k, nil)
+	x.layout = stop == nil ? layout_of(k, u) : and_law(k, {layout_of(k, u), not_law(k, stop)})
+	i := new_unknown(k, nil)
+	i.layout = COUNTS
+	ki := orbit(k, rewrite(k, step, rewriting(nil, u, x)), x, start, i) or_return
+	along := new_unknown(k, nil)
+	along.layout = COUNTS
+	if stop != nil {
+		j := new_unknown(k, nil)
+		j.layout = COUNTS
+		n := least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), stop), {})
+		if _, unsolved := n.(^Least); !unsolved do along.layout = range_law(k, Int(0), n, .Int, {})
+	}
+	image = layout_image(k, rewrite(k, ki, rewriting(nil, i, along))) or_return
+	return image, is_constant(image)
 }
 
 // keyed_equation: the equation a call of root carving given reads: through the

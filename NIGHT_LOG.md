@@ -1,5 +1,21 @@
 # Night log
 
+## Proposed law, waiting for the user
+§5.6 reads a call's equation where every field its calls carve is an unknown of its
+color. The values a field takes across a recursion are not stated. Proposed text,
+after "A call reads its equation where what it carves …":
+
+> A field the call leaves at its value, a constant a, and that every call of the
+> equation carves by the same step s, is a state of the fold the equation is: its
+> init a, its update s. In the equation it is an unknown in the image of its orbit
+> — sⁱ(a) for i in 0..n, n = μ(i: sⁱ(a) in B), B the cover of the base case of a
+> pattern on it, every i without one —, not of its color, when the orbit has a
+> closed form; otherwise of its color. What a call proves holds for those values.
+
+Implemented alone in one commit (call_equation, orbit_narrowings), easy to revert.
+Not yet proposed: a field every call keeps read in the image of what the call
+gives it (needed by blur's row y, lru's keys); see the round report.
+
 Each step: the law, the commit, the benchmarks' status. Every commit is green
 (kernel corpus 581/5 unchanged, code tests, sum tree interp bintrees records push
 identical to Goose) and can be reverted on its own.
