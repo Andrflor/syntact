@@ -191,3 +191,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
   (scratchpad wd/least_growing.patch) proves it, but words then types count/put/hash and
   goes over 10 GB: not pushed. 283:8 |split| in i64 (a fold over a fold's length). The
   count-down run length (orbit going down) not done.
+
+## Step: words gaps, respond and calc memory (b7fc637…88f9c29, e1a1668, 646014e) — 05:35 UTC
+- words 37 → 4 errors: expansions are their bindings placed; runs of one piece meet by their lengths (also a soundness fix: a suffix at an unknown place has 0..M pieces); x [&] m in 0..m; n / b ≤ Q + R.
+- respond: out of memory → 2 errors, 4.3 s / 2.9 GB (folds compared by what they bind, not by rewriting; |items.#x.sku| = 6; induction does not rewrite what it needs no hypothesis for). calc 8.7 GB → 2.2 GB, 29 errors.
+- sexp now 4 errors; blur 7.
