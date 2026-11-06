@@ -459,9 +459,10 @@ same_narrowings :: proc(k: ^Kernel, a, b: []Narrowing) -> bool {
 	return true
 }
 
-// field_bounds: the values each integer field of root takes across the recursion a
-// call starts, by the linear bounds of a call (§5.6), sorted by field. A field
-// every call keeps holds what the call gives it — given, or its value. A counter,
+// field_bounds: the values each integer or run field of root takes across the
+// recursion a call starts, by the linear bounds of a call (§5.6), sorted by field. A
+// field every call keeps holds what the call gives it — given, or its value; a run
+// every call carves to its own suffix, the suffixes of what it gives. A counter,
 // each call carving it by a step α·y + g, α ≥ 0, from what the call gives it: the
 // least range that holds it and that every step keeps, a side without bound when a
 // step leaves it — proven by induction, each step taken in the range. Each step is
@@ -478,7 +479,9 @@ field_bounds :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Thr
 		is_given := slice.contains(given, b)
 		if !carved && !is_given do continue
 		color := binding_color(k, b)
-		if color == nil || !proven_in(k, color, family_term(.Int)) do continue
+		if color == nil do continue
+		integer := proven_in(k, color, family_term(.Int))
+		if !integer && !gives_scope(k, color) do continue
 		// what the call gives it: given without a value, an unknown of its color
 		start: Type
 		if is_given {
@@ -486,8 +489,14 @@ field_bounds :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Thr
 		} else do start = binding_type(k, b)
 		if moves.unread do continue
 		set: Type
-		if len(moves.at) == 0 do set = kept_image(k, start) or_continue
-		else do set = counter_image(k, steps.at[b], moves.at[:], start) or_continue
+		switch {
+		case !integer:
+			set = suffix_image(k, steps.at[b], moves.at[:], start, b.span) or_continue
+		case len(moves.at) == 0:
+			set = kept_image(k, start) or_continue
+		case:
+			set = counter_image(k, steps.at[b], moves.at[:], start) or_continue
+		}
 		// none: the call gives what its color does not hold, an error where it is written
 		narrowed := and_law(k, {color, set})
 		if included(k, color, set) || is_none(narrowed) do continue
@@ -501,6 +510,19 @@ field_bounds :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Thr
 kept_image :: proc(k: ^Kernel, start: Type) -> (set: Type, ok: bool) {
 	image := layout_image(k, start) or_return
 	return image, is_constant(image)
+}
+
+// suffix_image: what a run every call keeps or carves to its own suffix x from c
+// holds: one of the suffixes of what the call gives it, Suff(T), each binding in the
+// image of those of T (§5.3, §5.6): a run of them.
+suffix_image :: proc(k: ^Kernel, x: ^Unknown, moves: []Type, start: Type, span: syn.Span) -> (set: Type, ok: bool) {
+	for t in moves {
+		o, cuts := t.(^Operation)
+		if !cuts || o.op != .From do return
+		if u, own := o.args[0].(^Unknown); !own || !same_unknown(u, x) do return
+	}
+	image := kept_image(k, start) or_return
+	return runs_of(k, item_image(k, image) or_return, COUNTS, span), true
 }
 
 // counter_image: lo..hi, the least range holding start that each step α·y + g, α ≥ 0,
@@ -526,8 +548,9 @@ counter_image :: proc(k: ^Kernel, y: ^Unknown, moves: []Type, start: Type) -> (s
 // the fields are the unknowns at; unread, a carve of the field whose term reads what
 // is not a field nor outside root.
 Steps :: struct {
-	fields: map[^Binding]Field_Steps,
-	at:     map[^Binding]^Unknown,
+	fields:   map[^Binding]Field_Steps,
+	at:       map[^Binding]^Unknown,
+	patterns: [dynamic]^Pattern, // written in root: their covers name pieces of their targets
 }
 
 Field_Steps :: struct {
@@ -540,11 +563,13 @@ Field_Steps :: struct {
 written_steps :: proc(k: ^Kernel, root: ^Scope) -> (steps: ^Steps, ok: bool) {
 	if found, read := k.steps[root]; read do return found, found != nil
 	Written :: struct {
-		root:   ^Scope,
-		carves: [dynamic]^Carve,
+		root:     ^Scope,
+		carves:   [dynamic]^Carve,
+		patterns: [dynamic]^Pattern,
 	}
 	collect :: proc(t: Type, data: rawptr) -> bool {
 		w := (^Written)(data)
+		if p, is_pattern := t.(^Pattern); is_pattern do append(&w.patterns, p)
 		c, is_carve := t.(^Carve)
 		if !is_carve do return false
 		#partial switch target in c.target {
@@ -559,6 +584,7 @@ written_steps :: proc(k: ^Kernel, root: ^Scope) -> (steps: ^Steps, ok: bool) {
 	seen := make(map[^Scope]bool)
 	for b in root.bindings do if written_any(b.color, collect, &written, &seen) || written_any(b.value, collect, &written, &seen) do break
 	steps = new(Steps)
+	steps.patterns = written.patterns
 	k.steps[root] = nil
 	for b in root.bindings {
 		if b.kind != .Push && b.kind != .Pull do continue
@@ -573,7 +599,7 @@ written_steps :: proc(k: ^Kernel, root: ^Scope) -> (steps: ^Steps, ok: bool) {
 		moves := steps.fields[b]
 		if a.pull || a.handler || len(a.carves) > 0 || a.otherwise != nil {
 			moves.unread = true
-		} else if t, read := written_step(k, a.value, root, steps.at); read {
+		} else if t, read := written_step(k, a.value, root, steps); read {
 			// a carve that keeps it is no step
 			if u, kept := t.(^Unknown); !kept || !same_unknown(u, steps.at[b]) do append(&moves.at, t)
 		} else do moves.unread = true
@@ -589,20 +615,36 @@ field_named :: proc(root: ^Scope, name: string) -> (^Binding, bool) {
 	return nil, false
 }
 
-// written_step: the term t written in root, where each field is its unknown of at:
-// a constant, a field, a binding outside root, an operator on them.
-written_step :: proc(k: ^Kernel, t: Type, root: ^Scope, at: map[^Binding]^Unknown) -> (out: Type, ok: bool) {
+// written_step: the term t written in root, where each field is its unknown of
+// steps.at: a constant, a field, a binding outside root, a piece a cover names of
+// the target of its pattern (§6), an operator on them.
+written_step :: proc(k: ^Kernel, t: Type, root: ^Scope, steps: ^Steps) -> (out: Type, ok: bool) {
 	#partial switch v in t {
 	case Int, Char, Bool, Real:
 		return t, true
 	case ^Name:
-		if u, field := at[v.binding]; field do return u, true
-		for s := v.binding.scope; s != nil; s = s.parent do if s == root do return
+		if u, field := steps.at[v.binding]; field do return u, true
+		for s := v.binding.scope; s != nil; s = s.parent do if s == root do return covered_piece(k, v.binding, root, steps)
 		return normal(k, t), true
 	case ^Operation:
 		args := make([]Type, len(v.args))
-		for a, i in v.args do args[i] = written_step(k, a, root, at) or_return
+		for a, i in v.args do args[i] = written_step(k, a, root, steps) or_return
 		return op(k, v.op, ..args), true
+	}
+	return
+}
+
+// covered_piece: the piece of the target of a pattern written in root that a place
+// of one of its covers names (destructuring, §6): x.#k, x.name, or x from k for its
+// last run, x the target as written.
+covered_piece :: proc(k: ^Kernel, place: ^Binding, root: ^Scope, steps: ^Steps) -> (out: Type, ok: bool) {
+	for p in steps.patterns do for b in p.branches {
+		cover, structural := b.cover.(^Scope)
+		if !structural || place.scope != cover do continue
+		target := written_step(k, p.target, root, steps) or_return
+		piece, named := cover_pieces(k, b, target)[place]
+		if _, invalid := piece.(Invalid); invalid do return
+		return piece, named
 	}
 	return
 }
