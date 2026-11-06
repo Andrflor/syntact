@@ -661,7 +661,8 @@ one_affine :: proc(k: ^Kernel, t: Type) -> (u: ^Unknown, a: i128, b: Type, ok: b
 
 // euclid_image: a = (a / b)·b + a % b (§4.5), read where a term reads a quotient or a
 // remainder — the image keeps what relates them. image is the image of the term as
-// it is. For b ≥ 1, and n ≥ 0 for the first two:
+// it is. The first quotient the laws read is read; the image of that reading reads
+// the others, each once. For b ≥ 1, and n ≥ 0 for the first two:
 //   n / c, c constant: n is c·q + r, q = n / c, r in 0..c - 1, unknowns of their own;
 //   n % b: an unknown in 0..b - 1 (in -(b - 1)..b - 1 when n may be negative);
 //   (b·Q + R) / b = Q + R / b (+ 1 when n < 0), R ≥ 0: the polynomial n divided by b.
@@ -697,9 +698,9 @@ euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 				r := new_unknown(k, nil)
 				top := op(k, .Sub, b, Int(1))
 				r.layout = range_law(k, natural ? Int(0) : op(k, .Neg, top), top, .Int, {})
-				out = related(k, t, out, append_read(nil, d, r))
+				return related(k, t, out, append_read(nil, d, r))
 			} else if whole, divided := divided_by(k, n, b, natural); divided {
-				out = related(k, t, out, append_read(nil, d, whole))
+				return related(k, t, out, append_read(nil, d, whole))
 			}
 			continue
 		}
@@ -717,7 +718,7 @@ euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 		} else if o, is_op := n.(^Operation); is_op {
 			reading = append_read(reading, o, whole)
 		} else do continue
-		out = related(k, t, out, reading)
+		return related(k, t, out, reading)
 	}
 	return out
 }
