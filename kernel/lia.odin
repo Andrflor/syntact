@@ -280,7 +280,8 @@ extremes :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128)) {
 			bound := floor_div(-r.constant, c)
 			if h, has := hi.?; !has || bound < h do hi = bound
 		} else {
-			bound := -floor_div(r.constant, -c)
+			// v ≥ ⌈constant / −c⌉
+			bound := -floor_div(-r.constant, -c)
 			if l, has := lo.?; !has || bound > l do lo = bound
 		}
 	}

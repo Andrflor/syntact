@@ -295,9 +295,10 @@ instances :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 
 // call_range: the integers a call that stays gives: the least solution of its
 // definition read on types (§5.6). Along the field u its calls move, each call one
-// value y of the type T(s(u)), the step is α·y + β, α ≥ 0 a constant; T(u) lies
-// between L(u) and H(u): H(u) = hi(β) + α·H(s(u)), hi(base) where the bases take u —
-// the maps compose along the orbit of u, a fold its laws close —, L likewise.
+// value y of the type T(s(u)), the step gives α·y + β, α ≥ 0 a constant — one of
+// several, a pattern —; T(u) lies between L(u) and H(u): H(u) = hi(β) + α·H(s(u)),
+// hi(base) where the bases take u — the maps compose along the orbit of u, a fold
+// its laws close —, L likewise.
 call_range :: proc(k: ^Kernel, call: ^Collapse) -> (lo, hi: Type, ok: bool) {
 	s := call.target.(^Scope) or_return
 	key, through := call_key(s), through_of(k, s)
@@ -325,9 +326,34 @@ call_range :: proc(k: ^Kernel, call: ^Collapse) -> (lo, hi: Type, ok: bool) {
 		moved = next[u]
 		r = rewriting_call(r, c, y)
 	}
-	alpha, beta := affine_in(k, rewrite(k, step, r), y) or_return
-	a := alpha.(Int) or_return
-	if a < 0 || !solved(beta, root) do return
+	// the step gives one of its products (§6), each α·y + β, α ≥ 0 a constant: the
+	// type of the call is in the union of their images
+	leaves := make([dynamic]Product)
+	products(k, rewrite(k, step, r), &leaves)
+	a_lo, a_hi: i128 = max(i128), 0
+	qlo, qhi: Maybe(i128)
+	q_nonnegative, p_nonnegative := true, true
+	for leaf in leaves {
+		if is_none(leaf.term) do continue
+		alpha, beta := affine_in(k, read_in(k, leaf, leaf.term), y) or_return
+		a := i128(alpha.(Int) or_return)
+		if a < 0 || !solved(beta, root) do return
+		a_lo, a_hi = min(a_lo, a), max(a_hi, a)
+		l, h := extremes(k, beta)
+		if x, has := h.?; has {
+			if q, known := qhi.?; !known || x > q do qhi = x
+			q_nonnegative &&= x >= 0
+		} else {
+			qhi, a_hi = nil, -1
+		}
+		if x, has := l.?; has {
+			if q, known := qlo.?; !known || x < q do qlo = x
+			p_nonnegative &&= x >= 0
+		} else {
+			qlo, a_lo = nil, -1
+		}
+	}
+	if a_hi < 0 && a_lo < 0 do return
 	at := values_of_call(k, eq, s)
 	// the fold of the maps h ↦ q + α·h along the orbit of u, from where the call is,
 	// until the bases take it: Aₙ·b + Bₙ, A: 1 ↦ α·A, B: 0 ↦ B + q·A
@@ -344,10 +370,15 @@ call_range :: proc(k: ^Kernel, call: ^Collapse) -> (lo, hi: Type, ok: bool) {
 		f.effects, f.value = None{}, op(k, .Add, op(k, .Mul, A, Int(b)), B)
 		return folded(k, f)
 	}
+	// the maps of different α bound by one: α·h ≤ α_max·h where h ≥ 0 — the bases and
+	// every β nonnegative, h is —; likewise α_min from below
 	blo, bhi := extremes(k, base)
-	qlo, qhi := extremes(k, beta)
-	if b, has := blo.?; has do if q, has_q := qlo.?; has_q do lo = rewrite(k, along(k, p, u, stop, moved, i128(a), b, q), at)
-	if b, has := bhi.?; has do if q, has_q := qhi.?; has_q do hi = rewrite(k, along(k, p, u, stop, moved, i128(a), b, q), at)
+	if b, has := blo.?; has && a_lo >= 0 && (a_lo == a_hi || b >= 0 && p_nonnegative) {
+		if q, has_q := qlo.?; has_q do lo = rewrite(k, along(k, p, u, stop, moved, a_lo, b, q), at)
+	}
+	if b, has := bhi.?; has && a_hi >= 0 && (a_lo == a_hi || b >= 0 && q_nonnegative) {
+		if q, has_q := qhi.?; has_q do hi = rewrite(k, along(k, p, u, stop, moved, a_hi, b, q), at)
+	}
 	return lo, hi, lo != nil || hi != nil
 }
 
