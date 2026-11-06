@@ -38,13 +38,18 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if _, read := x.(^Operation); read && !is_constant(c) {
 		if set, known := values(k, x); known && included(k, set, c) do return Bool(true)
 	}
-	// x in lo..hi, its ends terms over unknowns: x - lo in 0.. and hi - x in 0.., sets of
-	// constants the image of each decides (§7)
-	if r, is_range := c.(^Range); is_range && !is_constant(c) && r.family == .Int && !is_constant(x) {
-		if f, known := family_of(k, x); known && (f == .Int || f == .Count) {
-			above := r.lo == nil || is_bool(in_law(k, op(k, .Sub, x, r.lo), COUNTS), true)
-			below := r.hi == nil || is_bool(in_law(k, op(k, .Sub, r.hi, x), COUNTS), true)
-			if above && below do return Bool(true)
+	// an integer term in a range lo..hi, its ends constants or terms: the branch with
+	// x out of it is empty, by the theory of the integers (integers.odin)
+	if !is_constant(x) {
+		r, is_range := c.(^Range)
+		if !is_range && is_constant(c) {
+			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) do r, is_range = range_law(k, maybe_int(lo), maybe_int(hi), .Int, {}).(^Range)
+		}
+		if is_range && (r.family == .Int || r.family == .Any) {
+			// its image already within: the layouts distribute (§7); otherwise what relates
+			// them, by the theory
+			if is_constant(c) && !relates(k, x) do if image, read := layout_image(k, x); read && is_constant(image) && included(k, image, c) do return Bool(true)
+			if f, known := family_of(k, x); known && (f == .Int || f == .Count) && in_range(k, x, r.lo, r.hi) do return Bool(true)
 		}
 	}
 	// a recursive call, by induction on its equation: in c, or in ~c — then not in c (§4.1)
