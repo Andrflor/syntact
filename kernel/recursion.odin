@@ -669,6 +669,10 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		ki, i = rewrite(k, ki, rewriting(nil, i, along)), along
 	}
 	at := proc(k: ^Kernel, ki: Type, i: ^Unknown, t: Type) -> Type {return rewrite(k, ki, rewriting(nil, i, t))}
+	// the points before n are out of B, kₙ in it: n the least i where kᵢ is in B.
+	// Solved, n says it through the range of i; a μ that stays, through the points
+	going, ending := ki, at(k, ki, i, n)
+	if _, unsolved := n.(^Least); unsolved do going, ending = and_law(k, {ki, not_law(k, stop)}), and_law(k, {ending, stop})
 	feeds := false
 	for e in pre do feeds ||= e.answer != nil && reads(k, after, e.answer)
 	// states carried by the call: the fold goes down
@@ -680,7 +684,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		f := new(Fold)
 		f.index, f.span = i, p.span
 		f.start, f.next, f.stop = op(k, .Sub, n, Int(1)), op(k, .Sub, i, Int(1)), new_range(nil, Int(-1), .Int)
-		inside := rewriting(nil, u, ki)
+		inside := rewriting(nil, u, going)
 		states := make([]^Unknown, d)
 		inits := make([]Type, d)
 		for &z, j in states {
@@ -701,7 +705,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		down.index, down.span = new_unknown(k, nil), p.span
 		down.index.layout = i.layout
 		down.start, down.next, down.stop = Int(0), op(k, .Add, down.index, Int(1)), new_range(n, nil, .Int)
-		down.effects, down.value = rewrite(k, wrap_effects(pre, None{}), rewriting(nil, u, at(k, ki, i, down.index))), None{}
+		down.effects, down.value = rewrite(k, wrap_effects(pre, None{}), rewriting(nil, u, at(k, going, i, down.index))), None{}
 		return wrapped(folded(k, down).(^Effect), nil, up), true
 	}
 	// v = (α·y + β) % m, m > 0, all ≥ 0: affine modulo m, the maps compose modulo m
@@ -736,7 +740,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	along, at_end: Rewrite
 	if closed {
 		f.index, f.start, f.next, f.stop = i, Int(0), op(k, .Add, i, Int(1)), new_range(n, nil, .Int)
-		along, at_end = rewriting(carry, u, ki), rewriting(carry, u, at(k, ki, i, n))
+		along, at_end = rewriting(carry, u, going), rewriting(carry, u, ending)
 	} else {
 		f.index, f.start, f.next, f.stop = x, u, rewrite(k, step, rewriting(nil, u, x)), stop
 		along, at_end = rewriting(carry, u, x), rewriting(carry, u, narrowing(x, and_law(k, {layout_of(k, u), stop})))

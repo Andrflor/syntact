@@ -63,7 +63,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		}
 		if verdict, read := built_in(k, x, s); read do return verdict
 		if carved_in(k, x, s) do return Bool(true)
-		if runs_in(k, x, s) do return Bool(true)
+		if verdict, read := runs_in(k, x, s); read do if decided, is_bool := verdict.(Bool); is_bool do return decided
 		return admits(k, x, s)
 	}
 	if o, ok := c.(^Operation); ok && o.op == .Mul && of_values(o.args[0]) do return repeated_in(k, x, o.args[0], o.args[1])
@@ -527,18 +527,23 @@ run_form :: proc(k: ^Kernel, s: ^Scope) -> (fixed: int, colors: []Type, counts: 
 	return fixed, found[:], counts, true
 }
 
-// runs_in: x, a run, in a shape of places then runs of pieces: true when each of
-// its bindings is in the colors of the shape and its length is one the shape
-// admits — read on what x may be (§5.3).
-runs_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> bool {
+// runs_in: x, a run, in a shape of places then runs of pieces: when each of its
+// bindings is in the colors of the shape, x is in it when its length is one the
+// shape admits (§5.3) — read on what x may be, or on its length as a term.
+runs_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) {
 	fixed, colors, counts := run_form(k, s) or_return
 	set := values(k, x) or_return
-	if _, same_scope := set.(^Scope); same_scope && set == Type(s) do return false
+	if _, same_scope := set.(^Scope); same_scope && set == Type(s) do return
 	items := item_image(k, set) or_return
-	length := length_image(k, set) or_return
-	for c in colors do if !included(k, items, c) do return false
-	if counts == nil do return included(k, length, range_law(k, Int(i128(fixed)), nil, .Int, s.span))
-	return included(k, exact_law(k, .Sub, {length, Int(i128(fixed))}, s.span), layout_image(k, counts) or_return)
+	for c in colors do if !included(k, items, c) do return
+	if length, known := length_image(k, set); known {
+		if counts == nil && included(k, length, range_law(k, Int(i128(fixed)), nil, .Int, s.span)) do return Bool(true), true
+		if counts != nil {
+			if admitted, imaged := layout_image(k, counts); imaged && included(k, exact_law(k, .Sub, {length, Int(i128(fixed))}, s.span), admitted) do return Bool(true), true
+		}
+	}
+	n := exact_law(k, .Sub, {run_law(k, .Length, {x}, s.span), Int(i128(fixed))}, s.span)
+	return in_law(k, n, counts == nil ? COUNTS : counts), true
 }
 
 // fold_induction: a fold is in c when the states its value reads start in c, stay

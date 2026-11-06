@@ -1486,6 +1486,21 @@ suffix :: proc(k: ^Kernel, layout: Type, at: Type) -> (out: Type, ok: bool) {
 	case ^Scope:
 		// runs of any number of pieces hold their own suffixes
 		if _, m, repeats := layout_pieces(k, v); repeats && same(k, m, COUNTS) do return v, true
+		// a run of values: its suffix at each place k may be (§4.5: x from k distributes
+		// over the values of k)
+		if xs := run_data(k, v); !is_shape(k, v) {
+			for x in xs do if x.kind != .Push do return
+			lo, hi := 0, len(xs)
+			if image, known := layout_image(k, at); known {
+				if l, h, bounded := int_bounds(k, image); bounded {
+					if x, has := l.?; has do lo = int(clamp(x, 0, i128(len(xs) + 1)))
+					if x, has := h.?; has do hi = int(clamp(x, -1, i128(len(xs))))
+				}
+			}
+			parts := make([dynamic]Type)
+			for i in lo ..= hi do append(&parts, run_scope(k, xs[i:]))
+			return or_law(k, parts[:]), true
+		}
 		shape := v
 		if recursive(v) do shape = arden(k, v) or_return
 		if !is_shape(k, shape) do return
@@ -1684,6 +1699,8 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		return repeated(k, piece, n, o.span), true
 	}
 	if s, known := given(k, o.args[0]).(^Scope); known {
+		// x from k: the runs of what follows the place k
+		if o.op == .From do return suffix(k, s, o.args[1])
 		if o.op != .Item && o.op != .Length do return nil, false
 		// its bindings, and those of the runs it expands; its length, the sum (§5.3)
 		xs := run_data(k, s)
@@ -1724,6 +1741,16 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		return image, true
 	}
 	if o.op == .Item {
+		// (t & S).#k: t where it is in S (§4.2): what t holds at k, within what S
+		// holds there
+		if meet, narrowed := given(k, o.args[0]).(^And); narrowed {
+			if t, set, one := value_in_meet(k, meet); one {
+				image := layout_image(k, run_law(k, .Item, {t, o.args[1]}, o.span, true)) or_return
+				held, read := item_image(k, set)
+				if at, placed_at := o.args[1].(Int); placed_at do held, read = place_image(k, set, int(at))
+				return read ? and_law(k, {image, held}) : image, true
+			}
+		}
 		if set, known := values(k, o.args[0]); known {
 			// a known place: what the layout holds there (§5.3)
 			if at, placed_at := o.args[1].(Int); placed_at do if c, read := place_image(k, set, int(at)); read do return c, true
