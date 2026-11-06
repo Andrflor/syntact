@@ -50,7 +50,6 @@ Kernel :: struct {
 	valued:     map[rawptr]Type, // what a shared node may hold, once read (size.odin)
 	generics:   [dynamic]Generic, // the solutions of equations where what is given is unknown, once (recursion.odin)
 	equations:  [dynamic]^Call_Equation, // the equations calls read, where what they carve is unknown, once (recursion.odin)
-	steps:      map[^Scope]^Steps, // the steps the carves of a recursive scope give its fields, as written, once (recursion.odin)
 	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file
