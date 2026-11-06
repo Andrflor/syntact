@@ -315,14 +315,17 @@ derive :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, span: syn.Span
 }
 
 // carved_copy: the copy of the scope s carves, uncarved, with the changes of s and
-// these.
+// these: a shared node, built once (intern.odin).
 carved_copy :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope {
-	root := s.carved != nil ? s.carved : s
+	root := origin(s)
 	merged := make(map[^Binding]Type)
 	for b, v in s.changes do merged[b] = v
 	for b, v in changes do merged[s.carved != nil ? b.source : b] = v
+	key := carve_key(root, merged)
+	if c := built_before(key); c != nil do return c.(^Scope)
 	c := copy_scope(k, root, merged)
 	c.carved, c.changes = root, merged
+	put(key, c)
 	return c
 }
 

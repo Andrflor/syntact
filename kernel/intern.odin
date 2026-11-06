@@ -9,6 +9,10 @@ package kernel
 // term it holds: a child is shared too, or a node of its own (an unknown, a scope,
 // a term written in the source). A term is not changed once built; a term written
 // in the source, which holds where it is, is a node of its own (written).
+//
+// A carve is a node too (§5.3): known by the scope it carves and the value it gives
+// each binding it changes. Built twice, it is the same scope, whose bindings are
+// typed once.
 
 Shape :: enum u8 {
 	Or,
@@ -17,12 +21,14 @@ Shape :: enum u8 {
 	Is,
 	Range,
 	Operation,
+	Carve,
 }
 
 Key :: struct {
 	shape:    Shape,
 	op:       u8, // the operator of an operation; the family of a range
-	children: []Type,
+	children: []Type, // a carve: the scope it carves, then the values it gives
+	changed:  []^Binding, // a carve: the bindings it changes, in their order
 }
 
 // Interned: the shared nodes, by their keys, in an open table: nil is an empty slot.
@@ -39,20 +45,52 @@ interned: ^Interned
 
 // intern: the node of this key: the one built before, or a new one.
 intern :: proc(key: Key) -> Type {
+	if node := built_before(key); node != nil do return node
+	node := build_node(key)
+	put(key, node)
+	return node
+}
+
+// built_before: the node of this key built before; nil when there is none.
+built_before :: proc(key: Key) -> Type {
+	if interned == nil do return nil
+	table := interned
+	if len(table.slots) == 0 do return nil
+	mask := len(table.slots) - 1
+	at := int(hash_key(key)) & mask
+	for table.slots[at] != nil {
+		if is_key(table.slots[at], key) do return table.slots[at]
+		at = (at + 1) & mask
+	}
+	return nil
+}
+
+// put: node, new, under its key.
+put :: proc(key: Key, node: Type) {
 	if interned == nil do interned = new(Interned)
 	table := interned
 	if (table.count + 1) * 4 > len(table.slots) * 3 do grow(table)
 	mask := len(table.slots) - 1
 	at := int(hash_key(key)) & mask
-	room: [2]Type
-	for table.slots[at] != nil {
-		if found, ok := key_of(table.slots[at], &room); ok && same_key(found, key) do return table.slots[at]
-		at = (at + 1) & mask
-	}
-	node := build_node(key)
+	for table.slots[at] != nil do at = (at + 1) & mask
 	table.slots[at] = node
 	table.count += 1
-	return node
+}
+
+// is_key: the node is the one of this key.
+is_key :: proc(node: Type, key: Key) -> bool {
+	if key.shape == .Carve {
+		s, is_scope := node.(^Scope)
+		if !is_scope || s.carved != key.children[0] || len(s.changes) != len(key.changed) do return false
+		for b, i in key.changed {
+			v, changed := s.changes[b]
+			if !changed || v != key.children[i + 1] do return false
+		}
+		return true
+	}
+	room: [2]Type
+	found, ok := key_of(node, &room)
+	return ok && same_key(found, key)
 }
 
 grow :: proc(table: ^Interned) {
@@ -62,11 +100,21 @@ grow :: proc(table: ^Interned) {
 	room: [2]Type
 	for t in old {
 		if t == nil do continue
-		key, _ := key_of(t, &room)
+		key, is_term := key_of(t, &room)
+		if !is_term do key = carve_key(t.(^Scope).carved, t.(^Scope).changes)
 		at := int(hash_key(key)) & mask
 		for table.slots[at] != nil do at = (at + 1) & mask
 		table.slots[at] = t
 	}
+}
+
+// carve_key: the key of the carve of root that gives these bindings these values.
+carve_key :: proc(root: ^Scope, changes: map[^Binding]Type) -> Key {
+	changed := in_order(changes)
+	children := make([]Type, len(changed) + 1)
+	children[0] = root
+	for b, i in changed do children[i + 1] = changes[b]
+	return {shape = .Carve, children = children, changed = changed}
 }
 
 // key_of: the key of a shared node; its children in the room given, for one that
@@ -74,20 +122,20 @@ grow :: proc(table: ^Interned) {
 key_of :: proc(t: Type, room: ^[2]Type) -> (key: Key, ok: bool) {
 	#partial switch v in t {
 	case ^Or:
-		return {.Or, 0, v.terms}, true
+		return {shape = .Or, children = v.terms}, true
 	case ^And:
-		return {.And, 0, v.terms}, true
+		return {shape = .And, children = v.terms}, true
 	case ^Not:
 		room[0] = v.term
-		return {.Not, 0, room[:1]}, true
+		return {shape = .Not, children = room[:1]}, true
 	case ^Is:
 		room[0] = v.term
-		return {.Is, 0, room[:1]}, true
+		return {shape = .Is, children = room[:1]}, true
 	case ^Range:
 		room^ = {v.lo, v.hi}
-		return {.Range, u8(v.family), room[:]}, true
+		return {shape = .Range, op = u8(v.family), children = room[:]}, true
 	case ^Operation:
-		return {.Operation, u8(v.op), v.args}, true
+		return {shape = .Operation, op = u8(v.op), children = v.args}, true
 	}
 	return {}, false
 }
@@ -98,9 +146,10 @@ same_key :: proc(a, b: Key) -> bool {
 	return true
 }
 
-// build_node: a new node of this key, its children its own.
+// build_node: a new node of this key, its children its own. A carve is built by
+// the kernel (carved_copy).
 build_node :: proc(key: Key) -> Type {
-	switch key.shape {
+	#partial switch key.shape {
 	case .Or:
 		o := new(Or)
 		o.terms = clone_types(key.children)
@@ -132,6 +181,7 @@ build_node :: proc(key: Key) -> Type {
 hash_key :: proc(key: Key) -> u64 {
 	h := mix(u64(key.shape) << 8 | u64(key.op), 0)
 	for c in key.children do h = mix(h, hash_term(c))
+	for b in key.changed do h = mix(h, u64(uintptr(b)))
 	return h
 }
 
