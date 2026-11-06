@@ -284,6 +284,16 @@ read_of :: proc(t: Type) -> Read {
 call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool {
 	s := call.target.(^Scope) or_return
 	eq := equation_of(k, origin(s), call_key(s)) or_return
+	if eq.term == nil {
+		// no equation where what the call carves is unknown (a hole the carve fills):
+		// the call is its production at the values its carve gives (§5.3), its calls
+		// the hypothesis meanwhile
+		p := first_production(k, s) or_return
+		if p.state == .In_Progress do return false
+		eq.reading = true
+		defer eq.reading = false
+		return holds_in(k, binding_type(k, p), c, fields, eq.root)
+	}
 	for x in k.induced do if x.equation == eq.generic && x.fields == fields && same(k, x.set, c) do return x.proven
 	at := len(k.induced)
 	append(&k.induced, Induced{eq.generic, c, fields, false})

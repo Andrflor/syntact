@@ -88,7 +88,7 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 		if eq.solution != nil do return renewed(k, solution_at(k, eq, s), &run)
 		// the definition is an equality: at the values the call gives, an equation
 		// that calls nothing is the value (§7); one that still calls stays the call
-		if v := equation_at(k, eq, s); solved(v, root) && !holds_invalid(v) do return renewed(k, v, &run)
+		if v := equation_at(k, eq, s); v != nil && solved(v, root) && !holds_invalid(v) do return renewed(k, v, &run)
 	}
 	out := new(Collapse)
 	out.target, out.recursive, out.span = s, true, span

@@ -97,6 +97,7 @@ solution_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
 
 // equation_at: the equation at the values a carve of root gives its fields.
 equation_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
+	if eq.term == nil do return nil
 	r: Rewrite
 	for b, u in eq.params do r = rewriting(r, u, b in s.changes ? s.changes[b] : binding_type(k, holding(s, b)))
 	// its calls are the hypothesis meanwhile: read as calls, never at their values
@@ -109,6 +110,7 @@ equation_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
 // leave a call of it.
 solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	root := eq.root
+	if eq.term == nil do return nil
 	if solved(eq.term, root) do return eq.term
 	calls := calls_in(k, eq.term, root)
 	if len(calls) != 1 do return nil
