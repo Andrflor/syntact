@@ -119,3 +119,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - Reals are a field in the ring (§4.5); affine fold states bounded by their bound folds; parser fix for `{{} -> a -> b}`; orbit points before μ out of the base.
 - particles 8 → 5, sexp 22 → 18, words 50.
 - Round 5 launched: sexp's digit run bounded by the language of the text gen builds (Arden); f32 rounding bounds at format extremes (particles); words gaps and compile time.
+
+## Found: 2ab6976 is unsound — 03:00 UTC
+- `depths{max -> 8  d -> 4}!` (= 18) types as `⟳(…; y: 0 ↦ none)` from 2ab6976 on (18 at 4800611). bintrees still prints right on master, but the law is wrong.
+- If the fix is not in by morning: `git revert 2ab6976` restores soundness (it only costs sexp/words `.#` places).
+- Field-bounds agent (round 4a) is fixing that law, then landing its one-reading commits (blur 4→1, words 50→38, calc 32→29, but lru/graph/scene surface more checks and respond ran out of memory after rebase — must be fixed before push).
