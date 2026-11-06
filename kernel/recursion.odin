@@ -114,9 +114,9 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	decides := false
 	for _, v in s.changes do decides ||= is_constant(v)
 	if decides && s != root {
-		if v, eq, read := production_at(k, out); read {
-			eq.read = false
-			if solved(v, root) do return v
+		if v, rest, eq, read := production_known(k, out); read {
+			defer eq.read = false
+			if solved(v, root) do return rewrite(k, v, rest)
 		}
 	}
 	// a recursion over what a fold builds is the fold of the recursion
@@ -334,16 +334,35 @@ at_values :: proc(k: ^Kernel, eq: ^Call_Equation, given: map[^Binding]Type, r: R
 // carve gives (§5.6, §6). The equation is read until the caller closes it (eq.read):
 // meanwhile its calls are the hypothesis. Not read while it is already.
 production_at :: proc(k: ^Kernel, c: ^Collapse) -> (v: Type, eq: ^Call_Equation, ok: bool) {
-	s, is_scope := c.target.(^Scope)
-	if !is_scope || !c.recursive || reading(k, origin(s)) do return
-	eq = equation_of(k, c) or_return
-	eq.read = true
-	v = rewrite(k, eq.equation, at_values(k, eq, s.changes))
+	rest: Rewrite
+	v, rest, eq = production_known(k, c) or_return
+	v = rewrite(k, v, rest)
 	if holds_invalid(v) || has_effect(v) {
 		eq.read = false
 		return nil, nil, false
 	}
 	return v, eq, true
+}
+
+// production_known: the production of the equation the call c reads at the known
+// values its carve gives — the constants, which decide its patterns —, and rest, the
+// other values: a term is read into the production after, so that a pattern on it is
+// not taken one binding at a time (§5.6: the equation is read where what is carved is
+// unknown, then solved).
+production_known :: proc(k: ^Kernel, c: ^Collapse) -> (v: Type, rest: Rewrite, eq: ^Call_Equation, ok: bool) {
+	s, is_scope := c.target.(^Scope)
+	if !is_scope || !c.recursive || reading(k, origin(s)) do return
+	eq = equation_of(k, c) or_return
+	eq.read = true
+	known := make([dynamic]Rewriting)
+	others := make([dynamic]Rewriting)
+	for x in at_values(k, eq, s.changes) do append(is_constant(x.term) ? &known : &others, x)
+	v = rewrite(k, eq.equation, known[:])
+	if holds_invalid(v) || has_effect(v) {
+		eq.read = false
+		return nil, nil, nil, false
+	}
+	return v, others[:], eq, true
 }
 
 // Call_Equation: the equation a call of root reads: root's production where the bindings
