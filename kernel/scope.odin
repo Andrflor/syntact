@@ -124,7 +124,7 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 		// values that reach a product without the field
 		branches := make([]Branch, len(v.branches))
 		for b, i in v.branches do branches[i] = with_product(b, access_law(k, b.product, a))
-		return pattern_law(k, branching(v, branches))
+		return entered(k, v, branches)
 	case Invalid:
 		return target
 	case None:
@@ -525,7 +525,7 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 	case ^Pattern:
 		p := new(Pattern)
 		p^ = v^
-		p.normal = false // what is copied is computed again
+		p.normal, p.reached = false, false // what is copied is computed again
 		p.target = copy_term(k, m, v.target, scope)
 		p.branches = slice.clone(v.branches)
 		for &b in p.branches {
@@ -1252,7 +1252,7 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 			at[0] = b.product
 			branches[i] = with_product(b, is_none(b.product) ? b.product : run_law(k, o, at, span, checked))
 		}
-		return pattern_law(k, branching(p, branches))
+		return entered(k, p, branches)
 	}
 	if !gives_scope(k, x) && !is_pending_call(k, x) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a run, not %s", operator_text[o], print_type(x)))
 	from, is_from := x.(^Operation)

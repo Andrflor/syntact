@@ -38,7 +38,7 @@ round_law :: proc(k: ^Kernel, t: Type, f: Real_Format, span: syn.Span) -> Type {
 	case ^Pattern:
 		branches := make([]Branch, len(v.branches))
 		for b, i in v.branches do branches[i] = with_product(b, round_law(k, b.product, f, span))
-		return pattern_law(k, branching(v, branches))
+		return entered(k, v, branches)
 	case ^Operation:
 		if v.op == .Round && holds_all(f, rounded_format(v)) do return t
 	}

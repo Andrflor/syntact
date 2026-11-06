@@ -118,7 +118,7 @@ sequence :: proc(k: ^Kernel, t: Type, parts: []Type, law: Law) -> Type {
 				rest[i] = b.product
 				branches[j] = with_product(b, sequence(k, t, rest, law))
 			}
-			return pattern_law(k, branching(v, branches))
+			return entered(k, v, branches)
 		}
 	}
 	return law(k, t, parts)
@@ -163,7 +163,7 @@ given :: proc(k: ^Kernel, t: Type) -> Type {
 		if !has_effect(v) do return t
 		branches := make([]Branch, len(v.branches))
 		for b, j in v.branches do branches[j] = with_product(b, given(k, b.product))
-		return pattern_law(k, branching(v, branches))
+		return entered(k, v, branches)
 	}
 	return t
 }
@@ -214,7 +214,7 @@ renewed :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
 		if !has_effect(v) do return t
 		branches := make([]Branch, len(v.branches))
 		for b, j in v.branches do branches[j] = with_product(b, renewed(k, b.product, run))
-		return pattern_law(k, branching(v, branches))
+		return entered(k, v, branches)
 	}
 	return t
 }

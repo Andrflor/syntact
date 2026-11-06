@@ -74,9 +74,46 @@ pattern_through :: proc(k: ^Kernel, v: Type, p: ^Pattern, outer: Rewrite) -> Typ
 	if q, is_pattern := v.(^Pattern); is_pattern && !has_effect(q) {
 		branches := make([]Branch, len(q.branches))
 		for b, i in q.branches do branches[i] = with_product(b, pattern_on(k, b.product, p, outer))
-		return pattern_law(k, branching(q, branches))
+		return entered(k, q, branches)
 	}
 	return pattern_on(k, v, p, outer)
+}
+
+// entered: the pattern p, an operation entered in its branches: a pattern gives one of
+// its products, op(t ? {c -> q …}) = t ? {c -> op(q) …} (§6). Its target and its covers
+// stay, so does the reach of each branch, which its normal form keeps: each product is
+// read where that reach holds, rewritten as it narrows. A pattern not read on its
+// target yet is read there.
+entered :: proc(k: ^Kernel, p: ^Pattern, branches: []Branch) -> Type {
+	if !p.reached do return pattern_law(k, branching(p, branches))
+	for &b in branches do b.product = rewrite(k, b.product, b.reach)
+	out := new(Pattern)
+	out^ = p^
+	out.normal, out.branches = false, branches
+	return one_product(k, out)
+}
+
+// one_product: p, each branch read where its reach holds — its product as its reach
+// rewrites it. Where every value is taken, t ? {c -> q  -> q} = q, and so is the same
+// product read in each branch (§6); otherwise p, whose values a check proves taken
+// (check.odin).
+one_product :: proc(k: ^Kernel, p: ^Pattern) -> Type {
+	n := len(p.branches)
+	if n == 0 || p.branches[n - 1].cover != nil do return p
+	all_same := true
+	for b in p.branches[1:] do all_same &&= same(k, b.product, p.branches[0].product)
+	if all_same do return p.branches[0].product
+	if whole, agrees := agreeing(k, p.branches); agrees do return whole
+	return p
+}
+
+// branch_reaches: the reach of each branch of p, which its normal form keeps; read on
+// its target and its covers when p is not read on them yet (§6).
+branch_reaches :: proc(k: ^Kernel, p: ^Pattern) -> (out: [dynamic]Reach, rest: Type, invalid: Type) {
+	if !p.reached do return reaches(k, p.target, p.branches)
+	out = make([dynamic]Reach, 0, len(p.branches))
+	for b, i in p.branches do append(&out, Reach{i, b.cover, b.reach, b.cover == nil, b.unsaid})
+	return out, p.rest, nil
 }
 
 // pattern_over: the pattern p on its target, not read through a call.
@@ -93,40 +130,28 @@ pattern_over :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite) -> T
 	reached, rest, invalid := reaches(k, target, p.branches)
 	if invalid != nil do return invalid
 	out := make([dynamic]Branch)
-	rewrites := make([dynamic]Rewrite)
 	for r in reached {
 		b := p.branches[r.branch]
 		product := branch_product(k, b, r.rewrite, target, outer)
 		if r.all && len(out) == 0 do return product
-		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
-		append(&rewrites, r.rewrite)
+		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span, reach = r.rewrite, unsaid = r.unsaid})
 	}
-	// taken by every value: t ? {c -> p  -> p} = p; otherwise the check proves that
-	// every value is taken (check.odin)
-	if rest == nil {
-		all_same := true
-		for b in out[1:] do all_same &&= same(k, b.product, out[0].product)
-		if all_same do return out[0].product
-		// the same product in each branch, read where its reach holds: p(t) where
-		// t in c gives what the branch gives
-		if whole, agrees := agreeing(k, out[:], rewrites[:]); agrees do return whole
-	}
-	r := new(Pattern)
-	r.target, r.branches, r.span = target, out[:], p.span
-	return r
+	q := new(Pattern)
+	q.target, q.branches, q.span, q.reached, q.rest = target, out[:], p.span, true, rest
+	return one_product(k, q)
 }
 
 // agreeing: the product of the last branch, its unknowns as they are outside it,
-// when every branch gives it rewritten as that branch narrows them: then the
-// pattern is that product (t ? {c -> p -> p} = p, read in each branch).
-agreeing :: proc(k: ^Kernel, out: []Branch, rewrites: []Rewrite) -> (Type, bool) {
+// when every branch gives it rewritten as its reach narrows them: then the pattern
+// is that product (t ? {c -> p -> p} = p, read in each branch).
+agreeing :: proc(k: ^Kernel, out: []Branch) -> (Type, bool) {
 	if len(out) < 2 do return nil, false
 	last := len(out) - 1
 	back: Rewrite
-	for x in rewrites[last] do if x.unknown != nil do back = rewriting(back, x.unknown, x.unknown)
+	for x in out[last].reach do if x.unknown != nil do back = rewriting(back, x.unknown, x.unknown)
 	whole := rewrite(k, out[last].product, back)
 	if has_effect(whole) || is_invalid(whole) do return nil, false
-	for b, i in out[:last] do if !same(k, b.product, rewrite(k, whole, rewrites[i])) do return nil, false
+	for b in out[:last] do if !same(k, b.product, rewrite(k, whole, b.reach)) do return nil, false
 	return whole, true
 }
 
@@ -369,11 +394,9 @@ conjuncts :: proc(t: Type, out: ^[dynamic]Type) {
 // enters each branch: x in (t ? {c -> p …}) = t ? {c -> x in p …}, and likewise
 // (t ? {c -> p …}) in C = t ? {c -> p in C …}.
 enter_branches :: proc(k: ^Kernel, p: ^Pattern, apply: proc(product, other: Type) -> Type, other: Type) -> Type {
-	entered := new(Pattern)
-	entered.target, entered.span = p.target, p.span
-	entered.branches = make([]Branch, len(p.branches))
-	for b, i in p.branches do entered.branches[i] = with_product(b, apply(b.product, other))
-	return pattern_law(k, entered)
+	branches := make([]Branch, len(p.branches))
+	for b, i in p.branches do branches[i] = with_product(b, normal(k, apply(b.product, other)))
+	return entered(k, p, branches)
 }
 
 // holds_invalid: t, or a term in it, has no type.

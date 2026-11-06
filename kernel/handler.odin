@@ -160,7 +160,7 @@ answer_in :: proc(k: ^Kernel, t: Type, s: ^Scope, bound: ^[]Type = nil) -> Type 
 			moved ||= branches[j].product != b.product
 		}
 		if !moved do return t
-		return pattern_law(k, branching(v, branches))
+		return entered(k, v, branches)
 	}
 	return t
 }

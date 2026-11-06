@@ -275,7 +275,9 @@ Pattern :: struct {
 	target:   Type,
 	branches: []Branch,
 	span:     syn.Span,
-	normal: bool, // a normal form: normal gives it back
+	normal:   bool, // a normal form: normal gives it back
+	reached:  bool, // read on its target (pattern_over): each branch keeps its reach
+	rest:     Type, // reached: the values no branch takes; nil when every one is
 }
 
 // Branch: a scope whose production is written in its cover (§6): `scope` holds
@@ -286,6 +288,8 @@ Branch :: struct {
 	scope:   ^Scope,
 	view:    ^Scope, // the names of the cover its product reads (destructuring)
 	span:    syn.Span,
+	reach:   Rewrite, // in a reached pattern: the rewrite its reach makes (§6)
+	unsaid:  Type, // and what of its reach that rewrite does not say
 }
 
 // Fold: the solution of a recursion (§5.6), an ordered product along the orbit of

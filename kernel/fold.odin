@@ -1062,7 +1062,7 @@ Product :: struct {
 
 products :: proc(k: ^Kernel, t: Type, out: ^[dynamic]Product, r: Rewrite = nil) {
 	if p, is_pattern := t.(^Pattern); is_pattern && !has_effect(p) {
-		reached, _, invalid := reaches(k, p.target, p.branches)
+		reached, _, invalid := branch_reaches(k, p)
 		if invalid != nil {
 			append(out, Product{invalid, r})
 			return

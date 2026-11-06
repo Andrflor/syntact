@@ -68,7 +68,7 @@ boole :: proc(k: ^Kernel, u: ^Unknown, s: Type, eq: Type) -> Type {
 }
 
 prove_branches :: proc(k: ^Kernel, p: ^Pattern) -> (Verdict, Rewrite) {
-	reached, _, _ := reaches(k, p.target, p.branches)
+	reached, _, _ := branch_reaches(k, p)
 	verdict := Verdict.Proven
 	for r in reached {
 		check := p.branches[r.branch].product

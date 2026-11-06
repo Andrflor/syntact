@@ -129,7 +129,7 @@ obligations :: proc(k: ^Kernel, t: Type, site := syn.Span{}) -> bool {
 // exhaustive: every value of the target of a pattern is taken by a branch: the
 // values no cover takes, rest, are none — [~]rest is proven (§6).
 exhaustive :: proc(k: ^Kernel, p: ^Pattern) {
-	_, rest, _ := reaches(k, p.target, p.branches)
+	_, rest, _ := branch_reaches(k, p)
 	if rest == nil do return
 	// the target in the union of the covers, read whole: a call by induction (§5.6)
 	covers := make([]Type, len(p.branches))

@@ -221,7 +221,7 @@ and_law :: proc(k: ^Kernel, terms: []Type) -> Type {
 		if p, is_pattern := terms[at].(^Pattern); is_pattern && !has_effect(p) {
 			branches := make([]Branch, len(p.branches))
 			for b, i in p.branches do branches[i] = with_product(b, and_law(k, {b.product, set}))
-			return pattern_law(k, branching(p, branches))
+			return entered(k, p, branches)
 		}
 	}
 	return lattice_law(k, terms, false)

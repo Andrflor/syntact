@@ -344,7 +344,8 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		}
 		if covers != nil do return as_normal(pattern_on(k, v.target, covers, r))
 		p := new(Pattern)
-		p.target, p.span = v.target, v.span
+		p^ = v^
+		p.normal = false
 		p.branches = make([]Branch, len(v.branches))
 		moved := false
 		for b, i in v.branches {
@@ -353,11 +354,8 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		}
 		if !moved do return t
 		// the target the same, so are its unknowns, and the reach of each branch: only
-		// its product is rewritten; t ? {c -> p  -> p} = p, where every value is taken
-		all_same := p.branches[len(p.branches) - 1].cover == nil
-		for b in p.branches[1:] do all_same &&= same(k, b.product, p.branches[0].product)
-		if all_same do return p.branches[0].product
-		return as_normal(p)
+		// its product is rewritten
+		return as_normal(one_product(k, p))
 	case ^Scope:
 		return rewrite_carve(k, v, r)
 	case ^Access:
