@@ -519,22 +519,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Least:
 		return COUNTS, true
 	case ^Series:
-		if v.op == .Add {
-			// Σ(a + b) = Σa + Σb
-			if o, sums := v.term.(^Operation); sums && o.op == .Add {
-				total: Type = Int(0)
-				split := true
-				for part in o.args {
-					image, known := layout_image(k, series(k, .Add, v.index, v.lo, v.hi, part))
-					if !known {
-						split = false
-						break
-					}
-					total = exact_law(k, .Add, {total, image}, v.span)
-				}
-				if split do return total, true
-			}
-		}
+		// its family: what it sums to, the linear theory bounds (lia.odin)
 		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Recurrent:
 		if f, known := family_of(k, t); known do return family_term(f), true

@@ -937,6 +937,21 @@ orbit_length :: proc(k: ^Kernel, u: ^Unknown, step, stop: Type, span: syn.Span) 
 // the state y, {} at first, {...y  e₀ … e_{c-1}} at each step. The binding c·i + j
 // of the run is eⱼ at step i.
 built :: proc(k: ^Kernel, f: ^Fold) -> (y: int, es: []Type, ok: bool) {
+	// a fold is never changed once built: what it builds, read once
+	if known, found := k.built[f]; found do return known.y, known.es, known.ok
+	y, es, ok = builds(k, f)
+	k.built[f] = Built{y, es, ok}
+	return
+}
+
+// Built: what a fold builds, once read (built).
+Built :: struct {
+	y:  int,
+	es: []Type,
+	ok: bool,
+}
+
+builds :: proc(k: ^Kernel, f: ^Fold) -> (y: int, es: []Type, ok: bool) {
 	lo, _ := counter_range(k, f) or_return
 	if !is_int(lo, 0) || !same(k, f.next, op(k, .Add, f.index, Int(1))) || !is_none(f.effects) do return
 	for z, i in f.states {

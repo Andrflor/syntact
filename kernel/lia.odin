@@ -32,6 +32,24 @@ Lia :: struct {
 // lia_in: every value of t is in the range lo..hi, an end nil for none: proven by the
 // theory.
 lia_in :: proc(k: ^Kernel, t: Type, lo, hi: Maybe(i128)) -> bool {
+	// a shared node is never changed: what is proven of it, found once — but of a
+	// call, the hypothesis while its equation is read
+	node := node_of(t)
+	if node == nil || holds_call(k, t, false) do return lia_decided(k, t, lo, hi)
+	key := Lia_Key{node, lo, hi}
+	if known, found := k.lia[key]; found do return known
+	proven := lia_decided(k, t, lo, hi)
+	k.lia[key] = proven
+	return proven
+}
+
+// Lia_Key: a node and a range asked of it.
+Lia_Key :: struct {
+	node:   rawptr,
+	lo, hi: Maybe(i128),
+}
+
+lia_decided :: proc(k: ^Kernel, t: Type, lo, hi: Maybe(i128)) -> bool {
 	if l, has := lo.?; has {
 		// t < l: t − l + 1 ≤ 0
 		s: Lia
