@@ -1,0 +1,6 @@
+{
+  "name": "tc_runs_of_one_piece",
+  "description": "Runs of one piece meet and part by their lengths (§4.6, §5.4, §5.6): Long8 & ~Bytes8 is the runs of 9 or more bytes, so a pattern on Long8 taking Bytes8 then {u8: ...Long8:} is exhaustive, its last cover taking every value left.",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nA -> Array{u8}\nWord -> {u8: ...A:}\nBytes8 -> {u8: u8: u8: u8: u8: u8: u8: u8:}\n{...Bytes8: ...A:}:a -> ??::{...Bytes8: ...Word:}\nLong8 -> {u8: u8: u8: u8: u8: u8: u8: u8: ...A:}\nw -> ??::Long8\nx -> w ? {Bytes8: -> 0  {u8: ...Long8:} -> 1}\ny -> {u8: u8: u8: u8: u8: u8: u8: u8: u8: ...A:} & ~{u8: ...Bytes8: u8: ...A:}\nz -> Long8 & ~Bytes8",
+  "expect_errors": []
+}

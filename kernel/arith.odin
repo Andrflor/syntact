@@ -890,7 +890,8 @@ flatten_bool :: proc(k: ^Kernel, op: Operator, t: Type) {
 }
 
 // literal: t is `x in S`, or `[~](x in S)` read as x in ~S: x one value — an
-// unknown, or a term over them —, S a constant type the laws compute whole.
+// unknown, or a term over them —, S a constant type the laws compute whole
+// (computed_whole).
 literal :: proc(k: ^Kernel, t: Type) -> (Type, Type, bool) {
 	positive := true
 	atom := t
@@ -900,7 +901,7 @@ literal :: proc(k: ^Kernel, t: Type) -> (Type, Type, bool) {
 	}
 	o, is_op := atom.(^Operation)
 	if !is_op || o.op != .In do return nil, nil, false
-	if !is_value(k, o.args[0]) || !decided(o.args[1]) do return nil, nil, false
+	if !is_value(k, o.args[0]) || !computed_whole(k, o.args[1]) do return nil, nil, false
 	return o.args[0], positive ? o.args[1] : not_law(k, o.args[1]), true
 }
 

@@ -21,7 +21,7 @@ import "core:strings"
 // directly or in a carve (§5.6); a carve of it is recursive with it.
 recursive :: proc(s: ^Scope) -> bool {
 	root := origin(s)
-	seen := make(map[^Scope]bool)
+	seen: map[^Scope]bool // allocated when a production is read
 	for b in root.bindings do if b.kind == .Product && (names_scope(b.color, root, &seen) || names_scope(b.value, root, &seen)) do return true
 	return false
 }

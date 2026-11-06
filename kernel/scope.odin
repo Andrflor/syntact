@@ -1613,14 +1613,21 @@ suffix :: proc(k: ^Kernel, layout: Type, at: Type) -> (out: Type, ok: bool) {
 			append(&out, ..rest[1:])
 			return run_scope(k, out[:]), true
 		}
-		// a place not known: any of the suffixes at 0 … fixed, the runs holding theirs
+		// a place not known: any of the suffixes at 0 … fixed, and those of the runs of
+		// pieces past them: from none of their pieces to as many as they take
+		parts := make([dynamic]Type)
+		for i in 0 ..= fixed do append(&parts, places_shape(k, places[i:]))
 		if len(places) > fixed {
-			_, _, closed := layout_pieces(k, run_scope(k, places[fixed:]))
-			if !closed do return
+			pieces, m := layout_pieces(k, run_scope(k, places[fixed:])) or_return
+			piece := pieces.(^Scope) or_return
+			counts := layout_image(k, m) or_return
+			_, most, bounded := int_bounds(k, counts)
+			if !bounded do return
+			top: Type = nil
+			if h, has := most.?; has do top = Int(h)
+			append(&parts, repeated(k, piece, range_law(k, Int(0), top, .Int, v.span), v.span))
 		}
-		parts := make([]Type, fixed + 1)
-		for i in 0 ..= fixed do parts[i] = places_shape(k, places[i:])
-		return or_law(k, parts), true
+		return or_law(k, parts[:]), true
 	}
 	return
 }

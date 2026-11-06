@@ -503,9 +503,13 @@ run_form :: proc(k: ^Kernel, s: ^Scope) -> (fixed: int, colors: []Type, counts: 
 		if !is_run(p) {
 			if p.name != "" do return // the bindings of a run are unnamed
 			fixed += 1
-			// what the place admits: its color, or the value written there
+			// what the place admits: the value written there — a value is a set (§5.1)
+			// —, or its color
 			c := binding_color(k, p)
-			if c == nil && p.value != nil do c = place_set(k, p) or_return
+			if p.value != nil {
+				c = values(k, binding_value(k, p)) or_return
+				if !is_constant(c) do return
+			}
 			if c != nil do append(&found, c)
 			continue
 		}

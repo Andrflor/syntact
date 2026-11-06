@@ -338,7 +338,28 @@ join_shapes :: proc(k: ^Kernel, cells: []Type) -> []Type {
 		template := placed(k, g[0], .Shape)
 		for row in product_rows(k, rows) do append(&out, product_shape(template, row))
 	}
-	return out[:]
+	// runs of one piece: P * M | P * N = P * (M | N)
+	if len(out) < 2 do return out[:]
+	Runs :: struct {
+		item, lengths, like: Type,
+		at:                  int,
+	}
+	runs := make([dynamic]Runs)
+	joined := make([dynamic]Type)
+	next_run: for c in out {
+		if p, m, one := one_piece(k, c); one {
+			for &r in runs do if same(k, r.item, p) {
+				r.lengths = or_law(k, {r.lengths, m})
+				joined[r.at] = nil
+				continue next_run
+			}
+			append(&runs, Runs{p, m, c, len(joined)})
+		}
+		append(&joined, c)
+	}
+	if len(joined) == len(out) do return out[:]
+	for r in runs do if joined[r.at] == nil do joined[r.at] = run_of_piece(k, r.like, r.item, r.lengths)
+	return joined[:]
 }
 
 // joinable: a shape each of whose places admits a set of its own (place_set).
@@ -531,6 +552,106 @@ product_minus :: proc(k: ^Kernel, x: Type, ys: []Type) -> (rows: [][]Type, ok: b
 	return current[:], true
 }
 
+// --- runs of one piece ---
+//
+// A shape of unnamed places and runs whose bindings all take one color P admits
+// the runs of P of the lengths N it admits: it is {...({P:} * N):}, as Arden reads
+// it (§5.6), and its expansions are their bindings placed (§5.3). Runs of one piece
+// meet and part by their lengths, as strings do by their counts (§4.6,
+// t * (m | n) = (t * m) | (t * n)); two runs of no common binding share only {}:
+//
+//   P * M & Q * N    = (P & Q) * (M & N)
+//   P * M & ~(Q * N) = P * (M & ~N)          P within Q
+//   P * M | P * N    = P * (M | N)
+
+// one_piece: the runs of one color, read as that color and the lengths they take, a
+// constant set: a shape whose bindings all take it, or a repetition {P:} * N of a
+// piece of one binding (§4.6).
+one_piece :: proc(k: ^Kernel, t: Type) -> (item, lengths: Type, ok: bool) {
+	#partial switch v in t {
+	case ^Operation:
+		if v.op != .Mul do return
+		piece := v.args[0].(^Scope) or_return
+		inner := placed(k, piece, .Shape)
+		if len(inner) != 1 || is_run(inner[0]) || inner[0].color == nil || inner[0].name != "" || !decided(v.args[1]) do return
+		return binding_color(k, inner[0]), v.args[1], true
+	case ^Scope:
+		// a shape with a named binding is a record, not a run
+		products := false
+		for b in v.bindings do products ||= b.kind == .Product
+		if !products do for b in v.bindings do if b.name != "" do return
+		fixed, colors, counts := run_form(k, v) or_return
+		if len(colors) == 0 do return
+		for c in colors[1:] do if !same(k, c, colors[0]) do return
+		n := Int(i128(fixed))
+		lengths = counts == nil ? range_law(k, n, nil, .Int, v.span) : exact_law(k, .Add, {counts, n}, v.span)
+		if !decided(lengths) do return
+		return colors[0], lengths, true
+	}
+	return
+}
+
+// run_of_piece: the runs of item of the lengths given, of the kind of like — a
+// shape, or a repetition: none when there are none; the shape {} when only the
+// empty one.
+run_of_piece :: proc(k: ^Kernel, like: Type, item, counts: Type) -> Type {
+	lengths := counts
+	if is_none(lengths) do return None{}
+	_, shape := like.(^Scope)
+	if is_none(item) {
+		if !included(k, Int(0), lengths) do return None{}
+		lengths = Int(0)
+	}
+	if shape && is_int(lengths, 0) do return run_scope(k, nil)
+	piece := new_scope(nil, {})
+	piece.source, piece.complete, piece.reached = piece, true, true
+	place := new_binding(piece, .Push, {})
+	place.color, place.typed_color = item, item
+	if !shape do return new_operation(.Mul, piece, lengths)
+	return repeated(k, piece, lengths, {})
+}
+
+// pieces_meet: x & y, both runs of one piece: (P & Q) * (M & N).
+pieces_meet :: proc(k: ^Kernel, x, y: Type) -> (out: Type, ok: bool) {
+	p, m := one_piece(k, x) or_return
+	q, n := one_piece(k, y) or_return
+	item, lengths := and_law(k, {p, q}), and_law(k, {m, n})
+	return run_of_piece(k, x, item, lengths), true
+}
+
+// pieces_minus: the runs of one piece x without the runs ys, each of one piece
+// within or apart from x's: false otherwise.
+pieces_minus :: proc(k: ^Kernel, x: Type, ys: []Type) -> (out: Type, ok: bool) {
+	p, m := one_piece(k, x) or_return
+	lengths := m
+	for y in ys {
+		q, n := one_piece(k, y) or_return
+		switch {
+		case included(k, p, q):
+			lengths = and_law(k, {lengths, not_law(k, n)})
+		case apart(k, p, q):
+			lengths = and_law(k, {lengths, not_law(k, and_law(k, {n, Int(0)}))})
+		case:
+			return
+		}
+	}
+	return run_of_piece(k, x, p, lengths), true
+}
+
+// computed_whole: a constant whose & and ~ with any other such one the laws compute
+// whole — decided, or runs of one piece beside decided cells.
+computed_whole :: proc(k: ^Kernel, t: Type) -> bool {
+	if decided(t) do return true
+	if !is_constant(t) do return false
+	one: [1]Type
+	cells, _ := cells_in(t, &one)
+	for c in cells {
+		if f := cell_family(c); f != .Value && f != .Other do continue
+		if _, _, runs := one_piece(k, c); !runs do return false
+	}
+	return true
+}
+
 // --- & of cells ---
 
 meet_cells :: proc(k: ^Kernel, a, b: []Type) -> []Type {
@@ -569,9 +690,11 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 			}
 			return cell(k, product_shape(placed(k, a, .Shape), row))
 		}
+		if met, runs := pieces_meet(k, x, y); runs do return cell(k, met)
 		return cell(k, new_and(x, y))
 	case fx == .Other:
 		if same(k, x, y) do return cell(k, x)
+		if met, runs := pieces_meet(k, x, y); runs do return cell(k, met)
 		if fy == .Text || fy == .Char || fy == .Bool || fy == .Value do return nil // a number is none of them
 		if fy == .Int {
 			// the least and greatest elements of x: nothing between them in y, nothing in common
@@ -661,6 +784,10 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 			for row in rows do _ = cell(k, product_shape(template, row))
 			return pushed(k, out)
 		}
+		if left, runs := pieces_minus(k, x, ys); runs {
+			release(k, from)
+			return cell(k, left)
+		}
 		left := new_and(x, new_not(cells_term(k, ys)))
 		release(k, from)
 		return cell(k, left)
@@ -668,6 +795,17 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 		for y in u do if g := cell_family(y); g == .Int || g == .Real || g == .Other do push(k, y)
 		ys := pushed(k, from)
 		if len(ys) == 0 do return cell(k, x)
+		// runs of one piece: what is taken away of them is runs of one piece too
+		if _, _, runs := one_piece(k, x); runs {
+			pieces := mark(k)
+			for y in ys do if cell_family(y) == .Other do push(k, y)
+			left, computed := pieces_minus(k, x, pushed(k, pieces))
+			if computed {
+				release(k, from)
+				return cell(k, left)
+			}
+			release(k, pieces)
+		}
 		if lo, hi, bounded := int_bounds(k, x); bounded {
 			hull := discrete_cell(.Int, lo, hi)
 			ints_from := mark(k)
