@@ -265,3 +265,12 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
   of the field-bounds agent). Not pushed until that is cheap.
 - Still open: 283:8 |split| tally in i64, distinct + p.new in i64 (count's counter moved
   by 0..1 a step), the count-down run length.
+
+## Check 06:00 UTC (master 6d1d99e) — artifact version 6 published
+- Verified on clean master: corpus 589/5, code, calc, x64 and C all pass (the zip cases too), six outputs identical, bt2 = 18.
+- REGRESSIONS found by bisect, agents on them:
+  - c102767 breaks strlist in the kernel (`passes{…}!` not proven in i64) — words agent fixing.
+  - f6e3790 slows strlist's compiled code (C at 8M 470 → 755 ms) — fresh agent fixing.
+- Kernel status: 7 pass (sum tree interp bintrees records push strlist@6fc34a9); respond 2, words 4, sexp 4, blur 7, lru 8, particles 8, scene 13, graph 22, calc 29 error lines.
+- respond: a9b102f keys an image by the hypotheses its calls reach (0 mismatches over 380k verified hits); respond 3.1 s / 1.9 GB.
+- Running: words (fix c102767, then its bounds), respond (relates/counter_range cost, 195:6), strlist runtime + blur places, items of run fields (graph, particles, lru, scene).
