@@ -203,6 +203,15 @@ or_law :: proc(k: ^Kernel, terms: []Type) -> Type {
 }
 
 and_law :: proc(k: ^Kernel, terms: []Type) -> Type {
+	// runs of one piece, whatever their lengths: P * M & Q * N = (P & Q) * (M & N) (§4.6)
+	for t, i in terms do for u, j in terms[i + 1:] {
+		if _, written := t.(^Operation); !written do continue
+		met := pieces_meet(k, t, u) or_continue
+		others := make([dynamic]Type)
+		append(&others, met)
+		for x, l in terms do if l != i && l != i + 1 + j do append(&others, x)
+		return len(others) == 1 ? met : and_law(k, others[:])
+	}
 	// a set the laws keep written, u8 * u8, lies in the range that bounds it: within
 	// what that range is within, out of what it is out of
 	for t, i in terms {

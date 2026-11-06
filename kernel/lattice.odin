@@ -565,15 +565,22 @@ product_minus :: proc(k: ^Kernel, x: Type, ys: []Type) -> (rows: [][]Type, ok: b
 //   P * M | P * N    = P * (M | N)
 
 // one_piece: the runs of one color, read as that color and the lengths they take, a
-// constant set: a shape whose bindings all take it, or a repetition {P:} * N of a
-// piece of one binding (§4.6).
+// constant set (run_piece).
 one_piece :: proc(k: ^Kernel, t: Type) -> (item, lengths: Type, ok: bool) {
+	item, lengths = run_piece(k, t) or_return
+	return item, lengths, decided(lengths)
+}
+
+// run_piece: the runs of one color, read as that color and the lengths they take, a
+// set or a term: a shape whose bindings all take it, or a repetition {P:} * N of a
+// piece of one binding (§4.6).
+run_piece :: proc(k: ^Kernel, t: Type) -> (item, lengths: Type, ok: bool) {
 	#partial switch v in t {
 	case ^Operation:
 		if v.op != .Mul do return
 		piece := v.args[0].(^Scope) or_return
 		inner := placed(k, piece, .Shape)
-		if len(inner) != 1 || is_run(inner[0]) || inner[0].color == nil || inner[0].name != "" || !decided(v.args[1]) do return
+		if len(inner) != 1 || is_run(inner[0]) || inner[0].color == nil || inner[0].name != "" do return
 		return binding_color(k, inner[0]), v.args[1], true
 	case ^Scope:
 		// a shape with a named binding is a record, not a run
@@ -587,7 +594,6 @@ one_piece :: proc(k: ^Kernel, t: Type) -> (item, lengths: Type, ok: bool) {
 		for c in colors[1:] do if !same(k, c, colors[0]) do return
 		n := Int(i128(fixed))
 		lengths = counts == nil ? range_law(k, n, nil, .Int, v.span) : exact_law(k, .Add, {counts, n}, v.span)
-		if !decided(lengths) do return
 		return colors[0], lengths, true
 	}
 	return
@@ -613,10 +619,11 @@ run_of_piece :: proc(k: ^Kernel, like: Type, item, counts: Type) -> Type {
 	return repeated(k, piece, lengths, {})
 }
 
-// pieces_meet: x & y, both runs of one piece: (P & Q) * (M & N).
+// pieces_meet: x & y, both runs of one piece: (P & Q) * (M & N), whatever their
+// lengths.
 pieces_meet :: proc(k: ^Kernel, x, y: Type) -> (out: Type, ok: bool) {
-	p, m := one_piece(k, x) or_return
-	q, n := one_piece(k, y) or_return
+	p, m := run_piece(k, x) or_return
+	q, n := run_piece(k, y) or_return
 	item, lengths := and_law(k, {p, q}), and_law(k, {m, n})
 	return run_of_piece(k, x, item, lengths), true
 }
