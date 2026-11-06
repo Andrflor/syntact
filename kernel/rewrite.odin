@@ -653,6 +653,17 @@ int_hull :: proc(k: ^Kernel, t: Type) -> Type {
 	return discrete_cell(.Int, lo, hi)
 }
 
+// kept_written: a set the laws keep written, u8 % 3, or one of several.
+kept_written :: proc(t: Type) -> bool {
+	#partial switch v in t {
+	case ^Operation:
+		return true
+	case ^Or:
+		for x in v.terms do if kept_written(x) do return true
+	}
+	return false
+}
+
 // one_affine: t = a·u + b, u its one unknown, a = ±1.
 one_affine :: proc(k: ^Kernel, t: Type) -> (u: ^Unknown, a: i128, b: Type, ok: bool) {
 	read := make([dynamic]^Unknown)
@@ -1142,14 +1153,7 @@ built_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 		items := make([dynamic]Type)
 		if !run_items(k, f.inits[i], nil, &items) do continue
 		for part in ([][]^Binding{prefix, suffix, before, after}) do if !run_items(k, run_scope(k, part), nil, &items) do continue next
-		piece := new_scope(nil, f.span)
-		piece.source, piece.complete, piece.reached = piece, true, true
-		place := new_binding(piece, .Push, f.span)
-		// what a binding may hold: a set the laws keep written, by the range that bounds it
-		place.color = or_law(k, items[:])
-		if _, written := place.color.(^Operation); written do place.color = int_hull(k, place.color)
-		place.typed_color = place.color
-		return repeated(k, piece, COUNTS, f.span), true
+		return runs_of(k, or_law(k, items[:]), COUNTS, f.span), true
 	}
 	return
 }

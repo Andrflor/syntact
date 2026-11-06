@@ -1822,6 +1822,18 @@ repeated :: proc(k: ^Kernel, piece: ^Scope, n: Type, span: syn.Span) -> ^Scope {
 	return run
 }
 
+// runs_of: the shape {...{C:} * n} of the runs of n bindings, each in C — a set the
+// laws keep written, by the range that bounds it.
+runs_of :: proc(k: ^Kernel, items: Type, n: Type, span: syn.Span) -> ^Scope {
+	piece := new_scope(nil, span)
+	piece.source, piece.complete, piece.reached = piece, true, true
+	place := new_binding(piece, .Push, span)
+	place.color = items
+	if kept_written(items) do place.color = int_hull(k, place.color)
+	place.typed_color = place.color
+	return repeated(k, piece, n, span)
+}
+
 // run_data: the bindings of a run: values, and runs not known yet.
 run_data :: proc(k: ^Kernel, s: ^Scope) -> []^Binding {
 	out := make([dynamic]^Binding)
@@ -1836,13 +1848,7 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		set := values(k, o.args[0]) or_return
 		items := item_image(k, set) or_return
 		n := length_image(k, set) or_return
-		piece := new_scope(nil, o.span)
-		piece.source, piece.complete, piece.reached = piece, true, true
-		place := new_binding(piece, .Push, o.span)
-		place.color = or_law(k, {items, values(k, o.args[2]) or_return})
-		if _, written := place.color.(^Operation); written do place.color = int_hull(k, place.color)
-		place.typed_color = place.color
-		return repeated(k, piece, n, o.span), true
+		return runs_of(k, or_law(k, {items, values(k, o.args[2]) or_return}), n, o.span), true
 	}
 	if s, known := given(k, o.args[0]).(^Scope); known {
 		// x from k: the runs of what follows the place k
@@ -1898,9 +1904,10 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 			}
 		}
 		if set, known := values(k, o.args[0]); known {
-			// a known place: what the layout holds there (§5.3)
-			if at, placed_at := o.args[1].(Int); placed_at do if c, read := place_image(k, set, int(at)); read do return c, true
-			if c, read := item_image(k, set); read do return c, true
+			// a known place: what the layout holds there (§5.3), one of its bindings
+			held, read := item_image(k, set)
+			if at, placed_at := o.args[1].(Int); placed_at do if c, there := place_image(k, set, int(at)); there do return read ? and_law(k, {c, held}) : c, true
+			if read do return held, true
 		}
 	}
 	// x from k: the runs of what follows the place k

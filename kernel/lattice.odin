@@ -581,6 +581,8 @@ one_piece :: proc(k: ^Kernel, t: Type) -> (item, lengths: Type, ok: bool) {
 		for b in v.bindings do products ||= b.kind == .Product
 		if !products do for b in v.bindings do if b.name != "" do return
 		fixed, colors, counts := run_form(k, v) or_return
+		// {}: the run of no piece, of any color
+		if len(colors) == 0 && fixed == 0 && counts != nil && is_int(counts, 0) do return None{}, Int(0), true
 		if len(colors) == 0 do return
 		for c in colors[1:] do if !same(k, c, colors[0]) do return
 		n := Int(i128(fixed))
@@ -691,7 +693,7 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 			return cell(k, product_shape(placed(k, a, .Shape), row))
 		}
 		if met, runs := pieces_meet(k, x, y); runs do return cell(k, met)
-		return cell(k, new_and(x, y))
+		return cell(k, kept_meet(k, x, y))
 	case fx == .Other:
 		if same(k, x, y) do return cell(k, x)
 		if met, runs := pieces_meet(k, x, y); runs do return cell(k, met)
@@ -703,9 +705,22 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 				if is_none(discrete_cell(.Int, max_bound(lo, lo_y), min_bound(hi, hi_y))) do return nil
 			}
 		}
-		return cell(k, new_and(x, y))
+		return cell(k, kept_meet(k, x, y))
 	}
 	return nil
+}
+
+// kept_meet: x & y kept written, flattened, each term once: (a & b) & a = a & b
+// (§4.1).
+kept_meet :: proc(k: ^Kernel, x, y: Type) -> Type {
+	terms := make([dynamic]Type)
+	for t in ([]Type{x, y}) {
+		parts := []Type{t}
+		if both, met := t.(^And); met do parts = both.terms
+		for p in parts do if !contains_same(k, terms[:], p) do append(&terms, p)
+	}
+	if len(terms) == 1 do return terms[0]
+	return new_and(..terms[:])
 }
 
 // --- & ~ of cells ---

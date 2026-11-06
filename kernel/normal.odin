@@ -553,6 +553,14 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 		return v
 	case ^Is:
 		return v.term
+	case ^And:
+		// a meet the laws keep written: the default of one of its terms that it holds
+		for t in v.terms {
+			if is_negated(t) do continue
+			d := default_of(k, t, span)
+			if !is_invalid(d) && is_bool(in_law(k, d, c), true) do return d
+		}
+		return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
 	case ^Operation:
 		// a run of n pieces: none of them, {}, when n may be 0; otherwise n times the
 		// default of a piece of one binding: the run a fold builds (§5.5)
