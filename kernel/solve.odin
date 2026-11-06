@@ -181,7 +181,7 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	stop, base, step, split := bases_and_steps(k, p, root, u)
 	if !split do return nil
 	// what the call gives back: y, in the family of the bases
-	family, known := family_of(k, base)
+	family, known := family_of(k, given(k, base))
 	if !known do return nil
 	y := new_unknown(k, nil)
 	y.layout = family_term(family)

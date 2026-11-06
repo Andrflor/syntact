@@ -4,7 +4,7 @@
   "source": "field -> {u8:n -> ??  w -> !?::none  -> n ? {0 -> 0  -> n + field{n -> n - 1}!}}\nx -> field{n -> 5}!",
   "type": "ε0(ε<⟳(x: 0 ↦ x + 1 until 5..; ε0; none)>(15))",
   "productions": {
-    "field": "ε0(?0 ? {0 -> 0  -> ε0(ε<field{n -> ?0 - 1  w -> none}!>(x, ?0 + x))})"
+    "field": "ε0(ε<⟳(x: 0 ↦ x + 1 until ?0..; ε0; none)>((?0 + ?0 * ?0) / 2))"
   },
   "expect_errors": []
 }
