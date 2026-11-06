@@ -115,6 +115,10 @@ rewritten_term :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		if v.layout != nil && !is_constant(v.layout) {
 			if layout := rewrite(k, v.layout, r); layout != v.layout do return narrowing(v, layout)
 		}
+		// a record whose places are colored over other unknowns: its colors follow them
+		if record, is_record := v.layout.(^Scope); is_record {
+			if colored, moved := colors_rewritten(k, record, r); moved do return narrowing(v, colored)
+		}
 		return t
 	case ^Effect:
 		then := rewrite(k, v.then, r)
@@ -282,6 +286,7 @@ rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 // written scope is rewritten as the carve of its bindings to their values
 // rewritten. The scope itself when nothing changes.
 rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> ^Scope {
+	if colored, moved := colors_rewritten(k, s, r); moved do return colored
 	if s.carved == nil {
 		changes := make(map[^Binding]Type)
 		moved := false
@@ -305,6 +310,23 @@ rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> ^Scope {
 	}
 	if !moved do return s
 	return carved_copy(k, s.carved, changes)
+}
+
+// colors_rewritten: a shape whose places are colored over unknowns, the colors
+// rewritten (§5.4): a color is a term like any other.
+colors_rewritten :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> (out: ^Scope, moved: bool) {
+	if s.carved != nil || recursive(s) do return
+	places := placed(k, s, .Shape)
+	row := make([]Type, len(places))
+	for p, i in places {
+		row[i] = p.color
+		if p.value != nil do return
+		if p.color == nil || is_constant(p.color) do continue
+		row[i] = rewrite(k, p.color, r)
+		moved ||= row[i] != p.color
+	}
+	if !moved do return
+	return product_shape(places, row).(^Scope), true
 }
 
 // rewrite_fold: the fold with its parts rewritten; what it binds is its own.
@@ -1133,6 +1155,17 @@ monotone_image :: proc(k: ^Kernel, t: Type, u: ^Unknown, layout: Type, direction
 // an unknown of what the layout says it holds, when that is over unknowns: the
 // bindings relate as unknowns do.
 runs_read :: proc(k: ^Kernel, t: Type) -> (out: Type, changed: bool) {
+	// a read a branch narrows, t & S: its unknown, within S
+	if meet, narrowed := t.(^And); narrowed {
+		x, set, one := value_in_meet(k, meet)
+		if !one do return t, false
+		inner, read := runs_read(k, x)
+		u, is_unknown := inner.(^Unknown)
+		if !read || !is_unknown do return t, false
+		w := new_unknown(k, nil)
+		w.layout = and_law(k, {u.layout, set})
+		return w, true
+	}
 	if a, is_access := t.(^Access); is_access {
 		set, known := values(k, a.target)
 		if !known do return t, false
