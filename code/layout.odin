@@ -14,10 +14,10 @@ import kernel "../kernel"
 // bindings of a run follow one another at the stride of its item.
 //
 // The layout is read on the set a value may take, as the kernel gives it: a set of
-// one family is a word; a shape of named fields is a scope of fields; a shape whose
-// places are not named, its runs included — a recursive one solved by Arden —, is
-// a run, its item what its places may hold (kernel.item_image); a recursive scope
-// whose productions are shapes otherwise is a tree of those shapes (§5.6).
+// one family is a word; a shape of named fields is a scope of fields; a recursive
+// scope whose productions are shapes of named fields is a tree of those shapes
+// (§5.6); a shape whose places are not named, its runs included — a recursive one
+// solved by Arden —, is a run, its item what its places may hold (kernel.item_image).
 
 Layout_Kind :: enum u8 {
 	Word,
@@ -66,6 +66,10 @@ layout_of_set :: proc(l: ^Lowering, written: kernel.Type, of: kernel.Type = nil)
 	if s, is_scope := set.(^kernel.Scope); is_scope && !kernel.recursive(s) && kernel.is_shape(l.k, s) {
 		if fields, named := fields_layout(l, s); named do return fields, true
 	}
+	// a recursive scope whose productions are shapes of named fields: a tree
+	if s, is_scope := set.(^kernel.Scope); is_scope && kernel.recursive(s) {
+		if tree, laid := tree_layout(l, s); laid do return tree, true
+	}
 	// the run of no binding is a value of every run, held as any: a union with it
 	// is held as the run its other terms are
 	if any, either := set.(^kernel.Or); either {
@@ -86,9 +90,7 @@ layout_of_set :: proc(l: ^Lowering, written: kernel.Type, of: kernel.Type = nil)
 		inner := layout_of_set(l, item) or_return
 		return new_clone(Layout{kind = .Run, item = inner, size = PAIR_BYTES, align = 8}), true
 	}
-	s := set.(^kernel.Scope) or_return
-	if !kernel.recursive(s) do return
-	return tree_layout(l, s)
+	return
 }
 
 // empty_run: t is {}, the run of no binding.
@@ -108,24 +110,32 @@ tree_layout :: proc(l: ^Lowering, s: ^kernel.Scope) -> (lay: ^Layout, ok: bool) 
 	for p in kernel.placed(l.k, s, .Shape) {
 		if p.kind != .Product do continue
 		shape, is_scope := kernel.binding_type(l.k, p).(^kernel.Scope)
-		if !is_scope || !kernel.is_shape(l.k, shape) do return nil, false
+		if !is_scope || !named_shape(l, shape) do return nil, false
 		append(&shapes, shape)
 	}
 	lay.shapes = shapes[:]
 	append(&l.trees, lay)
+	defer if !ok do pop(&l.trees)
 	for shape in shapes do append(&nodes, fields_layout(l, shape.(^kernel.Scope)) or_return)
 	lay.nodes = nodes[:]
 	return lay, true
 }
 
+// named_shape: a shape whose places are all named bindings.
+named_shape :: proc(l: ^Lowering, s: ^kernel.Scope) -> bool {
+	if !kernel.is_shape(l.k, s) do return false
+	for p in kernel.placed(l.k, s, .Shape) do if p.name == "" || kernel.is_run(p) || p.kind != .Push && p.kind != .Pull do return false
+	return true
+}
+
 // fields_layout: a shape of named fields, each at its natural alignment; false when
 // a place is not named, or holds what the code does not lay out.
 fields_layout :: proc(l: ^Lowering, s: ^kernel.Scope) -> (lay: ^Layout, ok: bool) {
+	if !named_shape(l, s) do return nil, false
 	places := kernel.placed(l.k, s, .Shape)
 	fields := make([]Field_Layout, len(places))
 	size, align := 0, 1
 	for p, i in places {
-		if p.name == "" || kernel.is_run(p) || p.kind != .Push && p.kind != .Pull do return nil, false
 		set := kernel.binding_color(l.k, p)
 		if set == nil do set = kernel.values(l.k, kernel.binding_value(l.k, p)) or_return
 		inner := layout_of_set(l, set) or_return

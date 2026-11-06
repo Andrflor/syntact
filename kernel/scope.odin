@@ -1594,20 +1594,23 @@ item_image :: proc(k: ^Kernel, layout: Type) -> (c: Type, ok: bool) {
 				append(&items, v)
 				continue
 			}
-			if p.color == nil do return // `...` or a place without color: any value
-			color := binding_color(k, p)
-			if !is_run(p) {
-				append(&items, color)
-				continue
-			}
-			// a run of the empty shape places nothing
-			if empty, is_scope := color.(^Scope); is_scope && is_shape(k, empty) && len(placed(k, empty, .Shape)) == 0 do continue
-			append(&items, item_image(k, color) or_return)
+			append(&items, hole_items(k, p) or_return)
 		}
 		if len(items) == 0 do return
 		return or_law(k, items[:]), true
 	}
 	return
+}
+
+// hole_items: what a place without a value admits: a binding, its color; a run,
+// the items of its color (§5.4). `...` or a place without color: any value.
+hole_items :: proc(k: ^Kernel, p: ^Binding) -> (c: Type, ok: bool) {
+	if p.color == nil do return
+	color := binding_color(k, p)
+	if !is_run(p) do return color, true
+	// a run of the empty shape places nothing
+	if empty, is_scope := color.(^Scope); is_scope && is_shape(k, empty) && len(placed(k, empty, .Shape)) == 0 do return None{}, true
+	return item_image(k, color)
 }
 
 // produced_items: the bindings of the runs a scope with productions admits: what
@@ -1634,6 +1637,10 @@ produced_items :: proc(k: ^Kernel, s: ^Scope) -> (c: Type, ok: bool) {
 		if own(leaf.term, root) do continue
 		run := given(k, leaf.term).(^Scope) or_return
 		for b in run_data(k, run) {
+			if b.value == nil {
+				append(&items, hole_items(k, b) or_return)
+				continue
+			}
 			v := read_in(k, leaf, binding_value(k, b))
 			if b.kind == .Push {
 				append(&items, values(k, given(k, v)) or_return)
