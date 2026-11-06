@@ -323,9 +323,10 @@ exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Typ
 	if op == .Pow do return single(k, power_law(k, sig, args[0], args[1], span))
 	out: Type
 	#partial switch sig.args[0] {
-	case .Int:
-		if r, ok := ring_law(op, args); ok do out = r
-		else if r, ok := atom_ring(k, op, args); ok do out = r
+	case .Int, .Real:
+		field := sig.args[0] == .Real
+		if r, ok := ring_law(op, args, field); ok do out = r
+		else if r, ok := atom_ring(k, op, args, field); ok do out = r
 	case .Bool:
 		out = bool_law(k, op, args)
 	case .String:
