@@ -654,13 +654,37 @@ maybe_int :: proc(x: Maybe(i128)) -> Type {
 
 // term_preimage: x of degree 1 in such an unknown: the unknown, and the preimage of s.
 term_preimage :: proc(k: ^Kernel, x, s: Type) -> (u: ^Unknown, set: Type, ok: bool) {
+	for d in degree_one(k, x) {
+		if c, constant := d.b.(Int); constant && is_constant(s) {
+			one: [1]Type
+			cells, negated := cells_in(s, &one)
+			if !negated do if p, exact := preimage(k, cells, d.a, i128(c)); exact do return d.u, p, true
+		}
+		if d.a != 1 && d.a != -1 do continue
+		return d.u, moved(k, s, d.a, d.b) or_continue, true
+	}
+	return
+}
+
+// Degree_One: x = a·u + b, b not reading u.
+Degree_One :: struct {
+	u: ^Unknown,
+	a: i128,
+	b: Type,
+}
+
+// degree_one: the unknowns x is of degree 1 in, each one no layout of the others
+// reads and not inside an atom — its layout says all that relates it to them —,
+// with its coefficient and what is left of x.
+degree_one :: proc(k: ^Kernel, x: Type) -> []Degree_One {
 	back: Rewrite
 	ms, divisor, ring := monomials(atomized(k, x, &back))
-	if !ring || divisor != 1 do return
+	if !ring || divisor != 1 do return nil
 	us := make([dynamic]^Unknown)
 	read_unknowns(x, &us)
 	inside := make([dynamic]^Unknown)
 	for r in back do if r.unknown != nil do read_unknowns(r.term, &inside)
+	out := make([dynamic]Degree_One)
 	next: for v in us {
 		// not while a layout of another reads it, nor inside an atom
 		for w in us do if !same_unknown(w, v) && layout_reads(k, w, v) do continue next
@@ -679,16 +703,9 @@ term_preimage :: proc(k: ^Kernel, x, s: Type) -> (u: ^Unknown, set: Type, ok: bo
 			a = coefficient(m)
 		}
 		if a == 0 do continue
-		b := unatomized(ring_term(rest[:], 1) or_continue, back)
-		if c, constant := b.(Int); constant && is_constant(s) {
-			one: [1]Type
-			cells, negated := cells_in(s, &one)
-			if !negated do if p, exact := preimage(k, cells, a, i128(c)); exact do return v, p, true
-		}
-		if a != 1 && a != -1 do continue
-		return v, moved(k, s, a, b) or_continue, true
+		append(&out, Degree_One{v, a, unatomized(ring_term(rest[:], 1) or_continue, back)})
 	}
-	return
+	return out[:]
 }
 
 // relates: the unknowns of x in c are related — c reads unknowns, or a layout of one of

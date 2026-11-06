@@ -560,14 +560,14 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// computed once
 		known, plain := plain_of(k, v)
 		if plain && known.imaged do return known.image, known.image != nil
+		image := translated_image(k, t)
 		// the images of its operands: sets of constants, or not given
-		image: Type
 		args := make([]Type, len(v.args))
-		computed := true
+		computed := image == nil
 		for a, i in v.args {
+			if !computed do break
 			args[i], computed = layout_image(k, a)
 			computed &&= is_constant(args[i])
-			if !computed do break
 		}
 		// the term computes exactly: only a rounding rounds (format.odin)
 		if computed && v.op == .Round do image = round_law(k, args[0], bits_format(args[1]), v.span)
@@ -660,6 +660,25 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Effect, ^Scope, ^Name, ^Carve, ^Default:
 	}
 	return nil, false
+}
+
+// translated_image: ±u + b, u in a layout over other unknowns: that layout moved by
+// b — {a·u + b | u in L} is the v with a·v - a·b in L —, a set over the others, read
+// in turn: the unknowns replaced one at a time, the relation kept (§7).
+translated_image :: proc(k: ^Kernel, t: Type) -> Type {
+	// over unknowns whose layouts are constants, nothing relates them
+	us := make([dynamic]^Unknown)
+	read_unknowns(t, &us)
+	related := false
+	for u in us do related ||= !is_constant(layout_of(k, u))
+	if !related do return nil
+	for d in degree_one(k, t) {
+		layout := layout_of(k, d.u)
+		if d.a != 1 && d.a != -1 || is_constant(layout) do continue
+		set := moved(k, layout, d.a, op(k, .Mul, Int(-d.a), d.b)) or_continue
+		if image, read := layout_image(k, set); read && is_constant(image) do return image
+	}
+	return nil
 }
 
 // THE TYPE OF A TERM THE RING DOES NOT READ
