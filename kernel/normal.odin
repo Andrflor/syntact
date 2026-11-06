@@ -203,7 +203,13 @@ or_law :: proc(k: ^Kernel, terms: []Type) -> Type {
 }
 
 and_law :: proc(k: ^Kernel, terms: []Type) -> Type {
-	// t & S, t one value: t where t in S is true, none where false (§4.1)
+	return meet_law(k, terms, nil)
+}
+
+// meet_law: the & of terms. t & S, t one value: t where t in S is true, none where
+// false (§4.1); in_s, when not nil, is that verdict as it is already read — the
+// literal of a reach (narrow).
+meet_law :: proc(k: ^Kernel, terms: []Type, in_s: Type) -> Type {
 	at := -1
 	for t, i in terms {
 		if !is_value(k, t) || is_constant(t) && !written_value(t) do continue
@@ -214,9 +220,9 @@ and_law :: proc(k: ^Kernel, terms: []Type) -> Type {
 		others := make([dynamic]Type)
 		for t, i in terms do if i != at do append(&others, t)
 		set := len(others) == 1 ? others[0] : lattice_law(k, others[:], false)
-		in_s := in_law(k, terms[at], set)
-		if is_bool(in_s, true) do return terms[at]
-		if is_bool(in_s, false) do return None{}
+		verdict := in_s != nil ? in_s : in_law(k, terms[at], set)
+		if is_bool(verdict, true) do return terms[at]
+		if is_bool(verdict, false) do return None{}
 		// a pattern gives one of its products: (t ? {c -> p …}) & S = t ? {c -> p & S …}
 		if p, is_pattern := terms[at].(^Pattern); is_pattern && !has_effect(p) {
 			branches := make([]Branch, len(p.branches))

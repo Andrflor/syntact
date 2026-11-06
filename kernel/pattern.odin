@@ -267,7 +267,7 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 		if !said {
 			unsaid = bool_and(k, unsaid, l)
 			// a term the reach speaks of: t & S in the branch, as ?ₖ::(L & S)
-			if _, is_unknown := o.args[0].(^Unknown); !is_unknown do out = restricting(k, out, o.args[0], positive ? o.args[1] : not_law(k, o.args[1]))
+			if _, is_unknown := o.args[0].(^Unknown); !is_unknown do out = restricting(k, out, o.args[0], positive ? o.args[1] : not_law(k, o.args[1]), l)
 		}
 	}
 	return out, true, unsaid
@@ -295,7 +295,7 @@ inhabited_by :: proc(k: ^Kernel, r: Rewrite, layout: Type) -> (out: Rewrite, rea
 
 // restricting: r, with the term t restricted to S, t & S — further, when r
 // restricts it.
-restricting :: proc(k: ^Kernel, r: Rewrite, t, s: Type) -> Rewrite {
+restricting :: proc(k: ^Kernel, r: Rewrite, t, s: Type, literal: Type) -> Rewrite {
 	out := make([dynamic]Rewriting)
 	current := t
 	for x in r {
@@ -305,7 +305,8 @@ restricting :: proc(k: ^Kernel, r: Rewrite, t, s: Type) -> Rewrite {
 		}
 		append(&out, x)
 	}
-	append(&out, Rewriting{read = t, term = and_law(k, {current, s})})
+	// t in S is the literal of the reach, already read: not read again
+	append(&out, Rewriting{read = t, term = meet_law(k, {current, s}, literal)})
 	return out[:]
 }
 
