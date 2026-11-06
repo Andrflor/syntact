@@ -207,8 +207,7 @@ production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	for c in calls_in(k, value, root) do for x in c.target.(^Scope).changes do carved[x] = true
 	if len(carved) == 0 do return value
 	key := make([dynamic]^Binding)
-	for x in carved do append(&key, x)
-	slice.sort_by(key[:], proc(a, b: ^Binding) -> bool {return uintptr(a) < uintptr(b)})
+	for x in in_order(carved) do append(&key, x)
 	eq: ^Recursion
 	for x in k.equations do if x.root == root && slice.equal(x.given, key[:]) do eq = x
 	if eq == nil do eq = equation_built(k, root, key[:])

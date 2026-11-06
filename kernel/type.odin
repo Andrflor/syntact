@@ -379,6 +379,7 @@ Typing :: enum u8 {
 // Binding: a binding as written — its color and its value are terms — and their
 // normal forms, given once, when asked.
 Binding :: struct {
+	order:       u64, // when it was made: bindings are read in this order, never by address
 	name:        string, // "" for an anonymous binding or a production
 	capture:     string, // (h): an alias the product of a cover reads; not a field
 	kind:        Kind,

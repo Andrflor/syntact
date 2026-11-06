@@ -400,8 +400,9 @@ copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 	if !m.substitute do c.source = s // a scope of a branch is checked as written there
 	m.scopes[s] = c
 	for b in s.bindings {
-		n := new(Binding)
+		n := binding_node()
 		n^ = Binding {
+			order    = n.order,
 			name     = b.name,
 			kind     = b.kind,
 			span     = b.span,
@@ -1277,7 +1278,7 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 				for b in xs[:min(int(at) + 1, len(xs))] do expanded ||= b.kind == .Expand
 				if !expanded && int(at) < len(xs) {
 					out := slice.clone(xs)
-					carved := new(Binding)
+					carved := binding_node()
 					carved.kind, carved.span, carved.value = .Push, span, args[2]
 					out[at] = carved
 					return run_scope(k, out)
@@ -1313,9 +1314,9 @@ by_place :: proc(k: ^Kernel, o: Operator, x: Type, xs: []^Binding, i: Type, span
 		none_of := in_law(k, run, empty)
 		if is_bool(none_of, true) do return by_place(k, o, after, xs[n + 1:], at, span)
 		some := is_bool(none_of, false) ? run : and_law(k, {run, not_law(k, empty)})
-		head := new(Binding)
+		head := binding_node()
 		head.kind, head.span, head.value = .Push, span, run_law(k, .Item, {some, Int(0)}, span)
-		tail := new(Binding)
+		tail := binding_node()
 		tail.kind, tail.span, tail.value = .Expand, span, run_law(k, .From, {some, Int(1)}, span)
 		split := make([dynamic]^Binding)
 		append(&split, head, tail)
@@ -1495,8 +1496,10 @@ suffix :: proc(k: ^Kernel, layout: Type, at: Type) -> (out: Type, ok: bool) {
 			piece := length_image(k, o.args[0]) or_return
 			if !is_int(piece, 1) do return
 			fewer := and_law(k, {exact_law(k, .Sub, {layout_image(k, o.args[1]) or_return, c - Int(fixed)}, rest[0].span), COUNTS})
-			b := new(Binding)
+			b := binding_node()
+			order := b.order
 			b^ = rest[0]^
+			b.order = order
 			b.color = new_operation(.Mul, o.args[0], fewer)
 			b.typed_color = b.color
 			out := make([dynamic]^Binding)

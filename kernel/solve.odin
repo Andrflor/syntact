@@ -23,7 +23,7 @@ import "core:slice"
 
 Recursion :: struct {
 	root:     ^Scope,
-	given:    []^Binding, // the fields the call that reads it carves, sorted by address
+	given:    []^Binding, // the fields the call that reads it carves, in their order
 	generic:  ^Scope, // root where each field its calls carve is an unknown of its color
 	term:     Type, // its first production there
 	params:   map[^Binding]^Unknown,
@@ -32,11 +32,10 @@ Recursion :: struct {
 	reading:  bool, // being read: its calls are the hypothesis (§5.6)
 }
 
-// call_key: the fields a carve of root changes, sorted by address.
+// call_key: the fields a carve of root changes, in their order.
 call_key :: proc(s: ^Scope) -> []^Binding {
 	key := make([dynamic]^Binding)
-	for b in s.changes do append(&key, b)
-	slice.sort_by(key[:], proc(a, b: ^Binding) -> bool {return uintptr(a) < uintptr(b)})
+	for b in in_order(s.changes) do append(&key, b)
 	return key[:]
 }
 
@@ -80,7 +79,8 @@ called :: proc(v: Type) -> (^Collapse, bool) {
 // equation: the recursion follows what the other builds (§5.6).
 through_of :: proc(k: ^Kernel, s: ^Scope) -> map[^Binding]^Recursion {
 	out := make(map[^Binding]^Recursion)
-	for b, v in s.changes {
+	for b in in_order(s.changes) {
+		v := s.changes[b]
 		c := called(v) or_continue
 		t, is_scope := c.target.(^Scope)
 		if !is_scope || origin(t) == origin(s) do continue
@@ -100,7 +100,7 @@ equation_built :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map
 	for {
 		params := make(map[^Binding]^Unknown)
 		changes := make(map[^Binding]Type)
-		for b in carved {
+		for b in in_order(carved) {
 			if other, kept := through[b]; kept {
 				// a call of the other equation, over its own fields
 				c := new(Collapse)
@@ -144,8 +144,9 @@ solution_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
 // unknowns of that equation at the values its carve gives.
 values_of_call :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope, r: Rewrite = nil) -> Rewrite {
 	r := r
-	for b, u in eq.params do r = rewriting(r, u, b in s.changes ? s.changes[b] : binding_type(k, holding(s, b)))
-	for b, other in eq.through {
+	for b in in_order(eq.params) do r = rewriting(r, eq.params[b], b in s.changes ? s.changes[b] : binding_type(k, holding(s, b)))
+	for b in in_order(eq.through) {
+		other := eq.through[b]
 		c := called(s.changes[b]) or_continue
 		t := c.target.(^Scope) or_continue
 		r = values_of_call(k, other, t, r)
@@ -213,7 +214,7 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 			if !is_call do return nil
 			t, is_scope := c.target.(^Scope)
 			if !is_scope || origin(t) != other.root do return nil
-			for ob, ou in other.params do next[ou] = ob in t.changes ? t.changes[ob] : binding_type(k, holding(t, ob))
+			for ob in in_order(other.params) do next[other.params[ob]] = ob in t.changes ? t.changes[ob] : binding_type(k, holding(t, ob))
 			continue
 		}
 		next[eq.params[b] or_else nil] = v
@@ -497,7 +498,8 @@ window :: proc(k: ^Kernel, eq: ^Recursion, p: ^Pattern, calls: []^Collapse) -> T
 	for c, j in calls {
 		changes := c.target.(^Scope).changes
 		if len(changes) != 1 do return nil
-		for b, v in changes {
+		for b in in_order(changes) {
+			v := changes[b]
 			if eq.params[b] != u do return nil
 			alpha, beta, affine := affine_in(k, v, u)
 			if !affine || !is_int(alpha, 1) do return nil

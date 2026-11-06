@@ -257,8 +257,8 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 	s, is_scope := c.target.(^Scope)
 	if !is_scope do return c
-	carved := rewrite_carve(k, s, r)
-	if carved == s do return c
+	carved, still := rewrite_carve(k, s, r).(^Scope)
+	if !still || carved == s do return c
 	out := new(Collapse)
 	out^ = c^
 	out.target = carved
@@ -268,8 +268,18 @@ rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 // rewrite_carve: s{x -> v} with u rewritten is s{x -> v with u rewritten}. A
 // written scope is rewritten as the carve of its bindings to their values
 // rewritten. The scope itself when nothing changes.
-rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> ^Scope {
+rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> Type {
 	if s.carved == nil {
+		// a run — anonymous values and expansions —: the free monoid, its parts
+		// rewritten; a part that becomes a known run places its bindings (§5.3)
+		run := len(s.bindings) > 0
+		for b in s.bindings do run &&= (b.kind == .Push || b.kind == .Expand) && b.name == "" && b.color == nil && b.value != nil
+		if run {
+			moved := false
+			for b in s.bindings do moved ||= !same(k, rewrite(k, binding_value(k, b), r), binding_value(k, b))
+			if !moved do return s
+			return joined(k, nil, s.bindings[:], r)
+		}
 		changes := make(map[^Binding]Type)
 		moved := false
 		for b in s.bindings {
@@ -283,7 +293,8 @@ rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> ^Scope {
 	}
 	changes := make(map[^Binding]Type)
 	moved := false
-	for b, v in s.changes {
+	for b in in_order(s.changes) {
+		v := s.changes[b]
 		w := rewrite(k, v, r)
 		// the place of a resonant binding is not a read of it: it follows only a place
 		if _, is_place := w.(^Unknown); b.resonance != nil && !is_place do w = v

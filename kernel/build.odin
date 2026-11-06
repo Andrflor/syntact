@@ -2,6 +2,7 @@ package kernel
 
 import syn "../syntax"
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 
 // FROM THE AST TO TERMS
@@ -25,8 +26,25 @@ new_scope :: proc(parent: ^Scope, span: syn.Span) -> ^Scope {
 	return s
 }
 
-new_binding :: proc(s: ^Scope, kind: Kind, span: syn.Span) -> ^Binding {
+// binding_node: a binding, numbered in the order bindings are made.
+binding_node :: proc() -> ^Binding {
+	@(static) made: u64
+	made += 1
 	b := new(Binding)
+	b.order = made
+	return b
+}
+
+// in_order: the bindings of a map, in the order they were made.
+in_order :: proc(m: map[^Binding]$V) -> []^Binding {
+	out := make([dynamic]^Binding, 0, len(m))
+	for b in m do append(&out, b)
+	slice.sort_by(out[:], proc(a, b: ^Binding) -> bool {return a.order < b.order})
+	return out[:]
+}
+
+new_binding :: proc(s: ^Scope, kind: Kind, span: syn.Span) -> ^Binding {
+	b := binding_node()
 	b.kind, b.span, b.scope = kind, span, s
 	append(&s.bindings, b)
 	return b
