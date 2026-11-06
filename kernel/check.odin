@@ -133,7 +133,7 @@ exhaustive :: proc(k: ^Kernel, p: ^Pattern) {
 	if rest == nil do return
 	// the target in the union of the covers, read whole: a call by induction (§5.6)
 	covers := make([]Type, len(p.branches))
-	for b, i in p.branches do covers[i] = normal(k, b.cover)
+	for b, i in p.branches do covers[i] = branch_term(k, b, b.cover)
 	if verdict, _ := prove(k, in_law(k, p.target, or_law(k, covers))); verdict == .Proven do return
 	if verdict, _ := prove(k, bool_not(k, rest)); verdict != .Proven {
 		report(k, .Non_Exhaustive_Pattern, p.span, fmt.tprintf("a value of %s is not proven taken by a branch", print_type(p.target)))

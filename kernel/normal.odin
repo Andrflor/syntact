@@ -12,8 +12,7 @@ import "core:slice"
 // types through their reading (lattice.odin); what holds an unknown keeps its terms.
 
 normal :: proc(k: ^Kernel, t: Type) -> Type {
-	if t == nil || normalized(t) do return t
-	if form := remembered(t); form != nil do return form
+	if t == nil do return t
 	switch v in t {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t
@@ -40,92 +39,17 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 		return scope_law(k, v)
 	case ^Operation:
 		if is_string_value(t) do return t // a string: a primitive
-		return remember(t, as_normal(sequence(k, t, normal_all(k, parts(t)), term_law)))
+		return sequence(k, t, normal_all(k, parts(t)), term_law)
 	case ^Or, ^And, ^Not, ^Is, ^Range, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern:
-		return remember(t, as_normal(sequence(k, t, normal_all(k, parts(t)), term_law)))
+		return sequence(k, t, normal_all(k, parts(t)), term_law)
 	}
 	return t
 }
 
-// remembered: the normal form of a closed node, once computed: computed once.
-remembered :: proc(t: Type) -> Type {
-	#partial switch v in t {
-	case ^Operation:
-		return v.form
-	case ^Or:
-		return v.form
-	case ^And:
-		return v.form
-	case ^Not:
-		return v.form
-	case ^Is:
-		return v.form
-	case ^Range:
-		return v.form
-	}
-	return nil
-}
-
-// remember: form, the normal form of t, kept in t when t is closed.
-remember :: proc(t: Type, form: Type) -> Type {
-	#partial switch v in t {
-	case ^Operation:
-		if v.closed do v.form = form
-	case ^Or:
-		if v.closed do v.form = form
-	case ^And:
-		if v.closed do v.form = form
-	case ^Not:
-		if v.closed do v.form = form
-	case ^Is:
-		if v.closed do v.form = form
-	case ^Range:
-		if v.closed do v.form = form
-	}
-	return form
-}
-
-// normalized: t is a normal form — normal(normal(t)) = normal(t): what gave it, the
-// laws, need not be computed again.
-normalized :: proc(t: Type) -> bool {
-	#partial switch v in t {
-	case ^Operation:
-		return v.normal
-	case ^Pattern:
-		return v.normal
-	case ^Or:
-		return v.normal
-	case ^And:
-		return v.normal
-	case ^Not:
-		return v.normal
-	case ^Is:
-		return v.normal
-	case ^Range:
-		return v.normal
-	}
-	return false
-}
-
-// as_normal: t, a normal form the laws gave, known as one.
-as_normal :: proc(t: Type) -> Type {
-	#partial switch v in t {
-	case ^Operation:
-		v.normal = true
-	case ^Pattern:
-		v.normal = true
-	case ^Or:
-		v.normal = true
-	case ^And:
-		v.normal = true
-	case ^Not:
-		v.normal = true
-	case ^Is:
-		v.normal = true
-	case ^Range:
-		v.normal = true
-	}
-	return t
+// composed: t, a new composition of normal terms, by its own law: only it is
+// normalized, never its parts, normal already. normal is for a term as written.
+composed :: proc(k: ^Kernel, t: Type) -> Type {
+	return sequence(k, t, parts(t), term_law)
 }
 
 // parts: what a term computes on, in the order it is written. A scope holds its

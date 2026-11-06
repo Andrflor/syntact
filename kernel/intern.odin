@@ -100,60 +100,33 @@ same_key :: proc(a, b: Key) -> bool {
 
 // build_node: a new node of this key, its children its own.
 build_node :: proc(key: Key) -> Type {
-	closed := true
-	for c in key.children do closed &&= is_closed(c)
 	switch key.shape {
 	case .Or:
 		o := new(Or)
-		o.terms, o.closed = clone_types(key.children), closed
+		o.terms = clone_types(key.children)
 		return o
 	case .And:
 		a := new(And)
-		a.terms, a.closed = clone_types(key.children), closed
+		a.terms = clone_types(key.children)
 		return a
 	case .Not:
 		n := new(Not)
-		n.term, n.closed = key.children[0], closed
+		n.term = key.children[0]
 		return n
 	case .Is:
 		i := new(Is)
-		i.term, i.closed = key.children[0], closed
+		i.term = key.children[0]
 		return i
 	case .Range:
 		r := new(Range)
-		r.lo, r.hi, r.family, r.closed = key.children[0], key.children[1], Range_Family(key.op), closed
+		r.lo, r.hi, r.family = key.children[0], key.children[1], Range_Family(key.op)
 		return r
 	case .Operation:
 		o := new(Operation)
-		o.op, o.args, o.closed = Operator(key.op), clone_types(key.children), closed
+		o.op, o.args = Operator(key.op), clone_types(key.children)
 		return o
 	}
 	return nil
-}
-
-// is_closed: a child whose normal form is its own wherever it is asked: a value, an
-// unknown — but what a recursive call gives back, known as its equation is solved —,
-// a closed node; a name is not, its normal form is its binding's, being typed.
-is_closed :: proc(t: Type) -> bool {
-	#partial switch v in t {
-	case nil, Char, Int, Real, Bool, None, Invalid:
-		return true
-	case ^Unknown:
-		return v.call == nil
-	case ^Or:
-		return v.closed
-	case ^And:
-		return v.closed
-	case ^Not:
-		return v.closed
-	case ^Is:
-		return v.closed
-	case ^Range:
-		return v.closed
-	case ^Operation:
-		return v.closed
-	}
-	return false
 }
 
 hash_key :: proc(key: Key) -> u64 {

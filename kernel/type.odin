@@ -128,51 +128,29 @@ Version :: struct {
 	place, at: ^Unknown,
 }
 
-// Known: what a node of the algebra knows of itself: whether it is a normal form;
-// whether it is closed — it holds values, unknowns and closed nodes, no name: its
-// normal form is its own, wherever it is asked —; and then that normal form, once
-// computed (normal.odin).
-Known :: struct {
-	normal:    bool, // a normal form: normal gives it back
-	closed:    bool,
-	constancy: Constancy, // whether it holds no unknown, once asked (lattice.odin)
-	form:      Type,
-}
-
-Constancy :: enum u8 {
-	Unknown,
-	Yes,
-	No,
-}
-
 Or :: struct {
-	terms:       []Type,
-	using known: Known,
+	terms: []Type,
 }
 
 And :: struct {
-	terms:       []Type,
-	using known: Known,
+	terms: []Type,
 }
 
 Not :: struct {
-	term:        Type,
-	using known: Known,
+	term: Type,
 }
 
 Is :: struct {
-	term:        Type,
-	using known: Known,
+	term: Type,
 }
 
 // Range: every primitive from lo to hi; a nil bound is infinite. Its bounds are
 // primitives of one family, or terms over unknowns (0..n). Infinite on both sides,
 // it keeps its family: `..0..` is every integer, `..` alone every primitive.
 Range :: struct {
-	lo, hi:      Type,
-	family:      Range_Family,
-	span:        syn.Span,
-	using known: Known,
+	lo, hi: Type,
+	family: Range_Family,
+	span:   syn.Span,
 }
 
 Range_Family :: enum u8 {
@@ -216,11 +194,10 @@ reads_run :: proc(op: Operator) -> bool {
 }
 
 Operation :: struct {
-	op:          Operator,
-	args:        []Type,
-	span:        syn.Span, // as written: where an illegal operator is reported
-	exact:       bool, // a / k known to divide exactly: what the ring gives over a divisor (ring.odin)
-	using known: Known,
+	op:    Operator,
+	args:  []Type,
+	span:  syn.Span, // as written: where an illegal operator is reported
+	exact: bool, // a / k known to divide exactly: what the ring gives over a divisor (ring.odin)
 }
 
 // Name: a binding, the last occurrence visible where the name is written.
@@ -275,7 +252,6 @@ Pattern :: struct {
 	target:   Type,
 	branches: []Branch,
 	span:     syn.Span,
-	normal:   bool, // a normal form: normal gives it back
 	reached:  bool, // read on its target (pattern_over): each branch keeps its reach
 	rest:     Type, // reached: the values no branch takes; nil when every one is
 }
@@ -468,12 +444,12 @@ written :: proc(t: Type, span: syn.Span) -> Type {
 	case ^Operation:
 		o := new(Operation)
 		o^ = v^
-		o.span, o.known = span, {}
+		o.span = span
 		return o
 	case ^Range:
 		r := new(Range)
 		r^ = v^
-		r.span, r.known = span, {}
+		r.span = span
 		return r
 	}
 	return t
@@ -527,9 +503,6 @@ init_constants :: proc "contextless" () {
 	BOOLS = new_or(Bool(false), Bool(true))
 	NONZERO_INT = new_or(new_range(nil, Int(-1), .Int), POSITIVE) // its cells, in their order
 	NONZERO_REAL = new_or(real_cell({hi = real_int(0), hi_open = true}), real_cell({lo = real_int(0), lo_open = true}))
-	// each is a normal form (kernel_test.odin): normal gives it back, and keeps in it
-	// nothing a kernel computed — they outlive every kernel
-	for c in constants() do as_normal(c)
 	EVERY_SCOPE = new_scope(nil, {})
 	new_binding(EVERY_SCOPE, .Expand, {})
 	EVERY_SCOPE.source, EVERY_SCOPE.complete, EVERY_SCOPE.reached = EVERY_SCOPE, true, true

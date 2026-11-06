@@ -60,7 +60,7 @@ prove :: proc(k: ^Kernel, eq: Type) -> (Verdict, Rewrite) {
 // boole: eq = (u in S) ? {true -> eq  -> eq}.
 boole :: proc(k: ^Kernel, u: ^Unknown, s: Type, eq: Type) -> Type {
 	p := new(Pattern)
-	p.target = new_operation(.In, u, s)
+	p.target = in_law(k, u, s)
 	p.branches = make([]Branch, 2)
 	p.branches[0] = Branch{cover = Bool(true), product = eq}
 	p.branches[1] = Branch{product = eq}

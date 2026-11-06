@@ -731,7 +731,7 @@ current_is :: proc(t: Type, from: ^Scope, to: Type) -> Type {
 		if args := currents(v.args, from, to); raw_data(args) != raw_data(v.args) {
 			o := new(Operation)
 			o^ = v^
-			o.args, o.known = args, {}
+			o.args = args
 			return o
 		}
 	case ^Or:
@@ -747,7 +747,7 @@ current_is :: proc(t: Type, from: ^Scope, to: Type) -> Type {
 		if lo != v.lo || hi != v.hi {
 			r := new(Range)
 			r^ = v^
-			r.lo, r.hi, r.known = lo, hi, {}
+			r.lo, r.hi = lo, hi
 			return r
 		}
 	case ^Collapse:

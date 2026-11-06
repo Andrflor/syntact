@@ -6,9 +6,9 @@ import "core:slice"
 // FOLDS (specs/types.md §5.6): the laws of a fold ⟳ along an orbit, of μ, of Σ and of
 // C-finite sequences, each a local law the normal form applies.
 
-// op: the normal form of the operation.
+// op: the operation on normal operands, by its law (composed).
 op :: proc(k: ^Kernel, o: Operator, args: ..Type) -> Type {
-	return normal(k, new_operation(o, ..args))
+	return composed(k, new_operation(o, ..args))
 }
 
 // affine_in: t = α·y + β, α and β not reading y: t of degree 1 in y, by the ring

@@ -19,8 +19,15 @@ import "core:slice"
 // not typed. A value of the target that no branch takes makes the pattern
 // non-exhaustive: `[~]rest` must be proven, rest being the values no cover takes.
 
+// pattern_law: p, a pattern a law built of normal terms, on its target.
 pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
-	return pattern_on(k, normal(k, p.target), p)
+	return pattern_on(k, p.target, p)
+}
+
+// branch_term: a term of the branch b, normal: written in its scope, its normal
+// form; built by a law, normal already — not normalized again.
+branch_term :: proc(k: ^Kernel, b: Branch, t: Type) -> Type {
+	return b.scope != nil ? normal(k, t) : t
 }
 
 // pattern_on: the pattern p on its target, in normal form. A cover is computed when
@@ -89,7 +96,7 @@ entered :: proc(k: ^Kernel, p: ^Pattern, branches: []Branch) -> Type {
 	for &b in branches do b.product = rewrite(k, b.product, b.reach)
 	out := new(Pattern)
 	out^ = p^
-	out.normal, out.branches = false, branches
+	out.branches = branches
 	return one_product(k, out)
 }
 
@@ -120,11 +127,12 @@ branch_reaches :: proc(k: ^Kernel, p: ^Pattern) -> (out: [dynamic]Reach, rest: T
 pattern_over :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite) -> Type {
 	if q, is_pattern := target.(^Pattern); is_pattern && !has_effect(q) do return pattern_through(k, q, p, outer)
 	for b, i in p.branches {
-		if b.cover == nil || !has_effect(normal(k, b.cover)) do continue
-		if i == 0 do return sequence(k, p, {target, normal(k, b.cover)}, covered)
+		if b.cover == nil || !has_effect(branch_term(k, b, b.cover)) do continue
+		if i == 0 do return sequence(k, p, {target, branch_term(k, b, b.cover)}, covered)
 		branches := make([dynamic]Branch)
 		append(&branches, ..p.branches[:i])
-		append(&branches, Branch{product = branching(p, p.branches[i:]), span = b.span})
+		// the others, a pattern on the same target: built in its normal form
+		append(&branches, Branch{product = pattern_on(k, target, branching(p, p.branches[i:])), span = b.span})
 		return pattern_over(k, target, branching(p, branches[:]), outer)
 	}
 	reached, rest, invalid := reaches(k, target, p.branches)
@@ -184,7 +192,7 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 		cond: Type = Bool(true)
 		cover: Type
 		if b.cover != nil {
-			cover = normal(k, b.cover)
+			cover = branch_term(k, b, b.cover)
 			cond = in_law(k, target, cover)
 			if is_invalid(cover) do return out, rest, cover
 			if is_invalid(cond) do return out, rest, cond
@@ -317,10 +325,10 @@ restricting :: proc(k: ^Kernel, r: Rewrite, t, s: Type, literal: Type) -> Rewrit
 branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite, target: Type, outer: Rewrite = nil) -> Type {
 	b := b
 	// a product rewritten with its target: in its branch, where its reach holds
-	if outer != nil do b.product = rewrite(k, normal(k, b.product), outer)
+	if outer != nil do b.product = rewrite(k, branch_term(k, b, b.product), outer)
 	// the pieces of the value that reaches the branch: the target, narrowed
 	pieces := cover_pieces(k, b, rewrite(k, target, r))
-	if b.scope == nil || len(r) == 0 && len(pieces) == 0 do return rewrite(k, normal(k, b.product), r)
+	if b.scope == nil || len(r) == 0 && len(pieces) == 0 do return rewrite(k, branch_term(k, b, b.product), r)
 	m := Copier{outer = r, substitute = true, pieces = pieces}
 	m.scopes[b.scope] = b.scope // the scopes written in the branch are copied
 	return rewrite(k, normal(k, copy_term(k, &m, b.product, b.scope)), r)
@@ -396,7 +404,7 @@ conjuncts :: proc(t: Type, out: ^[dynamic]Type) {
 // (t ? {c -> p …}) in C = t ? {c -> p in C …}.
 enter_branches :: proc(k: ^Kernel, p: ^Pattern, apply: proc(product, other: Type) -> Type, other: Type) -> Type {
 	branches := make([]Branch, len(p.branches))
-	for b, i in p.branches do branches[i] = with_product(b, normal(k, apply(b.product, other)))
+	for b, i in p.branches do branches[i] = with_product(b, composed(k, apply(b.product, other)))
 	return entered(k, p, branches)
 }
 

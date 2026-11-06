@@ -247,7 +247,7 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 			// a scope not known yet, collapsed: its law once the rewrite gives it
 			target := rewrite(k, v.target, r)
 			if target == v.target do return t
-			return as_normal(collapse_law(k, target, v))
+			return collapse_law(k, target, v)
 		}
 		return rewrite_call(k, v, r)
 	case ^Carve:
@@ -264,7 +264,7 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		out := new(Carve)
 		out^ = v^
 		out.target, out.args = target, args
-		return as_normal(carve_law(k, target, out))
+		return carve_law(k, target, out)
 	case ^Fold:
 		parts := fold_parts(v)
 		rewritten := rewrite_all(k, parts, r)
@@ -305,30 +305,30 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		if is_string_value(t) do return t
 		args := rewrite_all(k, v.args, r)
 		if identical(args, v.args) do return t
-		return as_normal(operation_law(k, v.op, args, v.span))
+		return operation_law(k, v.op, args, v.span)
 	case ^Or:
 		terms := rewrite_all(k, v.terms, r)
 		if identical(terms, v.terms) do return t
-		return as_normal(or_law(k, terms))
+		return or_law(k, terms)
 	case ^And:
 		terms := rewrite_all(k, v.terms, r)
 		if identical(terms, v.terms) do return t
-		return as_normal(and_law(k, terms))
+		return and_law(k, terms)
 	case ^Not:
 		term := rewrite(k, v.term, r)
 		if term == v.term do return t
-		return as_normal(not_law(k, term))
+		return not_law(k, term)
 	case ^Is:
 		term := rewrite(k, v.term, r)
 		if term == v.term do return t
-		return as_normal(is_law(term))
+		return is_law(term)
 	case ^Range:
 		lo, hi := rewrite(k, v.lo, r), rewrite(k, v.hi, r)
 		if lo == v.lo && hi == v.hi do return t
-		return as_normal(range_law(k, lo, hi, v.family, v.span))
+		return range_law(k, lo, hi, v.family, v.span)
 	case ^Pattern:
 		// a new target: the pattern on it, each product rewritten in its branch (§6)
-		if target := rewrite(k, v.target, r); target != v.target do return as_normal(pattern_on(k, target, v, r))
+		if target := rewrite(k, v.target, r); target != v.target do return pattern_on(k, target, v, r)
 		// a cover over the unknowns rewritten: the pattern on its new covers
 		covers: ^Pattern
 		for b, i in v.branches {
@@ -342,10 +342,9 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 			}
 			covers.branches[i].cover = cover
 		}
-		if covers != nil do return as_normal(pattern_on(k, v.target, covers, r))
+		if covers != nil do return pattern_on(k, v.target, covers, r)
 		p := new(Pattern)
 		p^ = v^
-		p.normal = false
 		p.branches = make([]Branch, len(v.branches))
 		moved := false
 		for b, i in v.branches {
@@ -355,14 +354,14 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		if !moved do return t
 		// the target the same, so are its unknowns, and the reach of each branch: only
 		// its product is rewritten
-		return as_normal(one_product(k, p))
+		return one_product(k, p)
 	case ^Scope:
 		return rewrite_carve(k, v, r)
 	case ^Access:
 		// x.a, x rewritten: the field of what x becomes
 		target := rewrite(k, v.target, r)
 		if target == v.target do return t
-		return as_normal(access_law(k, target, v))
+		return access_law(k, target, v)
 	case ^Name, ^Default:
 	}
 	return t

@@ -525,7 +525,7 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 	case ^Pattern:
 		p := new(Pattern)
 		p^ = v^
-		p.normal, p.reached = false, false // what is copied is computed again
+		p.reached = false // what is copied is computed again
 		p.target = copy_term(k, m, v.target, scope)
 		p.branches = slice.clone(v.branches)
 		for &b in p.branches {
