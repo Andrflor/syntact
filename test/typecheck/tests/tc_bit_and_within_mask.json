@@ -1,0 +1,6 @@
+{
+  "name": "tc_bit_and_within_mask",
+  "description": "x [&] m, x and m ≥ 0, lies in 0..m (§4.5): read as an unknown in 0..m where the term relates it to m, as a remainder is read in 0..b - 1.",
+  "source": "u64:h -> ??\nu32:n -> ??\nmask -> n * 4\n(0..mask):a -> h [&] mask\n(0..mask):b -> mask [&] h",
+  "expect_errors": []
+}

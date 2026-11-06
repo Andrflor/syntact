@@ -671,13 +671,15 @@ one_affine :: proc(k: ^Kernel, t: Type) -> (u: ^Unknown, a: i128, b: Type, ok: b
 //   n / c, c constant: n is c·q + r, q = n / c, r in 0..c - 1, unknowns of their own;
 //   n % b: an unknown in 0..b - 1 (in -(b - 1)..b - 1 when n may be negative);
 //   (b·Q + R) / b = Q + R / b (+ 1 when n < 0), R ≥ 0: the polynomial n divided by b.
+// Likewise x [&] m, x and m ≥ 0, m not constant: an unknown in 0..m, a bit of it
+// set only where m has it set (§4.5).
 euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 	if !is_constant(image) do return image
 	quotients := make([dynamic]^Operation)
 	visit :: proc(t: Type, out: ^[dynamic]^Operation) {
 		o, is_op := t.(^Operation)
 		if !is_op do return
-		if (o.op == .Div || o.op == .Mod) && len(o.args) == 2 do append(out, o)
+		if (o.op == .Div || o.op == .Mod || o.op == .Bit_And) && len(o.args) == 2 do append(out, o)
 		for a in o.args do visit(a, out)
 	}
 	visit(t, &quotients)
@@ -688,7 +690,22 @@ euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 		if !known || !is_constant(read) do return out
 		return and_law(k, {int_hull(k, out), int_hull(k, read)})
 	}
+	natural :: proc(k: ^Kernel, t: Type) -> bool {
+		at_least, _ := term_bound(k, t, true)
+		low, bounded := at_least.(Int)
+		return bounded && low >= 0
+	}
 	for d in quotients {
+		if d.op == .Bit_And {
+			if Type(d) == t || !natural(k, d.args[0]) || !natural(k, d.args[1]) do continue
+			w := new_unknown(k, nil)
+			for m in d.args do if !is_constant(m) {
+				within := range_law(k, Int(0), m, .Int, {})
+				w.layout = w.layout == nil ? within : and_law(k, {w.layout, within})
+			}
+			if w.layout == nil do continue
+			return related(k, t, out, append_read(nil, d, w))
+		}
 		n, b := d.args[0], d.args[1]
 		c, constant := b.(Int)
 		// n / c, n % b themselves: nothing beside them to relate
