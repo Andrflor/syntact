@@ -33,7 +33,11 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
-	if call, ok := x.(^Collapse); ok && call.recursive && call_in(k, call, c) do return Bool(true)
+	// a recursive call, by induction on its equation: in c, or in ~c — then not in c (§4.1)
+	if call, ok := x.(^Collapse); ok && call.recursive {
+		if call_in(k, call, c) do return Bool(true)
+		if call_in(k, call, not_law(k, c)) do return Bool(false)
+	}
 	// what a call with effects gives back: in c by the same induction (§5.6, §4.8)
 	if u, ok := x.(^Unknown); ok && u.call != nil && u.call.recursive && call_in(k, u.call, c) do return Bool(true)
 	// a field, a binding, of what a call gives: in c by induction on it (call_in)
@@ -283,7 +287,9 @@ read_of :: proc(t: Type) -> Read {
 // production at the values its carve gives (§5.3), its calls the hypothesis meanwhile.
 call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool {
 	s := call.target.(^Scope) or_return
-	eq := equation_of(k, origin(s), call_key(s)) or_return
+	key, through := call_key(s), through_of(k, s)
+	eq, found := equation_found(k, origin(s), key, through)
+	if !found do eq = equation_of(k, origin(s), key, through) or_return
 	if eq.term == nil {
 		// no equation where what the call carves is unknown (a hole the carve fills):
 		// the call is its production at the values its carve gives (§5.3), its calls

@@ -83,7 +83,7 @@ origin :: proc(s: ^Scope) -> ^Scope {
 // computes. A carve of it was checked where it is written (scope.odin).
 recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	root := origin(s)
-	if eq, read := equation_of(k, root, call_key(s)); read {
+	if eq, read := equation_of(k, root, call_key(s), through_of(k, s)); read {
 		run: Rewrite
 		if eq.solution != nil do return renewed(k, solution_at(k, eq, s), &run)
 		// the definition is an equality: at the values the call gives, an equation

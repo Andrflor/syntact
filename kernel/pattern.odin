@@ -33,6 +33,17 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 // the target, before any test.
 pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) -> Type {
 	if is_invalid(target) do return target
+	// a call of an equation: the pattern is read on its production at the values the
+	// carve gives (§6), its calls the hypothesis meanwhile — never read at theirs
+	if c, is_call := target.(^Collapse); is_call && c.recursive {
+		if s, is_scope := c.target.(^Scope); is_scope {
+			if eq, read := equation_of(k, origin(s), call_key(s), through_of(k, s)); read && eq.term != nil {
+				eq.reading = true
+				defer eq.reading = false
+				if v := rewrite(k, eq.term, values_of_call(k, eq, s)); !holds_invalid(v) do return pattern_through(k, v, p, outer)
+			}
+		}
+	}
 	return pattern_over(k, target, p, outer)
 }
 
