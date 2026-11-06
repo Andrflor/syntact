@@ -162,3 +162,32 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - Hoisting: a term hoisted before a fold reads no unknown the loop binds and is typed total for all values of its unknowns; test "loop invariant before zero turns" added.
 - x86: branches on comparisons fused, decided branches threaded. strlist 8M: x86 630 ms, C 469 ms, Goose 622 ms. records x86 122 → 96 ms, push 180 → 152 ms.
 - Proposed law, waiting for the user (§5.6): "A state read only through measures of it — its length, its first and last bindings — each of which its update gives in terms of those measures, m(u(x)) = h(m(x)), is the fold of those measures: x: c ↦ u(x) becomes m: m(c) ↦ h(m), and the run is never built." (would remove strlist's per-letter store). Not implemented.
+
+## Step: words round 6 (b7fc637, f27a72e, 10bdfff, 3d31fc2, 88f9c29) — 05:30 UTC
+- b7fc637 §5.3/§5.4 a run `...C:` of a shape C is the bindings of C placed (run_form,
+  layout_pieces): {...Bytes8: ...Word:} in {...Bytes8: ...A:}, Bytes8 in
+  {...A: ...Bytes8:}, {u8 ×16 ...Over8:} in {u8 ×8 ...Word:}. Also: a suffix of a
+  shape is read only when it is not a value (no default of its runs computed), and the
+  default of a meet the laws leave is unsupported, not an infinite recursion.
+- f27a72e §4.6/§5.4/§5.6 runs of one piece meet and part by their lengths:
+  P*M & Q*N = (P&Q)*(M&N), P*M & ~(Q*N) = P*(M&~N) (P within Q), P*M | P*N = P*(M|N);
+  `x in S` atoms on such runs combine (computed_whole). Long8 & ~Bytes8 = u8 * 9..:
+  a pattern `{Bytes8: -> …  {u8: ...Long8:} -> …}` on Long8 is exhaustive, its last
+  cover taking every value left, so last8/last4 are folds. A suffix at an unknown
+  place of a run of M pieces is a run of 0..max(M) pieces (was M: wrong).
+- 10bdfff §5.6 the up-fold's base is read at kₙ & B when n stays a μ (as the down-fold
+  did): last8{t}! is (t from μ) & Bytes8. hash types with no error alone.
+- 3d31fc2 §4.5 x [&] m, x, m ≥ 0: read as an unknown in 0..m where the term relates it.
+- 88f9c29 §4.5 (order of /) n / b ≤ n(h) / b ≤ Q + R, n(h) = b·Q + R (the euclid3 draft,
+  ring-only), and two efficiency laws of the reading: a term is read where it relates
+  (t reads beside d an unknown d reads; for n / c, not through layouts), and the unknown
+  that reads a term is one for each node (plain: in every state). Without the quotient
+  law words drops 1.9 s → 0.65 s.
+- words: 37 errors at 1.9 s → 4 errors at ~7 s (user 4 s) / 7.6 GB: the time is the rest of
+  the program typed for the first time (text, split, count, hash); the cost is readings
+  of (r*r)/vocab for each new remainder unknown r, inside fold_induction and fold
+  lengths (~1500 readings of terms holding |dict.#k|).
+- Left: 260:20/246:20 nslots in u64 needs the image of μ(i: α·c**i + β in l..): a patch
+  (scratchpad wd/least_growing.patch) proves it, but words then types count/put/hash and
+  goes over 10 GB: not pushed. 283:8 |split| in i64 (a fold over a fold's length). The
+  count-down run length (orbit going down) not done.
