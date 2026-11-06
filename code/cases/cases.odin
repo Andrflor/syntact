@@ -118,6 +118,8 @@ CASES := []Binary_Case {
 	{"function that gives a scope, its other field", PAIR + "-> f{n -> ??::u32}!.b", {{args = {"0"}, exit = 1}, {args = {"10"}, exit = 2}}},
 	{"values beyond the registers", FOUR + "-> f{n -> ??::u32}!.d", {{args = {"0"}, exit = 0}, {args = {"5"}, exit = 7}}},
 	{"a float beyond the registers", FOUR + "-> f{n -> ??::u32}!.c", {{args = {"0"}, stdout = "0.500000\n"}, {args = {"5"}, stdout = "1.500000\n"}}},
+	// reals of 32 bits (specs/types.md §4.10): each operation rounded to the nearest
+	{"reals of 32 bits", "io -> <libc.so.6>{\n  printf -> {string:format, f64:x, -> !?::i32}\n}\nstep -> {\n  u32:n -> ??\n  (f32 & 0.0..1.0):x -> 0.0\n  -> n ? {\n    0 -> x\n    -> step{n -> n - 1  x -> x * 0.75 + 0.1}!\n  }\n}\n-> io.printf{format -> \"%.9g\\n\"  x -> step{n -> ??::u32}!}!", {{args = {"3"}, stdout = "0.231250018\n", exit = 12}, {args = {"1000"}, stdout = "0.399999946\n", exit = 12}}},
 	{"binding of a run", RUN + "-> f{n -> ??::u32}!.#2", {{args = {"0"}, exit = 20}, {args = {"5"}, exit = 21}}},
 	{"run read at a counter", TOTAL + "-> total{xs -> {1 2 3}  acc -> ??::u8}!", {{args = {"10"}, exit = 16}, {args = {"254"}, exit = 4}}},
 	// memory (specs/types.md §4.13): runs built by folds, reserved whole and grown

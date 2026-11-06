@@ -1201,10 +1201,17 @@ OPS := [kernel.Operator]Op {
 
 operation :: proc(l: ^Lowering, o: ^kernel.Operation) -> Value {
 	if o.op == .In do return member(l, lower(l, o.args[0]), o.args[1])
-	// a real is computed in 64 bits: rounding to them is what each operation does
+	// a real is computed in 64 bits: rounding to them is what each operation does;
+	// a float holds every float of 32 bits, round32 the nearest of them (§4.10)
 	if o.op == .Round {
-		if bits, is_int := o.args[1].(kernel.Int); is_int && bits == 64 do return lower(l, o.args[0])
-		return fail(l, "%s: the reals of 16 and 32 bits are not lowered yet", kernel.print_type(o))
+		bits, is_int := o.args[1].(kernel.Int)
+		if !is_int || bits != 64 && bits != 32 do return fail(l, "%s: the reals of 16 bits are not lowered yet", kernel.print_type(o))
+		x := lower(l, o.args[0])
+		if bits == 64 || l.error != "" do return x
+		if machine_of(l.f, x) != .Real do return fail(l, "%s rounds a %v", kernel.print_type(o), machine_of(l.f, x))
+		dst := value(l.f, .Real)
+		emit(l, Unary{dst, x, .Round32})
+		return dst
 	}
 	if kernel.reads_run(o.op) do return fail(l, "%s is not lowered yet", kernel.print_type(o))
 	args := make([dynamic]Value)

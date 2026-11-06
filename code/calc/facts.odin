@@ -238,6 +238,8 @@ exact :: proc(op: code.Op, x, y: i128) -> (r: i128, ok: bool) {
 		}
 	case .Neg:
 		r = -x
+	case .Round32:
+		return // an operation on floats
 	case .And:
 		r = x & y
 	case .Or:
