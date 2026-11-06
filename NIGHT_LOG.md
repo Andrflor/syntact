@@ -37,3 +37,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - graph, words, blur, particles rewritten as faithful ports; Python mirrors match Goose outputs at two sizes.
 - None type yet. Kernel gaps (s % v symbolic, count-down run length, captured-unknown fold bound, expansion inclusion, narrow rest cover, product places, particles stack overflow, f32 laws) queued to kernel round 2.
 - Linear bounds now proven by induction (2d8b71a).
+
+## Step: backend round 1 (ea788a7, 6d0f699)
+- strlist compiles, Goose output at N ≤ 3000; crashes at 400000 (split builds its run one level per word: O(N²), stack). 
+- round32 lowered (f32); C calls foreign symbols as variadic.
+- Found: 5 x64/c case failures (3 old; 2 from cf611be). Backend round 2 launched: those cases, item_image({}), split as a fold building its run, strlist compile time, scene port.
