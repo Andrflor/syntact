@@ -157,3 +157,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - Verified on clean master aa8cd77: green, bt2 = 18.
 - respond: 2 errors in 7.4 s with aa8cd77 on the base before 95260f7; out of memory again with 95260f7 (Σ through a fold).
 - Launched: (A) respond memory + kernel compile time; (B) §5.6 field law for scopes, runs and fold states (lru, zip tests, sexp text, particles), extra errors, blur 72:10, calc/graph/scene. Running: words round, x86 code quality + hoisting soundness.
+
+## Step: x86 quality, hoisting (955b160, db9ff0d) — 04:55 UTC
+- Hoisting: a term hoisted before a fold reads no unknown the loop binds and is typed total for all values of its unknowns; test "loop invariant before zero turns" added.
+- x86: branches on comparisons fused, decided branches threaded. strlist 8M: x86 630 ms, C 469 ms, Goose 622 ms. records x86 122 → 96 ms, push 180 → 152 ms.
+- Proposed law, waiting for the user (§5.6): "A state read only through measures of it — its length, its first and last bindings — each of which its update gives in terms of those measures, m(u(x)) = h(m(x)), is the fold of those measures: x: c ↦ u(x) becomes m: m(c) ↦ h(m), and the run is never built." (would remove strlist's per-letter store). Not implemented.
