@@ -33,10 +33,12 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 // the target, before any test.
 pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) -> Type {
 	if is_invalid(target) do return target
-	// a call of an equation: the pattern is read on its production at the values the
-	// carve gives (§6), its calls the hypothesis meanwhile — never read at theirs
+	// a call whose carve gives each field an unknown — the definition over its fields,
+	// universally quantified: the pattern is read on its production (§6), the
+	// definitions compose, its calls the hypothesis meanwhile. A call that gives a field
+	// a term is never read there: that would unfold it
 	if c, is_call := target.(^Collapse); is_call && c.recursive {
-		if s, is_scope := c.target.(^Scope); is_scope {
+		if s, is_scope := c.target.(^Scope); is_scope && at_unknowns(s) {
 			if eq, read := equation_of(k, origin(s), call_key(s), through_of(k, s)); read && eq.term != nil {
 				eq.reading = true
 				defer eq.reading = false
@@ -45,6 +47,25 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 		}
 	}
 	return pattern_over(k, target, p, outer)
+}
+
+// at_unknowns: the carve s gives each field it changes an unknown of its own, a field
+// given a call of another equation such a call.
+at_unknowns :: proc(s: ^Scope) -> bool {
+	seen := make(map[int]bool)
+	defer delete(seen)
+	for b in s.changes {
+		v := s.changes[b]
+		if c, is_call := called(v); is_call {
+			t, is_scope := c.target.(^Scope)
+			if !is_scope || !at_unknowns(t) do return false
+			continue
+		}
+		u, is_unknown := v.(^Unknown)
+		if !is_unknown || u.id in seen do return false
+		seen[u.id] = true
+	}
+	return true
 }
 
 // pattern_through: v ? p, a pattern giving one of its products (§6):

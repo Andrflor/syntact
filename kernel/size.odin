@@ -201,7 +201,7 @@ values_of :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
 	case ^Unknown:
 		return layout_of(k, v), true
 	case ^Collapse:
-		if v.recursive do return call_values(k, v)
+		if v.recursive do if set, found := call_values(k, v); found do return set, true
 	case ^Scope:
 		return v, true // a scope is one value
 	case ^Pattern:
