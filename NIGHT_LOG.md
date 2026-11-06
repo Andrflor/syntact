@@ -42,3 +42,9 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - strlist compiles, Goose output at N ≤ 3000; crashes at 400000 (split builds its run one level per word: O(N²), stack). 
 - round32 lowered (f32); C calls foreign symbols as variadic.
 - Found: 5 x64/c case failures (3 old; 2 from cf611be). Backend round 2 launched: those cases, item_image({}), split as a fold building its run, strlist compile time, scene port.
+
+## Step: kernel round 2 (2d8b71a … f330f31)
+- Linear bounds proven by induction; compile time memoised by the state of what is given (respond 47 s/OOM → 3.7 s, strlist 0.6 s).
+- Euclid with a symbolic divisor (s % v); place carve in run shapes; particles stack overflow fixed; fold length through its step.
+- Errors now: respond 3, sexp 22, calc 32, lru 7, graph 12, words ~32, blur 4, particles 7.
+- Kernel round 3 launched: values of a field across a recursion as the image of its orbit (blur, calc, sexp, graph, lru); runs compose for call lengths (respond); reals in the ring (particles); words gaps.
