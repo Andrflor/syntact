@@ -74,6 +74,28 @@ Read_Key :: struct {
 // gives it back — only what holds a rewritten unknown is computed again.
 rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	if len(r) == 0 || t == nil do return t
+	// a term shared in t is rewritten once: within one rewrite, by node, rewrite and
+	// state of what is being given
+	o, shared := t.(^Operation)
+	if !shared do return rewritten_term(k, t, r)
+	key := Rewrite_Key{o, raw_data(r), len(r), k.state}
+	if x, found := k.rewrites[key]; found do return x
+	k.rewriting += 1
+	out := rewritten_term(k, t, r)
+	k.rewriting -= 1
+	if key.state == k.state do k.rewrites[key] = out
+	if k.rewriting == 0 do clear(&k.rewrites)
+	return out
+}
+
+Rewrite_Key :: struct {
+	node:    ^Operation,
+	rewrite: rawptr,
+	count:   int,
+	state:   u64,
+}
+
+rewritten_term :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	for x in r do if x.read != nil && same(k, x.read, t) do return x.term
 	switch v in t {
 	case Char, Int, Real, Bool, None, Invalid:
