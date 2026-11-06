@@ -1,0 +1,1 @@
+{"name": "tc_pat_glued_empty_scope", "description": "x ? {{} -> a  -> b}: the second { is glued to the braces of the branches and opens the scope {} of the cover; nothing precedes it to carve", "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nf -> {\n  Array{u8}:x\n  -> x ? {{} -> 1  -> 2}\n}\na -> f{x -> {}}!\nb -> f{x -> {7}}!", "expect_errors": []}
