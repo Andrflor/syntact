@@ -1341,35 +1341,30 @@ by_place :: proc(k: ^Kernel, o: Operator, x: Type, xs: []^Binding, i: Type, span
 	return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %s", print_type(x), print_type(i)))
 }
 
-// fold_length: |⟳(…; z: s ↦ {...P ...z ...Q}; z)| = ⟳(…; ℓ: |s| ↦ ℓ + |P| + |Q|; ℓ):
-// each step places P and Q around what the run holds, |{...P ...x ...Q}| = |x| + |P|
-// + |Q| (§5.3), and nothing else reads it — the length passes through the fold as
-// through an operator.
+// fold_length: |⟳(…; z: s ↦ u(z); z)| = ⟳(…; ℓ: |s| ↦ ℓ + g; ℓ) when |u(z)| = |z| + g:
+// each step places z once and g bindings around it, |{...P ...x ...Q}| = |x| + |P| +
+// |Q| (§5.3) through its carves and expansions, and nothing else reads it — the
+// length passes through the fold as through an operator.
 fold_length :: proc(k: ^Kernel, f: ^Fold, span: syn.Span) -> (n: Type, ok: bool) {
 	for z, i in f.states {
 		if !same(k, f.value, z) do continue
-		// z placed once, as a run, anywhere among the bindings of the step
-		step := f.updates[i].(^Scope) or_return
-		data := run_data(k, step)
-		others := make([dynamic]^Binding)
-		placed_z := 0
-		for b in data {
-			if b.kind == .Expand && same(k, binding_value(k, b), z) do placed_z += 1
-			else do append(&others, b)
-		}
-		if placed_z != 1 do return
-		rest := run_scope(k, others[:])
-		if reads(k, rest, z) || reads(k, f.effects, z) do return
+		if reads(k, f.effects, z) do return
 		for t, j in f.updates do if j != i && reads(k, t, z) do return
+		// the length of the step as a term in |z|: ℓ + g, g reading no z — z placed
+		// once, as a run, among what the step places, through its carves and
+		// expansions (§5.3)
 		l := new_unknown(k, nil)
 		l.layout = COUNTS
-		g := new(Fold)
-		g^ = f^
-		g.states, g.inits, g.updates = slice.clone(f.states), slice.clone(f.inits), slice.clone(f.updates)
-		g.states[i], g.value = l, l
-		g.inits[i] = run_law(k, .Length, {f.inits[i]}, span)
-		g.updates[i] = op(k, .Add, l, run_law(k, .Length, {rest}, span))
-		return fold_law(k, g), true
+		length := rewrite(k, run_law(k, .Length, {f.updates[i]}, span), append_read(nil, new_operation(.Length, z), l))
+		one, g := affine_in(k, length, l) or_return
+		if !is_int(one, 1) || reads(k, g, z) || reads(k, g, l) do return
+		h := new(Fold)
+		h^ = f^
+		h.states, h.inits, h.updates = slice.clone(f.states), slice.clone(f.inits), slice.clone(f.updates)
+		h.states[i], h.value = l, l
+		h.inits[i] = run_law(k, .Length, {f.inits[i]}, span)
+		h.updates[i] = op(k, .Add, l, g)
+		return fold_law(k, h), true
 	}
 	return
 }
