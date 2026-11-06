@@ -433,6 +433,8 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if b.kind == .Product {
 		b.typed_product = value
 		value = with_effects(k, b.scope, b, value)
+		// the first production of a generalized carve is the equation of its scope
+		if first, found := first_production(k, b.scope); found && first == b && generalizes(k, b.scope) do value = equation_law(k, b.scope, value)
 	}
 	// a real in a color of a format is what the machine holds of it (format.odin)
 	if f := color_format(color); f != .Exact && b.kind == .Push do value = round_law(k, value, f, b.span)

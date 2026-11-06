@@ -72,6 +72,121 @@ names_scope :: proc(t: Type, s: ^Scope, seen: ^map[^Scope]bool) -> bool {
 	return false
 }
 
+// generalized: the carve whose first production is the equation a call s reads
+// (§5.6): its production where what s carves is ?? — unknowns of their colors —, and
+// what its calls carve too (widened). With through, a field s gives a call of another
+// equation keeps it, over the fields of that equation, each ??: the recursion follows
+// what the other builds. A shared node: its production is typed once.
+generalized :: proc(k: ^Kernel, s: ^Scope, through := true) -> ^Scope {
+	root := origin(s)
+	changes := make(map[^Binding]Type)
+	for b in s.changes {
+		changes[b] = SOME
+		if !through do continue
+		c := called(carved_value(k, s, b)) or_continue
+		t := c.target.(^Scope) or_continue
+		if origin(t) == root do continue
+		other := generalized(k, t, false)
+		if _, read := equation(k, other); read do changes[b] = call_of(other)
+	}
+	return generalization(k, root, changes)
+}
+
+// widened: the generalized carve g where what the calls of root in t carve is ?? too.
+widened :: proc(k: ^Kernel, g: ^Scope, t: Type) -> ^Scope {
+	root := g.carved
+	changes := make(map[^Binding]Type)
+	for b in params_of(k, g) do changes[b] = SOME
+	for b, other in through_of(g) do changes[b] = call_of(other)
+	wider := false
+	for c in calls_in(k, t, root) do for b in c.target.(^Scope).changes do if b not_in changes {
+		changes[b] = SOME
+		wider = true
+	}
+	return wider ? generalization(k, root, changes) : g
+}
+
+// generalization: the generalized carve of root these changes give, a shared node;
+// nil when it is not proven in its colors: it has no equation (§7).
+generalization :: proc(k: ^Kernel, root: ^Scope, changes: map[^Binding]Type) -> ^Scope {
+	key := carve_key(root, changes)
+	if node := built_before(key); node != nil {
+		g, _ := node.(^Scope)
+		return g
+	}
+	g := carved_copy(k, root, changes)
+	if carve_problem(k, g, root.span) == nil do return g
+	replace(key, Invalid{})
+	return nil
+}
+
+// call_of: the call of the generalized carve g, over its own fields: a shared node.
+call_of :: proc(g: ^Scope) -> Type {
+	one := [1]Type{g}
+	return intern({shape = .Call, children = one[:]})
+}
+
+// generalizes: s is a generalized carve: the node of the carve that gives ?? where s
+// gives its unknowns.
+generalizes :: proc(k: ^Kernel, s: ^Scope) -> bool {
+	if s.carved == nil do return false
+	changes := make(map[^Binding]Type)
+	for b, v in s.changes {
+		_, is_unknown := v.(^Unknown)
+		changes[b] = is_unknown ? SOME : v
+	}
+	return built_before(carve_key(s.carved, changes)) == Type(s)
+}
+
+// carved_value: the value the carve s gives b, or the one s holds.
+carved_value :: proc(k: ^Kernel, s: ^Scope, b: ^Binding) -> Type {
+	if v, carved := s.changes[b]; carved do return v
+	return binding_type(k, holding(s, b))
+}
+
+// equation: what the generalized carve g holds: the type of its first production,
+// solved when the laws solve it. Not read while it is typed — its calls are then the
+// hypothesis (§5.6) —, nor while the base case of its scope is; without g, a carve not
+// proven in its colors, there is none.
+equation :: proc(k: ^Kernel, g: ^Scope) -> (Type, bool) {
+	if g == nil do return nil, false
+	if base, found := first_production(k, g.carved); found && typing(base) do return nil, false
+	return equation_term(k, g)
+}
+
+// equation_known: the equation of g once its production is typed — also while the
+// base case of its scope is —, otherwise when it may be read (equation).
+equation_known :: proc(k: ^Kernel, g: ^Scope) -> (Type, bool) {
+	if g == nil do return nil, false
+	if p, found := first_production(k, g); found && p.type != nil do return equation_term(k, g)
+	return equation(k, g)
+}
+
+// equation_term: the type of the first production of g, but while it is typed. The
+// base case of its scope is typed first (§5.6): it reads the equation.
+equation_term :: proc(k: ^Kernel, g: ^Scope) -> (t: Type, ok: bool) {
+	if g == nil do return nil, false
+	if base, found := first_production(k, g.carved); found && base.type == nil do binding_type(k, base)
+	p := first_production(k, g) or_return
+	if typing(p) do return nil, false
+	return binding_type(k, p), true
+}
+
+// params_of: the unknown each field of the generalized carve g is in its equation.
+params_of :: proc(k: ^Kernel, g: ^Scope) -> map[^Binding]^Unknown {
+	out := make(map[^Binding]^Unknown)
+	for b, v in g.changes do if u, is_unknown := v.(^Unknown); is_unknown do out[b] = u
+	return out
+}
+
+// through_of: the fields g gives a call of another equation, with its generalized
+// carve.
+through_of :: proc(g: ^Scope) -> map[^Binding]^Scope {
+	out := make(map[^Binding]^Scope)
+	for b, v in g.changes do if c, is_call := v.(^Collapse); is_call do out[b] = c.target.(^Scope)
+	return out
+}
+
 // origin: the scope a copy carves, uncarved; a scope is its own.
 origin :: proc(s: ^Scope) -> ^Scope {
 	return s.carved != nil ? s.carved : s
@@ -81,25 +196,41 @@ origin :: proc(s: ^Scope) -> ^Scope {
 // its equation at the values s gives (§5.6); without one, the call, which the program
 // computes — never its definition read at the values: that is unfolding. A carve of
 // it was checked where it is written (scope.odin).
-recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
+recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span, site: ^Scope = nil) -> Type {
 	root := origin(s)
+	run: Rewrite
+	if asked_again(k, site, root) do return stays(k, s, span, site)
 	// a definition solved is an equality for every value of its fields: substituted,
 	// whatever gives them; otherwise read through what gives them (§5.6)
-	if through := through_of(k, s); len(through) > 0 {
-		if eq, read := equation_of(k, root, call_key(s)); read && eq.solution != nil {
-			run: Rewrite
-			return renewed(k, solution_at(k, eq, s), &run)
-		}
+	plain, g := generalized(k, s, false), generalized(k, s)
+	if g != plain {
+		if t, read := equation(k, plain); read && solved(t, root) do return renewed(k, solution_at(k, plain, t, s), &run)
 	}
-	if eq, read := equation_of(k, root, call_key(s), through_of(k, s)); read {
-		run: Rewrite
-		if eq.solution != nil do return renewed(k, solution_at(k, eq, s), &run)
-		if v, based := reached_base(k, eq, s); based do return renewed(k, v, &run)
+	if t, read := equation(k, g); read {
+		if solved(t, root) do return renewed(k, solution_at(k, g, t, s), &run)
+		if v, based := reached_base(k, g, t, s); based do return renewed(k, v, &run)
 	}
+	return stays(k, s, span, site)
+}
+
+// stays: the call s! as a term, which the program computes; with effects, an effect
+// (§4.8).
+stays :: proc(k: ^Kernel, s: ^Scope, span: syn.Span, site: ^Scope) -> Type {
 	out := new(Collapse)
-	out.target, out.recursive, out.span = s, true, span
-	if root.effectful do return call_effect(k, out)
+	out.target, out.recursive, out.span, out.site = s, true, span, site
+	if origin(s).effectful do return call_effect(k, out)
 	return out
+}
+
+// asked_again: a call of root written at site is asked again from a production of
+// its scope being typed — that of root, or of a carve of it —: it stays a carve and a
+// collapse, the hypothesis, never unfolded (§5.6).
+asked_again :: proc(k: ^Kernel, site, root: ^Scope) -> bool {
+	for x := site; x != nil; x = x.parent {
+		if origin(x) != root do continue
+		if p, found := first_production(k, x); found && typing(p) do return true
+	}
+	return false
 }
 
 // as_call: t is a recursive call, or what one with effects gives back.
@@ -209,16 +340,29 @@ production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 		value = normal(k, copy_term(k, &m, b.value, b.scope))
 	}
 	// the equation of the fields its calls carve, solved: at the values the scope holds
-	carved := make(map[^Binding]bool)
-	for c in calls_in(k, value, root) do for x in c.target.(^Scope).changes do carved[x] = true
-	if len(carved) == 0 do return value
-	key := make([dynamic]^Binding)
-	for x in in_order(carved) do append(&key, x)
-	eq: ^Recursion
-	if x, found := equation_covering(k, root, key[:], nil); found do eq = x
-	if eq == nil do eq = equation_built(k, root, key[:])
-	if eq.solution != nil do return solution_at(k, eq, b.scope)
+	carves := false
+	for c in calls_in(k, value, root) do carves ||= len(c.target.(^Scope).changes) > 0
+	if !carves do return value
+	g := generalized(k, root)
+	if t, read := equation_term(k, g); read && solved(t, root) do return solution_at(k, g, t, b.scope)
 	return value
+}
+
+// equation_law: t, what the first production of the generalized carve g gives: the
+// equation of its scope, in normal form (§5.6) — each call of root that is not at
+// values of its fields read by its own equation, and the laws of the recursion
+// solving it when they do.
+equation_law :: proc(k: ^Kernel, g: ^Scope, t: Type) -> Type {
+	if is_invalid(t) do return t
+	// what its calls carve is unknown too: solved, the equation of the widened carve,
+	// at the values g holds
+	if w := widened(k, g, t); w != g {
+		if e, read := equation_term(k, w); read && solved(e, g.carved) do return solution_at(k, w, e, g)
+	}
+	term := instances(k, g, t)
+	// what the laws turn invalid is not a solution of a term that holds
+	if solution := solve(k, g, term); solution != nil && (holds_invalid(term) || !holds_invalid(solution)) do return solution
+	return term
 }
 
 // base_cases: the products of e that do not call root, through the effects that wrap
@@ -243,13 +387,10 @@ base_family :: proc(k: ^Kernel, c: ^Collapse, fields := Read{}) -> (Family, bool
 	s, is_scope := c.target.(^Scope)
 	if !is_scope do return {}, false
 	root := origin(s)
-	key, through := call_key(s), through_of(k, s)
-	// its bases are known once its term is, while it is read too
-	eq, read := equation_found(k, root, key, through)
-	if !read do eq, read = equation_of(k, root, key, through)
-	if !read || eq.term == nil do return {}, false
+	t, read := equation_known(k, generalized(k, s))
+	if !read do return {}, false
 	bases := make([dynamic]Type)
-	base_cases(eq.term, root, &bases)
+	base_cases(t, root, &bases)
 	family: Family
 	found := false
 	for base in bases {
@@ -312,21 +453,23 @@ is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
 	if !is_scope do return false
 	root := origin(s)
 	if p, found := first_production(k, root); found && typing(p) do return true
-	for x in k.equations do if x.root == root && x.reading do return true
-	return false
+	return asked_again(k, c.site, root)
 }
 
 // reached_base: the values the carve s gives the fields reach one branch of the
-// equation (§6), a base that calls nothing: its product there is the call (§7). Only
-// the covers are read; no other branch, and no call, is.
-reached_base :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> (v: Type, ok: bool) {
-	p := eq.term.(^Pattern) or_return
-	at := values_of_call(k, eq, s)
+// equation t of g (§6), a base that calls nothing: its product there is the call
+// (§7). Only the covers are read; no other branch, and no call, is.
+reached_base :: proc(k: ^Kernel, g: ^Scope, t: Type, s: ^Scope) -> (v: Type, ok: bool) {
+	p := t.(^Pattern) or_return
+	at := values_of_call(k, g, s)
 	target := rewrite(k, p.target, at)
-	reached, _, invalid := reaches(k, target, p.branches)
+	// the covers at those values too: they may read the fields
+	covers := slice.clone(p.branches)
+	for &b in covers do if b.cover != nil do b.cover = rewrite(k, b.cover, at)
+	reached, _, invalid := reaches(k, target, covers)
 	if invalid != nil || len(reached) != 1 || !reached[0].all do return
-	b := p.branches[reached[0].branch]
-	if !solved(b.product, eq.root) do return
+	b := covers[reached[0].branch]
+	if !solved(b.product, g.carved) do return
 	v = rewrite(k, branch_product(k, b, reached[0].rewrite, target), at)
-	return v, solved(v, eq.root) && !holds_invalid(v)
+	return v, solved(v, g.carved) && !holds_invalid(v)
 }

@@ -631,7 +631,10 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// (§5.4); otherwise the family it is proven in
 		f := family_of(k, v) or_return
 		// an equation not built, without a term, says nothing of them
-		if f == .Value do if s, is_scope := v.target.(^Scope); is_scope do if eq, read := equation_of(k, origin(s), call_key(s)); read && eq.term != nil do return eq.generic, true
+		if f == .Value do if s, is_scope := v.target.(^Scope); is_scope {
+			g := generalized(k, s, false)
+			if _, read := equation(k, g); read do return g, true
+		}
 		return family_term(f), true
 	case ^Fold, ^Series:
 		// a node is never changed once built: what it may hold, read once (values), but

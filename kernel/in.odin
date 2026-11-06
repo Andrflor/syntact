@@ -316,26 +316,23 @@ read_of :: proc(t: Type) -> Read {
 // production at the values its carve gives (§5.3), its calls the hypothesis meanwhile.
 call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool {
 	s := call.target.(^Scope) or_return
-	key, through := call_key(s), through_of(k, s)
-	eq, found := equation_found(k, origin(s), key, through)
-	if !found do eq = equation_of(k, origin(s), key, through) or_return
-	if eq.term == nil {
+	root := origin(s)
+	g := generalized(k, s)
+	if g == nil {
 		// no equation where what the call carves is unknown (a hole the carve fills):
 		// the call is its production at the values its carve gives (§5.3), its calls
 		// the hypothesis meanwhile
-		p := first_production(k, s) or_return
-		if typing(p) do return false
-		eq.reading = true
-		defer eq.reading = false
-		return holds_in(k, binding_type(k, p), c, fields, eq.root)
+		q := first_production(k, s) or_return
+		if typing(q) do return false
+		return holds_in(k, binding_type(k, q), c, fields, root)
 	}
-	for x in k.induced do if x.equation == eq.generic && x.fields == fields && same(k, x.set, c) do return x.proven
+	p := first_production(k, g) or_return
+	if typing(p) do return false
+	for x in k.induced do if x.equation == g && x.fields == fields && same(k, x.set, c) do return x.proven
+	e := equation_known(k, g) or_return
 	at := len(k.induced)
-	append(&k.induced, Induced{eq.generic, c, fields, false})
-	// the proof reads the equation: meanwhile its calls are the hypothesis
-	eq.reading = true
-	proven := induced(k, eq, c, fields)
-	eq.reading = false
+	append(&k.induced, Induced{g, c, fields, false})
+	proven := induced(k, g, e, c, fields)
 	k.induced[at].proven = proven
 	return proven
 }
@@ -348,8 +345,8 @@ Induced :: struct {
 	proven:   bool,
 }
 
-induced :: proc(k: ^Kernel, eq: ^Recursion, c: Type, fields: Read) -> bool {
-	root, e := eq.root, eq.term
+induced :: proc(k: ^Kernel, g: ^Scope, e: Type, c: Type, fields: Read) -> bool {
+	root := g.carved
 	assumed: Rewrite
 	taken :: proc(k: ^Kernel, c: Type) -> Type {
 		u := new_unknown(k, nil)
@@ -358,8 +355,8 @@ induced :: proc(k: ^Kernel, eq: ^Recursion, c: Type, fields: Read) -> bool {
 	}
 	// the hypothesis: a call of this equation, at values of its fields; a call of
 	// another — root at a value not of its fields — by its own induction
-	holds :: proc(k: ^Kernel, eq: ^Recursion, call: ^Collapse, c: Type, fields: Read) -> bool {
-		if _, _, instance := moves(k, eq, call); instance do return true
+	holds :: proc(k: ^Kernel, g: ^Scope, call: ^Collapse, c: Type, fields: Read) -> bool {
+		if _, _, instance := moves(k, g, call); instance do return true
 		return call_in(k, call, c, fields)
 	}
 	if fields.fields {
@@ -368,14 +365,14 @@ induced :: proc(k: ^Kernel, eq: ^Recursion, c: Type, fields: Read) -> bool {
 		for read in call_reads(k, e, root) {
 			if fields.name != "" && read_of(read) != fields do continue
 			call, _ := call_read(read)
-			if holds(k, eq, call, c, read_of(read)) do assumed = append_read(assumed, read, taken(k, c))
+			if holds(k, g, call, c, read_of(read)) do assumed = append_read(assumed, read, taken(k, c))
 		}
 	} else {
 		// each call, and each one a read of a field holds
 		calls := make([dynamic]^Collapse)
 		append(&calls, ..calls_in(k, e, root))
 		for read in call_reads(k, e, root) do if call, _ := call_read(read); !slice.contains(calls[:], call) do append(&calls, call)
-		for inner in calls do if holds(k, eq, inner, c, fields) do assumed = rewriting_call(assumed, inner, taken(k, c))
+		for inner in calls do if holds(k, g, inner, c, fields) do assumed = rewriting_call(assumed, inner, taken(k, c))
 		// a call with effects: what it gives back, its answer, is taken in c likewise
 		for x in call_answers(k, e, root) do assumed = rewriting(assumed, x, taken(k, c))
 	}

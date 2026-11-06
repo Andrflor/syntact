@@ -52,7 +52,6 @@ Kernel :: struct {
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file
 	scratch:    [dynamic]Type, // what the laws gather, in an arena of its own (scratch.odin)
-	equations:  [dynamic]^Recursion, // the equation of each recursive scope, read once (solve.odin)
 	interned:   ^Interned, // its shared terms (intern.odin)
 }
 

@@ -5,10 +5,11 @@ import "core:slice"
 
 // THE EQUATION OF A RECURSION, AND ITS SOLUTION (specs/types.md §5.6)
 //
-// A recursive scope is an equation: its first production, where each field its calls
-// carve is an unknown of its color. It is one per scope, read once. Its solution is
-// its normal form under the laws below, each a local equality that composes with the
-// others and with every law of the algebra:
+// A recursive scope is an equation: the first production of its generalized carve,
+// where each field a call and its calls carve is an unknown of its color — a shared
+// node, its production typed once (calls.odin). Its solution is its normal form under
+// the laws below, each a local equality that composes with the others and with every
+// law of the algebra:
 //
 //   a pattern takes its first branch (§6): the branches that call nothing are the
 //   bases, those that call the step, each a pattern of its branches;
@@ -21,61 +22,6 @@ import "core:slice"
 // and the laws of folds then simplify the fold (fold.odin). What none of them
 // reduces stays the equation: its calls are calls, which the program computes.
 
-Recursion :: struct {
-	root:     ^Scope,
-	given:    []^Binding, // the fields the call that reads it carves, in their order
-	generic:  ^Scope, // root where each field its calls carve is an unknown of its color
-	term:     Type, // its first production there
-	params:   map[^Binding]^Unknown,
-	through:  map[^Binding]^Recursion, // a field given a call of another equation: that equation (§5.6)
-	solution: Type, // the term without calls of root, when the laws give one
-	reading:  bool, // being read: its calls are the hypothesis (§5.6)
-	values:   Type, // the values of its calls, once found (call_values)
-	valued:   bool,
-}
-
-// call_key: the fields a carve of root changes, in their order.
-call_key :: proc(s: ^Scope) -> []^Binding {
-	key := make([dynamic]^Binding)
-	for b in in_order(s.changes) do append(&key, b)
-	return key[:]
-}
-
-// equation_of: the equation a call of root carving the fields given reads (§5.6): its
-// production where those fields, and those its calls carve, are unknowns of their
-// colors — one definition, quantified over its fields: a call carving fewer of them
-// reads it, the others at the values the scope holds. Read once; false while it is
-// read, its calls then the hypothesis, and while the production of root is typed.
-equation_of :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map[^Binding]^Recursion = nil) -> (eq: ^Recursion, ok: bool) {
-	// while an equation of root is built, every call of root is its hypothesis
-	for x in k.equations do if x.root == root && x.reading && x.term == nil do return nil, false
-	if x, found := equation_covering(k, root, given, through); found {
-		if x.reading do return nil, false
-		return x, true
-	}
-	if p, found := first_production(k, root); found && typing(p) do return nil, false
-	return equation_built(k, root, given, through), true
-}
-
-// equation_covering: the equation of root whose fields hold those given, a field
-// given a call of another equation by the same equation.
-equation_covering :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map[^Binding]^Recursion) -> (^Recursion, bool) {
-	equations: for x in k.equations {
-		if x.root != root || len(x.through) != len(through) do continue
-		for f, e in through do if x.through[f] != e do continue equations
-		for b in given do if b not_in x.params && b not_in x.through do continue equations
-		return x, true
-	}
-	return nil, false
-}
-
-// equation_found: the equation of root for those fields when it is built, read or
-// not: what an induction proves on (§5.6).
-equation_found :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map[^Binding]^Recursion) -> (^Recursion, bool) {
-	x, found := equation_covering(k, root, given, through)
-	return x, found && x.term != nil
-}
-
 // called: the call a carve gives, also where a branch narrows it: t & S is t where it
 // is in S (§4.2).
 called :: proc(v: Type) -> (^Collapse, bool) {
@@ -84,105 +30,39 @@ called :: proc(v: Type) -> (^Collapse, bool) {
 	return nil, false
 }
 
-// through_of: the fields a carve gives a call of another equation, with that
-// equation: the recursion follows what the other builds (§5.6).
-through_of :: proc(k: ^Kernel, s: ^Scope) -> map[^Binding]^Recursion {
-	out := make(map[^Binding]^Recursion)
-	for b in in_order(s.changes) {
-		v := s.changes[b]
-		c := called(v) or_continue
-		t, is_scope := c.target.(^Scope)
-		if !is_scope || origin(t) == origin(s) do continue
-		if eq, read := equation_of(k, origin(t), call_key(t)); read && eq.term != nil do out[b] = eq
-	}
-	return out
+// solution_at: the solution t of the equation of g at the values a carve s of its
+// scope gives its fields, its bound unknowns its own (§5.6).
+solution_at :: proc(k: ^Kernel, g: ^Scope, t: Type, s: ^Scope) -> Type {
+	at := values_of_call(k, g, s)
+	return rewrite(k, renamed(k, t, at), at)
 }
 
-// equation_built: the equation of root for the fields given, built.
-equation_built :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map[^Binding]^Recursion = nil) -> ^Recursion {
-	eq := new(Recursion)
-	eq.root, eq.given, eq.through, eq.reading = root, slice.clone(given), through, true
-	append(&k.equations, eq)
-	defer eq.reading = false
-	carved := make(map[^Binding]bool)
-	for b in given do carved[b] = true
-	for {
-		params := make(map[^Binding]^Unknown)
-		changes := make(map[^Binding]Type)
-		for b in in_order(carved) {
-			if other, kept := through[b]; kept {
-				// a call of the other equation, over its own fields
-				c := new(Collapse)
-				c.target, c.recursive, c.span = other.generic, true, root.span
-				changes[b] = c
-				continue
-			}
-			u := new_unknown(k, nil)
-			params[b], changes[b] = u, u
-		}
-		// each field an unknown of its color in the equation, where the fields above
-		// it are unknowns too: a layout over them, Array{?T} (§5.6); then the carve
-		// checked where it is written (§7)
-		generic := carved_copy(k, root, changes)
-		for b in in_order(params) {
-			u := params[b]
-			u.layout = binding_color(k, holding(generic, b))
-			if u.layout == nil {
-				f, known := family_of(k, binding_type(k, b))
-				u.layout = known ? family_term(f) : everything()
-			}
-		}
-		if carve_problem(k, generic, root.span) != nil do return eq
-		p, found := first_production(k, generic)
-		if !found do return eq
-		term := binding_type(k, p)
-		more := false
-		for c in calls_in(k, term, root) do for b in c.target.(^Scope).changes do if b not_in carved {
-			carved[b] = true
-			more = true
-		}
-		if more do continue
-		eq.generic, eq.term, eq.params = generic, term, params
-		eq.term = instances(k, eq)
-		eq.solution = solve(k, eq)
-		return eq
-	}
-}
-
-// solution_at: the solution of the equation at the values a carve of root gives its
-// fields, its bound unknowns its own (§5.6).
-solution_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
-	at := values_of_call(k, eq, s)
-	return rewrite(k, renamed(k, eq.solution, at), at)
-}
-
-// values_of_call: each unknown of the equation at the value the carve s gives its
+// values_of_call: each unknown of the equation of g at the value the carve s gives its
 // field, or the value the scope holds; a field given a call of another equation, the
 // unknowns of that equation at the values its carve gives.
-values_of_call :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope, r: Rewrite = nil) -> Rewrite {
+values_of_call :: proc(k: ^Kernel, g: ^Scope, s: ^Scope, r: Rewrite = nil) -> Rewrite {
 	r := r
-	for b in in_order(eq.params) do r = rewriting(r, eq.params[b], b in s.changes ? s.changes[b] : binding_type(k, holding(s, b)))
-	for b in in_order(eq.through) {
-		other := eq.through[b]
-		c := called(s.changes[b]) or_continue
+	params, through := params_of(k, g), through_of(g)
+	for b in in_order(params) do r = rewriting(r, params[b], carved_value(k, s, b))
+	for b in in_order(through) {
+		c := called(carved_value(k, s, b)) or_continue
 		t := c.target.(^Scope) or_continue
-		r = values_of_call(k, other, t, r)
+		r = values_of_call(k, through[b], t, r)
 	}
 	return r
 }
 
-// solve: the normal form of the equation by the laws of the recursion; nil when they
-// leave a call of it.
-solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
-	root := eq.root
-	if eq.term == nil do return nil
-	if solved(eq.term, root) do return eq.term
-	p, is_pattern := eq.term.(^Pattern)
+// solve: the normal form of the equation term of g by the laws of the recursion; nil
+// when they leave a call of it.
+solve :: proc(k: ^Kernel, g: ^Scope, term: Type) -> Type {
+	root := g.carved
+	if solved(term, root) do return term
+	p, is_pattern := term.(^Pattern)
 	if !is_pattern do return nil
 	// covered branches each calling the equation with the same fields are one (§6)
 	p = calls_joined(k, p, root)
 	calls := calls_in(k, p, root)
-	if len(calls) > 1 do return window(k, eq, p, calls)
+	if len(calls) > 1 do return window(k, g, p, calls)
 	if len(calls) != 1 do return nil
 	call := calls[0]
 	u, on_field := p.target.(^Unknown)
@@ -213,7 +93,7 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	step = rewrite(k, step, rewriting_call(nil, call, y))
 	if !solved(step, root) || has_effect(step) do return nil
 	// the fields the call moves, each to a term over the fields
-	fields, next, moved := moves(k, eq, call)
+	fields, next, moved := moves(k, g, call)
 	if !moved || u not_in next do return nil
 	// an orbit of u: its step reads u alone (§5.6); one that reads another field the
 	// call moves is no orbit, and the call stays
@@ -281,15 +161,15 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 // instances: the term of the equation, built, each call of root that is not at
 // values of its fields — a call of another equation of root — read by that equation
 // (§7): what stays are its calls, the hypothesis.
-instances :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
+instances :: proc(k: ^Kernel, g: ^Scope, term: Type) -> Type {
 	r: Rewrite
-	for c in calls_in(k, eq.term, eq.root) {
-		if _, _, instance := moves(k, eq, c); instance do continue
+	for c in calls_in(k, term, g.carved) {
+		if _, _, instance := moves(k, g, c); instance do continue
 		s := c.target.(^Scope) or_continue
 		if v := recursive_call(k, s, c.span); v != Type(c) do r = rewriting_call(r, c, v)
 	}
-	if len(r) == 0 do return eq.term
-	return rewrite(k, eq.term, r)
+	if len(r) == 0 do return term
+	return rewrite(k, term, r)
 }
 
 // call_values: the values of a call that stays that gives runs: its equation read on
@@ -298,20 +178,19 @@ instances :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 // the equation.
 call_values :: proc(k: ^Kernel, call: ^Collapse) -> (set: Type, ok: bool) {
 	s := call.target.(^Scope) or_return
-	key, through := call_key(s), through_of(k, s)
-	eq, found := equation_found(k, origin(s), key, through)
-	if !found do eq = equation_of(k, origin(s), key, through) or_return
+	root := origin(s)
+	g := generalized(k, s)
 	// while it is read, its calls are the hypothesis: nothing is known of them yet
-	if eq.term == nil || eq.reading do return
-	if eq.valued do return eq.values, eq.values != nil
-	eq.valued = true
+	term := equation(k, g) or_return
+	if known, found := k.valued[g]; found do return known, known != nil
+	k.valued[g] = nil
 	leaves := make([dynamic]Product)
-	products(k, eq.term, &leaves)
+	products(k, term, &leaves)
 	items := make([dynamic]Type)
 	for leaf in leaves {
 		if is_none(leaf.term) do continue
 		product := given(k, read_in(k, leaf, leaf.term))
-		if c, is_call := called(product); is_call && origin(c.target.(^Scope) or_return) == eq.root do continue
+		if c, is_call := called(product); is_call && origin(c.target.(^Scope) or_return) == root do continue
 		v := product.(^Scope) or_return
 		for b in run_data(k, v) {
 			x := binding_value(k, b)
@@ -319,7 +198,7 @@ call_values :: proc(k: ^Kernel, call: ^Collapse) -> (set: Type, ok: bool) {
 				append(&items, values(k, x) or_return)
 				continue
 			}
-			if c, is_call := called(x); is_call && origin(c.target.(^Scope) or_return) == eq.root do continue
+			if c, is_call := called(x); is_call && origin(c.target.(^Scope) or_return) == root do continue
 			placed := values(k, x) or_return
 			if empty, is_scope := placed.(^Scope); is_scope && len(run_data(k, empty)) == 0 do continue
 			append(&items, item_image(k, placed) or_return)
@@ -333,30 +212,33 @@ call_values :: proc(k: ^Kernel, call: ^Collapse) -> (set: Type, ok: bool) {
 	b.typed_color = b.color
 	set = runs_of(k, piece, Int(0), nil, nil)
 	if !call_in(k, call, set) do return nil, false
-	eq.values = set
+	k.valued[g] = set
 	return set, true
 }
 
-// moves: the fields a call of the equation moves, in their order, each to a term over
-// the fields; a field given a call of another equation, the fields of that equation.
-moves :: proc(k: ^Kernel, eq: ^Recursion, call: ^Collapse) -> (fields: []^Unknown, next: map[^Unknown]Type, ok: bool) {
+// moves: the fields a call of the equation of g moves, in their order, each to a term
+// over the fields; a field given a call of another equation, the fields of that
+// equation.
+moves :: proc(k: ^Kernel, g: ^Scope, call: ^Collapse) -> (fields: []^Unknown, next: map[^Unknown]Type, ok: bool) {
 	order := make([dynamic]^Unknown)
 	next = make(map[^Unknown]Type)
-	changes := call.target.(^Scope).changes
-	for b in in_order(changes) {
-		v := changes[b]
-		if other, kept := eq.through[b]; kept {
+	s := call.target.(^Scope)
+	params, through := params_of(k, g), through_of(g)
+	for b in in_order(s.changes) {
+		v := carved_value(k, s, b)
+		if other, kept := through[b]; kept {
 			// a call of the other equation: its fields, each to what the call gives it
 			c := called(v) or_return
 			t := c.target.(^Scope) or_return
-			if origin(t) != other.root do return
-			for ob in in_order(other.params) {
-				append(&order, other.params[ob])
-				next[other.params[ob]] = ob in t.changes ? t.changes[ob] : binding_type(k, holding(t, ob))
+			if origin(t) != other.carved do return
+			others := params_of(k, other)
+			for ob in in_order(others) {
+				append(&order, others[ob])
+				next[others[ob]] = carved_value(k, t, ob)
 			}
 			continue
 		}
-		u := eq.params[b] or_return
+		u := params[b] or_return
 		append(&order, u)
 		next[u] = v
 	}
@@ -565,8 +447,9 @@ runs_of :: proc(k: ^Kernel, pieces, lo, hi: Type, at: Type) -> ^Scope {
 // the points of one orbit m − g·i, g the gcd of the cⱼ. The fold comes back up from
 // the base, d = max(cⱼ) / g states, the values at the d points after kᵢ: a window of
 // states (§5.6). The points past the end of the orbit are bases (continues).
-window :: proc(k: ^Kernel, eq: ^Recursion, p: ^Pattern, calls: []^Collapse) -> Type {
-	root := eq.root
+window :: proc(k: ^Kernel, g: ^Scope, p: ^Pattern, calls: []^Collapse) -> Type {
+	root := g.carved
+	params := params_of(k, g)
 	u, on_field := p.target.(^Unknown)
 	if !on_field do return nil
 	stop, base, step, split := bases_and_steps(k, p, root, u)
@@ -580,7 +463,7 @@ window :: proc(k: ^Kernel, eq: ^Recursion, p: ^Pattern, calls: []^Collapse) -> T
 		if len(changes) != 1 do return nil
 		for b in in_order(changes) {
 			v := changes[b]
-			if eq.params[b] != u do return nil
+			if params[b] != u do return nil
 			alpha, beta, affine := affine_in(k, v, u)
 			if !affine || !is_int(alpha, 1) do return nil
 			minus, constant := beta.(Int)

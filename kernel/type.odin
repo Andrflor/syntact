@@ -483,6 +483,7 @@ is_int :: proc(t: Type, i: i128) -> bool {
 EVERY_INT, EVERY_REAL, EVERY_CHAR, STRING, EMPTY_STRING, EVERYTHING, BOOLS: Type
 COUNTS, POSITIVE, NONPOSITIVE, NONZERO_INT, NONZERO_REAL: Type // 0.., 1.., ..0, int & ~0, float & ~0.0
 EVERY_SCOPE: ^Scope // {...}: the shape that admits any run, every scope (§5.4)
+SOME: ^Unknown // ??, the value a carve gives a field: an unknown of the color of the field (§5.6)
 
 @(init)
 init_constants :: proc "contextless" () {
@@ -499,6 +500,8 @@ init_constants :: proc "contextless" () {
 	EVERY_SCOPE = new_scope(nil, {})
 	new_binding(EVERY_SCOPE, .Expand, {})
 	EVERY_SCOPE.source, EVERY_SCOPE.complete, EVERY_SCOPE.reached = EVERY_SCOPE, true, true
+	SOME = new(Unknown)
+	SOME.id = -1
 	init_signatures() // they ask the constants (arith.odin)
 }
 

@@ -171,7 +171,7 @@ product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	// a recursive call, or a carve of a recursive scope: the solution of its equation
 	// at the values the carve gives, or the call stays — never its production typed
 	// at those values: that is unfolding (§5.6)
-	if c.recursive || s != origin(s) && recursive(s) do return recursive_call(k, s, c.span)
+	if c.recursive || s != origin(s) && recursive(s) do return recursive_call(k, s, c.span, c.site)
 	if p, found := first_production(k, s); found do return product(k, p)
 	return None{}
 }
@@ -238,40 +238,35 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 	next := 0
 	for arg in args {
 		a := arg
+		b, named := carved_by(k, s, bindings, a, &next)
 		if a.carves != nil {
 			// `z{…}`: the binding z of s, carved in turn: z -> s.z{…}; without one, the
 			// carve of the name z above, a value given by position
-			if field, found := occurrence(bindings, a.name, a.ordinal, false); found {
+			if named {
 				inner := new(Carve)
-				inner.target, inner.args, inner.span = binding_value(k, field), a.carves, a.span
+				inner.target, inner.args, inner.span = binding_value(k, b), a.carves, a.span
 				a.value = carve_law(k, inner.target, inner)
 			} else if a.otherwise != nil {
-				a.name, a.value = "", normal(k, a.otherwise)
+				a.value = normal(k, a.otherwise)
 			} else {
 				return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding `%s` to carve", print_type(s), a.name))
 			}
 			if is_invalid(a.value) do return a.value
 		}
-		b: ^Binding
-		if a.handler {
+		switch {
+		case a.handler:
 			// `E -< e {…}`: the handler of E; a carve replaces it, it never adds one (§4.9)
-			event, found := occurrence(bindings, a.name, a.ordinal, false)
-			if found do b = handler_of(k, s, as_written(event))
 			if b == nil do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no handler of `%s` to replace: a carve never adds one", print_type(s), a.name))
 			a.value = normal(k, a.value)
 			if is_invalid(a.value) do return a.value
-		} else if a.name != "" {
-			found: bool
-			b, found = occurrence(bindings, a.name, a.ordinal, false)
-			if !found do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding `%s` to carve", print_type(s), a.name))
+		case named:
 			// a hole is filled by <-, a field by -> (§5.7)
 			if a.pull && b.kind != .Pull do return problem(.Invalid_Carve, a.span, fmt.tprintf("`%s` is a field: it is filled by ->", a.name))
 			if !a.pull && b.kind == .Pull do return problem(.Invalid_Carve, a.span, fmt.tprintf("`%s` is a hole: it is filled by <-", a.name))
-		} else {
-			for next < len(bindings) && (bindings[next].kind == .Product || bindings[next].kind == .Pull || bindings[next].kind == .Handler) do next += 1
-			if next >= len(bindings) do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding left to carve", print_type(s)))
-			b = bindings[next]
-			next += 1
+		case a.name != "" && a.carves == nil:
+			return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding `%s` to carve", print_type(s), a.name))
+		case b == nil:
+			return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding left to carve", print_type(s)))
 		}
 		// no law replaces an effect (§4.8), nor an emission (§4.9)
 		if t := binding_type(k, b); has_effect(t) {
@@ -283,6 +278,26 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 	}
 	if p := infer_holes(k, s, &changes, span); p != nil do return p
 	return derive(k, s, changes, span)
+}
+
+// carved_by: the binding of s an argument of a carve changes, among bindings, those s
+// places: the one it names — `z{…}` without a binding z is the carve of the name z
+// above, a value given by position —, or the next one an unnamed argument takes,
+// neither a production, a hole nor a handler; `E -< e {…}`, the handler of E. named:
+// by its name. nil when there is none; next, the place of the next unnamed argument.
+carved_by :: proc(k: ^Kernel, s: ^Scope, bindings: []^Binding, a: Carve_Arg, next: ^int) -> (b: ^Binding, named: bool) {
+	if a.handler {
+		event, found := occurrence(bindings, a.name, a.ordinal, false)
+		return found ? handler_of(k, s, as_written(event)) : nil, true
+	}
+	if a.name != "" {
+		b, named = occurrence(bindings, a.name, a.ordinal, false)
+		if named || a.carves == nil || a.otherwise == nil do return
+	}
+	for next^ < len(bindings) && (bindings[next^].kind == .Product || bindings[next^].kind == .Pull || bindings[next^].kind == .Handler) do next^ += 1
+	if next^ >= len(bindings) do return nil, false
+	next^ += 1
+	return bindings[next^ - 1], false
 }
 
 // carve_at: changes b, a binding s places, to w. A binding an expansion placed is
@@ -324,6 +339,8 @@ carved_copy :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope
 	key := carve_key(root, merged)
 	if c := built_before(key); c != nil do return c.(^Scope)
 	c := copy_scope(k, root, merged)
+	// ??: what the carve gives is the unknown its copy holds
+	for b in c.bindings do if merged[b.source] == Type(SOME) do merged[b.source] = b.value
 	c.carved, c.changes = root, merged
 	put(key, c)
 	return c
@@ -393,9 +410,25 @@ Copier :: struct {
 copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope {
 	m := Copier{carve = len(changes) > 0}
 	c := copy_into(k, &m, s, s.parent)
+	some := make([dynamic]^Binding)
 	for b in c.bindings {
-		if v, carved := changes[b.source]; carved {
-			b.value, b.carved = v, true
+		v, carved := changes[b.source]
+		if !carved do continue
+		b.value, b.carved = v, true
+		if v == Type(SOME) {
+			b.value = new_unknown(k, nil)
+			append(&some, b)
+		}
+	}
+	// ??: an unknown of the color of the field, read in the copy, where the fields
+	// above it are unknowns too — a layout over them, Array{?T} —; uncolored, of the
+	// family of its value (§5.6)
+	for b in some {
+		u := b.value.(^Unknown)
+		u.layout = binding_color(k, b)
+		if u.layout == nil {
+			f, known := family_of(k, binding_type(k, b.source))
+			u.layout = known ? family_term(f) : everything()
 		}
 	}
 	return c

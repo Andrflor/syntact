@@ -12,7 +12,8 @@ package kernel
 //
 // A carve is a node too (§5.3): known by the scope it carves and the value it gives
 // each binding it changes. Built twice, it is the same scope, whose bindings are
-// typed once.
+// typed once. So is the call of a generalized carve, which a field of another
+// equation is given (§5.6).
 
 Shape :: enum u8 {
 	Or,
@@ -22,6 +23,7 @@ Shape :: enum u8 {
 	Range,
 	Operation,
 	Carve,
+	Call,
 }
 
 Key :: struct {
@@ -32,9 +34,12 @@ Key :: struct {
 }
 
 // Interned: the shared nodes, by their keys, in an open table: nil is an empty slot.
-// A kernel has its own, which lives as long as the nodes it holds (check).
+// A carve keeps its key beside it: what it gives a field may be ??, which its copy
+// holds as an unknown of its own (§5.6). A kernel has its own table, which lives as
+// long as the nodes it holds (check).
 Interned :: struct {
 	slots: []Type,
+	carves: []Key, // the key of the carve in the same slot
 	count: int,
 }
 
@@ -58,8 +63,9 @@ built_before :: proc(key: Key) -> Type {
 	if len(table.slots) == 0 do return nil
 	mask := len(table.slots) - 1
 	at := int(hash_key(key)) & mask
+	room: [2]Type
 	for table.slots[at] != nil {
-		if is_key(table.slots[at], key) do return table.slots[at]
+		if same_key(key_at(table, at, &room), key) do return table.slots[at]
 		at = (at + 1) & mask
 	}
 	return nil
@@ -74,37 +80,46 @@ put :: proc(key: Key, node: Type) {
 	at := int(hash_key(key)) & mask
 	for table.slots[at] != nil do at = (at + 1) & mask
 	table.slots[at] = node
+	if key.shape == .Carve do table.carves[at] = key
 	table.count += 1
 }
 
-// is_key: the node is the one of this key.
-is_key :: proc(node: Type, key: Key) -> bool {
-	if key.shape == .Carve {
-		s, is_scope := node.(^Scope)
-		if !is_scope || s.carved != key.children[0] || len(s.changes) != len(key.changed) do return false
-		for b, i in key.changed {
-			v, changed := s.changes[b]
-			if !changed || v != key.children[i + 1] do return false
-		}
-		return true
-	}
+// replace: what the key holds is now node.
+replace :: proc(key: Key, node: Type) {
+	table := interned
+	mask := len(table.slots) - 1
+	at := int(hash_key(key)) & mask
 	room: [2]Type
-	found, ok := key_of(node, &room)
-	return ok && same_key(found, key)
+	for table.slots[at] != nil {
+		if same_key(key_at(table, at, &room), key) {
+			table.slots[at] = node
+			return
+		}
+		at = (at + 1) & mask
+	}
+}
+
+// key_at: the key of the node in the slot at; its children in the room given, for
+// one that holds them one by one.
+key_at :: proc(table: ^Interned, at: int, room: ^[2]Type) -> Key {
+	if table.carves[at].shape == .Carve do return table.carves[at]
+	key, _ := key_of(table.slots[at], room)
+	return key
 }
 
 grow :: proc(table: ^Interned) {
-	old := table.slots
+	old, keys := table.slots, table.carves
 	table.slots = make([]Type, max(1024, 2 * len(old)))
+	table.carves = make([]Key, len(table.slots))
 	mask := len(table.slots) - 1
 	room: [2]Type
-	for t in old {
+	for t, i in old {
 		if t == nil do continue
-		key, is_term := key_of(t, &room)
-		if !is_term do key = carve_key(t.(^Scope).carved, t.(^Scope).changes)
+		key := keys[i]
+		if key.shape != .Carve do key, _ = key_of(t, &room)
 		at := int(hash_key(key)) & mask
 		for table.slots[at] != nil do at = (at + 1) & mask
-		table.slots[at] = t
+		table.slots[at], table.carves[at] = t, keys[i]
 	}
 }
 
@@ -136,13 +151,17 @@ key_of :: proc(t: Type, room: ^[2]Type) -> (key: Key, ok: bool) {
 		return {shape = .Range, op = u8(v.family), children = room[:]}, true
 	case ^Operation:
 		return {shape = .Operation, op = u8(v.op), children = v.args}, true
+	case ^Collapse:
+		room[0] = v.target
+		return {shape = .Call, children = room[:1]}, true
 	}
 	return {}, false
 }
 
 same_key :: proc(a, b: Key) -> bool {
-	if a.shape != b.shape || a.op != b.op || len(a.children) != len(b.children) do return false
+	if a.shape != b.shape || a.op != b.op || len(a.children) != len(b.children) || len(a.changed) != len(b.changed) do return false
 	for c, i in a.children do if c != b.children[i] do return false
+	for x, i in a.changed do if x != b.changed[i] do return false
 	return true
 }
 
@@ -174,6 +193,10 @@ build_node :: proc(key: Key) -> Type {
 		o := new(Operation)
 		o.op, o.args = Operator(key.op), clone_types(key.children)
 		return o
+	case .Call:
+		c := new(Collapse)
+		c.target, c.recursive = key.children[0], true
+		return c
 	}
 	return nil
 }

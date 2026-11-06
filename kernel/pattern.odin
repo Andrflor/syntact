@@ -45,11 +45,10 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 	// definitions compose, its calls the hypothesis meanwhile. A call that gives a field
 	// a term is never read there: that would unfold it
 	if c, is_call := target.(^Collapse); is_call && c.recursive {
-		if s, is_scope := c.target.(^Scope); is_scope && at_unknowns(s) {
-			if eq, read := equation_of(k, origin(s), call_key(s), through_of(k, s)); read && eq.term != nil {
-				eq.reading = true
-				defer eq.reading = false
-				if v := rewrite(k, eq.term, values_of_call(k, eq, s)); !holds_invalid(v) do return pattern_through(k, v, p, outer)
+		if s, is_scope := c.target.(^Scope); is_scope && at_unknowns(k, s) {
+			g := generalized(k, s)
+			if t, read := equation(k, g); read {
+				if v := rewrite(k, t, values_of_call(k, g, s)); !holds_invalid(v) do return pattern_through(k, v, p, outer)
 			}
 		}
 	}
@@ -58,14 +57,14 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 
 // at_unknowns: the carve s gives each field it changes an unknown of its own, a field
 // given a call of another equation such a call.
-at_unknowns :: proc(s: ^Scope) -> bool {
+at_unknowns :: proc(k: ^Kernel, s: ^Scope) -> bool {
 	seen := make(map[int]bool)
 	defer delete(seen)
 	for b in s.changes {
-		v := s.changes[b]
+		v := carved_value(k, s, b)
 		if c, is_call := called(v); is_call {
 			t, is_scope := c.target.(^Scope)
-			if !is_scope || !at_unknowns(t) do return false
+			if !is_scope || !at_unknowns(k, t) do return false
 			continue
 		}
 		u, is_unknown := v.(^Unknown)
