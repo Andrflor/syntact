@@ -56,16 +56,40 @@ Kernel :: struct {
 	scratch:    [dynamic]Type, // what the laws gather, in an arena of its own (scratch.odin)
 	interned:   ^Interned, // its shared terms (intern.odin)
 	// what is being given — the bindings asked, the equations read, the bounds and
-	// proofs under way: the hypotheses (§5.6) — counted at each change (given)
-	state:      int,
+	// proofs under way: the hypotheses (§5.6) —, each one's mark toggled in and out
+	// of it (given_toggled)
+	state:      u64,
 	images_in:  map[Image_Key]Image_Known, // the image of a term holding calls, in a state (rewrite.odin)
 }
 
-// given_changed: what is being given changed: what the laws answer from now on may
-// differ from what they answered (§5.6: a call whose equation is read is the
-// hypothesis).
-given_changed :: proc(k: ^Kernel) {
-	k.state += 1
+Given_Kind :: enum u64 {
+	Binding, // a binding being given
+	Read, // an equation read
+	Deriving, // an equation being derived
+	Bounds, // the bounds of a call being given
+	Proof, // an induction under way
+	Answering, // a handler answering
+	Summed, // an equation of sums being made
+	Tupled, // an equation of tuples being made
+}
+
+// given_toggled: what is being given gains, or loses, item: what the laws answer
+// may differ (§5.6: a call whose equation is read is the hypothesis). The state is
+// the sum, without carry, of the marks of what is given: the same hypotheses, the
+// same state.
+given_toggled :: proc(k: ^Kernel, kind: Given_Kind, item: rawptr, at := 0) {
+	x := u64(uintptr(item)) ~ (u64(kind) << 58) ~ (u64(at) * 0x9e3779b97f4a7c15)
+	// splitmix64
+	x = (x ~ (x >> 30)) * 0xbf58476d1ce4e5b9
+	x = (x ~ (x >> 27)) * 0x94d049bb133111eb
+	k.state ~= x ~ (x >> 31)
+}
+
+// read_equation: eq read, or no longer, at the values of a call (§5.6).
+read_equation :: proc(k: ^Kernel, eq: ^Call_Equation, read: bool) {
+	if eq.read == read do return
+	eq.read = read
+	given_toggled(k, .Read, eq)
 }
 
 // report: an error, once. What it concerns becomes Invalid, which stays silent.

@@ -457,7 +457,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return family_term(f), true
 	case ^Fold, ^Least, ^Series:
 		// computed once when the term alone gives it; holding calls, once for what is
-		// being given (given_changed): their images read it
+		// being given (given_toggled): their images read it
 		known, plain := plain_of(k, t)
 		if plain && known.imaged do return known.image, known.image != nil
 		node, _ := plain_node(t)
@@ -532,7 +532,7 @@ ordered_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 // Image_Key: a term holding calls, in a state of what is being given.
 Image_Key :: struct {
 	node:  rawptr,
-	state: int,
+	state: u64,
 }
 
 Image_Known :: struct {
@@ -805,13 +805,10 @@ field_color :: proc(k: ^Kernel, layout: Type, name: string) -> (color: Type, ok:
 			if x.generic != s do continue
 			for f in k.fields do if f.scope == s && f.name == name do return f.color, f.color != nil
 			if reading(k, x.root) do return nil, false
-			x.read = true
-			given_changed(k)
+			read_equation(k, x, true)
 			color, ok = produced_field(k, s, name)
-			x.read = false
-			given_changed(k)
+			read_equation(k, x, false)
 			append(&k.fields, Field{s, name, ok ? color : nil})
-			given_changed(k)
 			return
 		}
 		return produced_field(k, s, name)

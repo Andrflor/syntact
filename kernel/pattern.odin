@@ -38,8 +38,7 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 	if c, is_call := target.(^Collapse); is_call {
 		if v, eq, read := production_at(k, c); read {
 			defer {
-				eq.read = false
-				given_changed(k)
+				read_equation(k, eq, false)
 			}
 			return pattern_through(k, v, p, outer)
 		}

@@ -115,8 +115,7 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	for _, v in s.changes do decides ||= is_constant(v)
 	if decides && s != root {
 		if v, eq, read := production_at(k, out); read {
-			eq.read = false
-			given_changed(k)
+			read_equation(k, eq, false)
 			if solved(v, root) do return v
 		}
 	}
@@ -338,12 +337,10 @@ production_at :: proc(k: ^Kernel, c: ^Collapse) -> (v: Type, eq: ^Call_Equation,
 	s, is_scope := c.target.(^Scope)
 	if !is_scope || !c.recursive || reading(k, origin(s)) do return
 	eq = equation_of(k, c) or_return
-	eq.read = true
-	given_changed(k)
+	read_equation(k, eq, true)
 	v = rewrite(k, eq.equation, at_values(k, eq, s.changes))
 	if holds_invalid(v) || has_effect(v) {
-		eq.read = false
-		given_changed(k)
+		read_equation(k, eq, false)
 		return nil, nil, false
 	}
 	return v, eq, true
@@ -376,10 +373,10 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Th
 	eq = new(Call_Equation)
 	eq.root, eq.given, eq.through = root, slice.clone(given), slice.clone(through)
 	append(&k.equations, eq)
-	given_changed(k)
+	given_toggled(k, .Deriving, eq)
 	defer {
 		eq.derived = true
-		given_changed(k)
+		given_toggled(k, .Deriving, eq)
 	}
 	params := make(map[^Binding]Type)
 	for b in given do params[b] = nil
@@ -1866,13 +1863,13 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure{}) -> (image:
 	for x in k.images do if x.equation == eq && same_measure(k, x.measure, measure) && !x.given do return
 	at := len(k.images)
 	append(&k.images, Image{equation = eq, measure = measure})
-	given_changed(k)
+	given_toggled(k, .Bounds, eq, at)
 	values, narrowed, kept := kept_fields(k, call, eq)
 	next: for &x in k.images[:at] {
 		if x.equation != eq || !same_measure(k, x.measure, measure) || len(x.kept) != len(kept) do continue
 		for t, i in kept do if !same(k, t, x.kept[i]) do continue next
 		ordered_remove(&k.images, at)
-		given_changed(k)
+		given_toggled(k, .Bounds, eq, at)
 		if !x.ok do return
 		return images_at(k, &x, values)
 	}
@@ -1900,7 +1897,7 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure{}) -> (image:
 		}
 	}
 	k.images[at] = Image{eq, measure, kept, bounds, ok, true, nil}
-	given_changed(k)
+	given_toggled(k, .Bounds, eq, at)
 	if !ok do return
 	return images_at(k, &k.images[at], values)
 }
@@ -2414,8 +2411,7 @@ counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure
 			continue
 		}
 		v, read := production_at(k, x) or_return
-		read.read = false
-		given_changed(k)
+		read_equation(k, read, false)
 		if !solved(v, root) do return
 		asked = rewriting_call(asked, x, v)
 	}
@@ -2561,7 +2557,7 @@ summed_call :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
 summed_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: Type) -> (^Scope, bool) {
 	for x in k.summed do if x.root == root && x.field == field && same(k, x.lo, lo) && same(k, x.hi, hi) do return x.sum, x.sum != nil
 	append(&k.summed, Summed{root, field, lo, hi, nil})
-	given_changed(k)
+	given_toggled(k, .Summed, nil, len(k.summed))
 	f := copy_scope(k, root, nil)
 	f.source, f.name = nil, strings.concatenate({"Σ", root.name})
 	p: ^Binding
@@ -2574,7 +2570,7 @@ summed_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: Type)
 		break
 	}
 	k.summed[len(k.summed) - 1].sum = f
-	given_changed(k)
+	given_toggled(k, .Summed, nil, len(k.summed))
 	return f, true
 }
 
@@ -2796,7 +2792,7 @@ tupled_call :: proc(k: ^Kernel, m: ^Copier, c: ^Collapse, scope: ^Scope) -> (Typ
 tupled_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: i128) -> (^Scope, bool) {
 	for x in k.tupled do if x.root == root && x.field == field && x.lo == lo && x.hi == hi do return x.tuple, x.tuple != nil
 	append(&k.tupled, Tupled{root, field, lo, hi, nil})
-	given_changed(k)
+	given_toggled(k, .Tupled, nil, len(k.tupled))
 	t := copy_scope(k, root, nil)
 	t.source, t.name = nil, strings.concatenate({"⊗", root.name})
 	p: ^Binding
@@ -2809,7 +2805,7 @@ tupled_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: i128)
 		break
 	}
 	k.tupled[len(k.tupled) - 1].tuple = t
-	given_changed(k)
+	given_toggled(k, .Tupled, nil, len(k.tupled))
 	return t, true
 }
 
@@ -2918,11 +2914,9 @@ over_fold :: proc(k: ^Kernel, s: ^Scope, field: ^Binding, f: ^Fold, span: syn.Sp
 	first := call(k, s, root, field, f.inits[at], span) or_return
 	next := call(k, s, root, field, rewrite(k, step, rewriting(nil, y, z)), span) or_return
 	init, init_read := production_at(k, first) or_return
-	init_read.read = false
-	given_changed(k)
+	read_equation(k, init_read, false)
 	value, value_read := production_at(k, next) or_return
-	value_read.read = false
-	given_changed(k)
+	read_equation(k, value_read, false)
 	// f{t -> y}!, the other fields as in s: w
 	w := new_unknown(k, nil)
 	family := family_of(k, init) or_return
