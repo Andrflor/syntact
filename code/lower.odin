@@ -550,7 +550,7 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold, into: ^Layout = nil, also: []^kernel
 	for g, m in members {
 		value_into := g == f ? into : nil
 		for e, j in entries do if e.fold == g && runs[j] != nil && runs[j] == into && extends(l, g.value, g.states[e.i]) && grows(l, g, e.i) do value_into = after(runs[j], held[j])
-		vs := held_as(l, g.value, value_into)
+		vs := held_as(l, g == f ? g.value : kernel.rewrite(l.k, g.value, renamed), value_into)
 		widths[m] = len(vs)
 		append(&values, ..vs)
 	}
@@ -564,7 +564,7 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold, into: ^Layout = nil, also: []^kernel
 	for e, j in entries {
 		if same_as[j] >= 0 do continue
 		g, i := e.fold, e.i
-		t := g.updates[i]
+		t := g == f ? g.updates[i] : kernel.rewrite(l.k, g.updates[i], renamed)
 		xs: []Value
 		switch {
 		case runs[j] != nil && grows(l, g, i):
@@ -1580,7 +1580,8 @@ in_run :: proc(l: ^Lowering, x: kernel.Type, c: kernel.Type) -> Value {
 	if !read do return fail(l, "a cover %s on a run is not code yet", kernel.print_type(c))
 	// the lengths the cover admits: tested, unless the kernel proves x has one
 	length := kernel.op(l.k, .Length, x)
-	fits := kernel_proves(l, kernel.in_law(l.k, length, lengths)) ? constant(l, 1) : member(l, lower(l, length), lengths)
+	proven := kernel_proves(l, kernel.in_law(l.k, length, lengths))
+	fits := proven ? constant(l, 1) : member(l, lower(l, length), lengths)
 	shape, is_scope := c.(^kernel.Scope)
 	if !is_scope do return fits
 	if kernel.recursive(shape) do shape = kernel.arden(l.k, shape) or_else shape
@@ -1611,6 +1612,12 @@ in_run :: proc(l: ^Lowering, x: kernel.Type, c: kernel.Type) -> Value {
 	held := make([dynamic]kernel.Type)
 	for t in tests do if !holds(t) && !kernel_proves(l, t) do append(&held, t)
 	if len(held) == 0 do return fits
+	// the length proven: the places are read where the cover is tested
+	if proven {
+		all := NONE
+		for t in held do all = both(l, .And, all, lower(l, t))
+		return all
+	}
 	// the places are read where the length holds
 	arms := make([]Arm, 2)
 	taken := make([]Bounds, 1)

@@ -227,6 +227,7 @@ layout_func :: proc(src: ^code.Func) -> ^Func {
 	constants(f)
 	kept_bits(f)
 	fused(f)
+	threaded(f)
 	unread(f)
 	coalesced(f)
 	rotated(f)
@@ -346,19 +347,31 @@ rotated :: proc(f: ^Func) {
 
 // fused: a branch, or a select, on a comparison nothing else reads is the branch,
 // or the select, of the comparison — x = a ◁ b, to yes when x = 1: to yes when
-// a ◁ b; when x = 0, when a ◁̸ b, its contrary, on integers.
+// a ◁ b; when x = 0, when a ◁̸ b, its contrary, on integers. A branch on a
+// comparison whose operands are each written once — the same values wherever x is
+// read — is the branch of the comparison too, read again where it branches.
 fused :: proc(f: ^Func) {
 	reads := make([]int, len(f.kinds))
+	defs := make([]int, len(f.kinds))
+	compared := make(map[Reg]Compare)
 	regs := make([dynamic]Reg)
 	for b in f.blocks {
 		for inst in b.insts {
 			clear(&regs)
 			uses(inst, &regs)
 			for r in regs do reads[r] += 1
+			clear(&regs)
+			writes(inst, &regs)
+			for r in regs do defs[r] += 1
+			if c, is_compare := inst.(Compare); is_compare do compared[c.dst] = c
 		}
 		clear(&regs)
 		end_uses(b.end, &regs)
 		for r in regs do reads[r] += 1
+	}
+	once :: proc(defs: []int, o: Operand) -> bool {
+		r, is_reg := o.(Reg)
+		return !is_reg || defs[r] <= 1
 	}
 	for &b in f.blocks {
 		// a select of integers on a comparison of integers before it in the block,
@@ -387,16 +400,118 @@ fused :: proc(f: ^Func) {
 			}
 		}
 		br, is_branch := b.end.(Branch)
-		if !is_branch || len(b.insts) == 0 || br.cond != .Eq && br.cond != .Ne do continue
+		if !is_branch || br.cond != .Eq && br.cond != .Ne do continue
 		value, constant := br.b.(i64)
-		c, is_compare := b.insts[len(b.insts) - 1].(Compare)
-		if !constant || value != 0 && value != 1 || !is_compare || c.dst != br.a || reads[c.dst] != 1 do continue
+		if !constant || value != 0 && value != 1 do continue
+		c, is_compare := compared[br.a]
+		if !is_compare || defs[br.a] != 1 do continue
+		last := false
+		if len(b.insts) > 0 do if l, at_end := b.insts[len(b.insts) - 1].(Compare); at_end do last = l.dst == c.dst
+		if !(last && reads[c.dst] == 1) && !(defs[c.a] <= 1 && once(defs, c.b)) do continue
 		holds := (br.cond == .Eq) == (value == 1)
 		if !holds && f.kinds[c.a].machine == .Real do continue // unordered: neither holds
 		b.end = Branch{holds ? c.cond : CONTRARY[c.cond], c.a, c.b, br.yes, br.no}
-		pop(&b.insts)
+		if last && reads[c.dst] == 1 do pop(&b.insts)
 	}
 }
+
+// threaded: a branch whose comparison is decided on every path that reaches it — a
+// branch on the same comparison before it, its operands written by nothing since —
+// is the jump to the side it takes there.
+threaded :: proc(f: ^Func) {
+	preds := make([][dynamic]Block_Id, len(f.blocks))
+	for b, id in f.blocks {
+		switch e in b.end {
+		case Jump:
+			append(&preds[e.to], Block_Id(id))
+		case Branch:
+			append(&preds[e.yes], Block_Id(id))
+			if e.no != e.yes do append(&preds[e.no], Block_Id(id))
+		case Return:
+		}
+	}
+	Outcome :: enum u8 {
+		Unknown,
+		Holds,
+		Fails,
+	}
+	regs := make([dynamic]Reg)
+	// writes_operands: an instruction of the block writes a or b
+	writes_operands :: proc(b: Block, br: Branch, regs: ^[dynamic]Reg) -> bool {
+		for inst in b.insts {
+			clear(regs)
+			writes(inst, regs)
+			if slice.contains(regs[:], br.a) do return true
+			if r, is_reg := br.b.(Reg); is_reg && slice.contains(regs[:], r) do return true
+		}
+		return false
+	}
+	// reaching: what the comparison of br is where block id begins, on every path
+	reaching :: proc(f: ^Func, preds: [][dynamic]Block_Id, id: Block_Id, br: Branch, seen: ^map[Block_Id]bool, regs: ^[dynamic]Reg) -> Outcome {
+		if seen[id] || len(preds[id]) == 0 do return .Unknown
+		seen[id] = true
+		defer delete_key(seen, id)
+		out := Outcome.Unknown
+		for p, k in preds[id] {
+			edge := Outcome.Unknown
+			switch e in f.blocks[p].end {
+			case Branch:
+				if e.a == br.a && e.b == br.b && e.yes != e.no && (e.cond == br.cond || e.cond == CONTRARY[br.cond]) {
+					holds := (e.yes == id) == (e.cond == br.cond)
+					edge = holds ? .Holds : .Fails
+				}
+			case Jump:
+				if !writes_operands(f.blocks[p], br, regs) do edge = reaching(f, preds, p, br, seen, regs)
+			case Return:
+			}
+			if edge == .Unknown || k > 0 && edge != out do return .Unknown
+			out = edge
+		}
+		return out
+	}
+	decided := make([]Outcome, len(f.blocks))
+	for b, id in f.blocks {
+		br, is_branch := b.end.(Branch)
+		if !is_branch || f.kinds[br.a].machine == .Real || writes_operands(b, br, &regs) do continue
+		seen := make(map[Block_Id]bool)
+		decided[id] = reaching(f, preds[:], Block_Id(id), br, &seen, &regs)
+	}
+	for &b, id in f.blocks {
+		br, is_branch := b.end.(Branch)
+		if !is_branch do continue
+		switch decided[id] {
+		case .Holds:
+			b.end = Jump{br.yes}
+		case .Fails:
+			b.end = Jump{br.no}
+		case .Unknown:
+		}
+	}
+	// a jump to a block of a few instructions that branches on a comparison the path
+	// of the jump decides: those instructions, then the side taken there
+	for id in 0 ..< len(f.blocks) {
+		b := f.blocks[id]
+		br, is_branch := b.end.(Branch)
+		if !is_branch || len(b.insts) > THREADED || f.kinds[br.a].machine == .Real || writes_operands(b, br, &regs) do continue
+		for k := len(preds[id]) - 1; k >= 0; k -= 1 {
+			p := preds[id][k]
+			j, jumps := f.blocks[p].end.(Jump)
+			if !jumps || j.to != Block_Id(id) || writes_operands(f.blocks[p], br, &regs) do continue
+			seen := make(map[Block_Id]bool)
+			seen[Block_Id(id)] = true
+			at := reaching(f, preds[:], p, br, &seen, &regs)
+			if at == .Unknown do continue
+			side := at == .Holds ? br.yes : br.no
+			append(&f.blocks[p].insts, ..b.insts[:])
+			f.blocks[p].end = Jump{side}
+			ordered_remove(&preds[id], k)
+			append(&preds[side], p)
+		}
+	}
+}
+
+// THREADED: the most instructions of a block a jump past it copies.
+THREADED :: 4
 
 // unread: what computes a register nothing reads goes, until nothing more does;
 // a call stays, for what it does, but gives nothing back.
