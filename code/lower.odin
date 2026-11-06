@@ -899,7 +899,9 @@ shape_of :: proc(l: ^Lowering, t: kernel.Type) -> (shape: ^kernel.Scope, ok: boo
 		if !kernel.gives_scope(l.k, v) do break
 		root := kernel.origin(v.target.(^kernel.Scope))
 		p, _ := kernel.first_production(l.k, root)
-		return shape_of(l, kernel.base_cases(kernel.binding_type(l.k, p), root)[0])
+		bases := make([dynamic]kernel.Type)
+		kernel.base_cases(kernel.binding_type(l.k, p), root, &bases)
+		for base in bases do if s, has := shape_of(l, base); has do return s, true
 	}
 	return nil, false
 }
