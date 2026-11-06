@@ -169,11 +169,13 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	root := eq.root
 	if eq.term == nil do return nil
 	if solved(eq.term, root) do return eq.term
-	calls := calls_in(k, eq.term, root)
-	if len(calls) != 1 do return nil
-	call := calls[0]
 	p, is_pattern := eq.term.(^Pattern)
 	if !is_pattern do return nil
+	// covered branches each calling the equation with the same fields are one (§6)
+	p = calls_joined(k, p, root)
+	calls := calls_in(k, p, root)
+	if len(calls) != 1 do return nil
+	call := calls[0]
 	u, on_field := p.target.(^Unknown)
 	if !on_field do return nil
 	stop, base, step, split := bases_and_steps(k, p, root, u)
@@ -305,7 +307,9 @@ bases_and_steps :: proc(k: ^Kernel, p: ^Pattern, root: ^Scope, u: ^Unknown) -> (
 	last := p.branches[len(p.branches) - 1]
 	if last.cover == nil && solved(last.product, root) {
 		taken := covers(steps[:]) or_return
-		stop = not_law(k, taken)
+		// on a run cut by its head: the runs of fewer pieces (§5.6)
+		if short, cuts := cuts_head(k, taken, u); cuts do stop = short
+		else do stop = not_law(k, taken)
 	} else {
 		stop = covers(bases[:]) or_return
 	}
@@ -374,3 +378,100 @@ from_base :: proc(k: ^Kernel, p: ^Pattern, u: ^Unknown, stop, base: Type, pre, p
 	down.effects, down.value = rewrite(k, before, rewriting(nil, u, at(k, ki, i, down.index))), None{}
 	return wrapped(folded(k, down).(^Effect), nil, value)
 }
+
+// calls_joined: t ? {c₀ -> f{x -> a₀}!  …  cₙ -> f{x -> aₙ}!  -> b}, each covered
+// branch a call of root carving the same bindings, is one branch (§6): a pattern takes
+// its first branch, so t ? {c₀ -> p₀  c₁ -> p₁  -> b} = t ? {c₀ | c₁ -> t ? {c₀ -> p₀
+// -> p₁}  -> b}; and a pattern gives one of its products, so t ? {c -> f{x -> a}!
+// -> f{x -> b}!} = f{x -> t ? {c -> a  -> b}}!. Otherwise p itself.
+calls_joined :: proc(k: ^Kernel, p: ^Pattern, root: ^Scope) -> ^Pattern {
+	n := len(p.branches)
+	if n < 3 || p.branches[n - 1].cover != nil do return p
+	carves := make([]^Scope, n - 1)
+	for b, i in p.branches[:n - 1] {
+		c, is_call := b.product.(^Collapse)
+		if !is_call || !c.recursive do return p
+		carve, is_scope := c.target.(^Scope)
+		if !is_scope || origin(carve) != root || i > 0 && len(carve.changes) != len(carves[0].changes) do return p
+		for x in carve.changes do if i > 0 && x not_in carves[0].changes do return p
+		carves[i] = carve
+	}
+	changes := make(map[^Binding]Type)
+	for x in carves[0].changes {
+		branches := make([]Branch, n - 1)
+		for carve, i in carves {
+			branches[i] = p.branches[i]
+			branches[i].product = carve.changes[x]
+		}
+		branches[n - 2].cover = nil
+		q := new(Pattern)
+		q.target, q.branches, q.span = p.target, branches, p.span
+		changes[x] = normal(k, q)
+	}
+	call := new(Collapse)
+	call.target, call.recursive, call.span = carved_copy(k, root, changes), true, p.span
+	covers := make([]Type, n - 1)
+	for b, i in p.branches[:n - 1] do covers[i] = b.cover
+	out := new(Pattern)
+	out.target, out.span = p.target, p.span
+	out.branches = make([]Branch, 2)
+	out.branches[0] = p.branches[0]
+	out.branches[0].cover, out.branches[0].product = new_or(..covers), call
+	out.branches[1] = p.branches[n - 1]
+	return out
+}
+
+
+// cuts_head: the covers {T₁(h₁) … T_c(h_c) ...R:(t)}, one or a union of them, each
+// cutting c pieces from the head of u, a run of pieces of one binding, in R. They take
+// every run of c pieces or more when one cover takes every piece at each place — or,
+// cutting one piece, when its heads together take every piece: a union of covers of
+// one piece is the cover of the union of their heads. What they do not take, the
+// base, is then the runs of fewer than c pieces.
+cuts_head :: proc(k: ^Kernel, cover: Type, u: ^Unknown) -> (short: ^Scope, ok: bool) {
+	covers := []Type{cover}
+	if any, is_or := cover.(^Or); is_or do covers = any.terms
+	pieces, _ := run_pieces(k, u) or_return
+	shape := pieces.(^Scope) or_return
+	inner := placed(k, shape, .Shape)
+	if len(inner) != 1 || is_run(inner[0]) || inner[0].color == nil do return
+	item := binding_color(k, inner[0])
+	c := -1
+	heads := make([dynamic]Type)
+	for x in covers {
+		written := x.(^Scope) or_return
+		places := placed(k, written, .Shape)
+		n := len(places) - 1
+		if n < 1 || c >= 0 && n != c || !is_run(places[n]) || places[n].color == nil do return
+		if !is_bool(in_law(k, u, binding_color(k, places[n])), true) do return
+		c = n
+		every := true
+		for place in places[:n] {
+			if is_run(place) do return
+			// what the place admits: its color, or the value written there
+			head := binding_color(k, place)
+			if head == nil && place.value != nil do head = values(k, binding_value(k, place)) or_return
+			if head == nil do head = item
+			if n == 1 do append(&heads, head)
+			every &&= included(k, item, head)
+		}
+		if every do return runs_of(k, pieces, Int(0), Int(c - 1), cover), true
+	}
+	if c != 1 || !included(k, item, or_law(k, heads[:])) do return
+	return runs_of(k, pieces, Int(0), Int(0), cover), true
+}
+
+// runs_of: the runs of lo..hi pieces, hi nil for no bound.
+runs_of :: proc(k: ^Kernel, pieces, lo, hi: Type, at: Type) -> ^Scope {
+	// no piece: the run of no binding, {} (§4.6)
+	if is_int(lo, 0) && is_int(hi, 0) do return run_scope(k, {})
+	span := syn.Span{}
+	if written, is_scope := at.(^Scope); is_scope do span = written.span
+	out := new_scope(nil, span)
+	out.source, out.complete, out.reached = out, true, true
+	run := new_binding(out, .Expand, span)
+	run.color = new_operation(.Mul, pieces, new_range(lo, hi, .Int))
+	run.typed_color = run.color
+	return out
+}
+

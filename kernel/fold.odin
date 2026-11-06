@@ -213,6 +213,11 @@ along_orbit :: proc(k: ^Kernel, f: ^Fold) -> (g: ^Fold, ok: bool) {
 	j := new_unknown(k, nil)
 	j.layout = COUNTS
 	n := least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), f.stop), f.span)
+	// along the orbit, before it stops: i in 0..n - 1
+	along := new_unknown(k, nil)
+	along.layout = range_law(k, Int(0), op(k, .Sub, n, Int(1)), .Int, f.span)
+	ki = rewrite(k, ki, rewriting(nil, i, along))
+	i = along
 	at := rewriting(nil, f.index, ki)
 	g = new(Fold)
 	g^ = f^
@@ -779,6 +784,8 @@ fixed :: proc(k: ^Kernel, f: ^Fold, i: int) -> bool {
 // fewer_than: s is the shape of the runs of fewer than c pieces, {...(A * (0..c - 1)):}.
 fewer_than :: proc(s: Type, c: i128) -> bool {
 	shape, is_scope := s.(^Scope)
+	// fewer than one piece: {}
+	if is_scope && len(shape.bindings) == 0 do return c == 1
 	if !is_scope || len(shape.bindings) != 1 || !is_run(shape.bindings[0]) do return false
 	o, repeats := shape.bindings[0].color.(^Operation)
 	if !repeats || o.op != .Mul do return false
