@@ -248,3 +248,20 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
   holding a record holds, binding by binding, what the steps give each. A counter
   every call moves by y + g along a field every call moves by u + δ lies within
   y - δ·max(g)·u ≤ max(y₀ - δ·max(g)·u₀): the steps made so far."
+
+## Step: words round 6b (2bc44da, c102767) — 06:30 UTC
+- 2bc44da §5.6 a substituted solution renames only the bound unknowns its values hold or
+  whose layouts follow them (renaming everything made every copy a new term, read again):
+  words 3.06 s → 2.5 s at that base; strlist 3.7 → 1.9 s, respond 2 errors in 3.6 s
+  (was over memory), sexp 2.9 → 2.1 s.
+- c102767 a call whose equation has no type is in no set: put was "proven" in int, so
+  `p.slots` / `p.new` were refused.
+- words on master c102767: 4 errors, 3.5 s (user 2.0 s). With least_growing.patch
+  (scratchpad wd/, μ of a growing power: nslots in u64) words types further and goes over
+  12 GB. Bisected: `count` over an unknown list alone takes 7.7 s / 5 GB, and 1.5 s / 1.3 GB
+  when hash{s -> w}! is replaced by size{s -> w}!: the cost is the hash closed form
+  (65 KB printed, 20 folds) read again in recursive_call → effects_elsewhere →
+  keyed_equation → call_equation for each call of count/put (the equation-reading code
+  of the field-bounds agent). Not pushed until that is cheap.
+- Still open: 283:8 |split| tally in i64, distinct + p.new in i64 (count's counter moved
+  by 0..1 a step), the count-down run length.
