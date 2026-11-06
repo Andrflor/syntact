@@ -6,3 +6,16 @@ RSAIdentity -> {
     -> decrypt{encrypt{m priv}! pub}! = m ?! true
   }
 }
+
+decrypt -> {
+  n -> 0
+  -> n+1
+}
+
+encrypt -> {
+  n -> 0
+  -> n-1
+}
+
+n -> ??
+true: -> decrypt{encrypt{n}!}! = n

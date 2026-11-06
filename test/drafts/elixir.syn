@@ -190,7 +190,10 @@ json -> '$s{$s"$alnum":$s$value$s}$s'
 // This is a compile time garantee
 decodeEncodeSymmetry -> {
   String:m -> ??
-  -> decode{encode{m}!}! = m ?! true
+  -> decode{encode{m}!}! = m {
+    true -> {}
+    -> ??
+  }
 }
 
 Maybe -> {
