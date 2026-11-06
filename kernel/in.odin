@@ -539,10 +539,18 @@ runs_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) {
 	if _, same_scope := set.(^Scope); same_scope && set == Type(s) do return
 	items := item_image(k, set) or_return
 	for c in colors do if !included(k, items, c) do return
-	if length, known := length_image(k, set); known {
-		if counts == nil && included(k, length, range_law(k, Int(i128(fixed)), nil, .Int, s.span)) do return Bool(true), true
-		if counts != nil {
-			if admitted, imaged := layout_image(k, counts); imaged && included(k, exact_law(k, .Sub, {length, Int(i128(fixed))}, s.span), admitted) do return Bool(true), true
+	// the image of its length, the sum of its pieces' (§5.3): in what the shape admits,
+	// or out of it, decides; otherwise its length as a term
+	// a run a fold builds: the image of the fold of its lengths
+	length, known := length_image(k, set)
+	if f, built := x.(^Fold); built do if image, read := fold_length_image(k, f, s.span); read do length, known = known ? and_law(k, {length, image}) : image, true
+	if known {
+		admitted, imaged := Type(COUNTS), true
+		if counts != nil do admitted, imaged = layout_image(k, counts)
+		if imaged {
+			beyond := exact_law(k, .Sub, {length, Int(i128(fixed))}, s.span)
+			if included(k, beyond, admitted) do return Bool(true), true
+			if is_none(and_law(k, {beyond, admitted})) do return Bool(false), true
 		}
 	}
 	n := exact_law(k, .Sub, {run_law(k, .Length, {x}, s.span), Int(i128(fixed))}, s.span)

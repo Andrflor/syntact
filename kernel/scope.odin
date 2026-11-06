@@ -1348,30 +1348,93 @@ by_place :: proc(k: ^Kernel, o: Operator, x: Type, xs: []^Binding, i: Type, span
 
 // fold_length: |⟳(…; v)| = ⟳(…; |v|), the length of what the fold gives read on
 // its value (§5.3). A state z: s ↦ u(z) that nothing else reads, and the value only
-// by |z|, is ℓ: |s| ↦ ℓ + g when |u(z)| = |z| + g: each step places z once and g
-// bindings around it, |{...P ...x ...Q}| = |x| + |P| + |Q| (§5.3) through its carves,
-// expansions and patterns — the length passes through the fold as through an
-// operator.
+// by |z|, is ℓ: |s| ↦ ℓ + g when each step places z once and g bindings around it,
+// |{...P ...x ...Q}| = |x| + |P| + |Q| (§5.3), read on the form of the step
+// (step_length): the fold of lengths, in closed form when g is a count.
 fold_length :: proc(k: ^Kernel, f: ^Fold, span: syn.Span) -> (n: Type, ok: bool) {
+	i, l, value, g := length_state(k, f, span) or_return
+	if !is_value(k, g) do return
+	h := new(Fold)
+	h^ = f^
+	h.states, h.inits, h.updates = slice.clone(f.states), slice.clone(f.inits), slice.clone(f.updates)
+	h.states[i], h.value = l, value
+	h.inits[i] = run_law(k, .Length, {f.inits[i]}, span)
+	h.updates[i] = op(k, .Add, l, g)
+	return fold_law(k, h), true
+}
+
+// fold_length_image: what the length of what the fold gives may be: from what the
+// state starts at, each step adding what its pieces may add — at least the least of
+// it, each of the steps the fold makes at least (§5.3, §5.6).
+fold_length_image :: proc(k: ^Kernel, f: ^Fold, span: syn.Span) -> (image: Type, ok: bool) {
+	i, l, value, g := length_state(k, f, span) or_return
+	// the value its length: |z|, or a sum over it
+	if u, is_state := value.(^Unknown); !is_state || !same_unknown(u, l) do return
+	start := length_image(k, values(k, f.inits[i]) or_return) or_return
+	least_start, _ := int_bounds(k, start) or_return
+	least_step, _ := int_bounds(k, layout_image(k, g) or_return) or_return
+	from := least_start.? or_return
+	each := least_step.? or_return
+	if each < 0 do return
+	lo, hi := counter_range(k, f) or_return
+	steps, _ := int_bounds(k, layout_image(k, op(k, .Add, op(k, .Sub, hi, lo), Int(1))) or_return) or_return
+	at_least := max(steps.? or_else 0, 0)
+	return range_law(k, Int(from + at_least * each), nil, .Int, span), true
+}
+
+// length_state: a state z of the fold that holds a run, nothing else reads, and the
+// value reads only by |z|: its place i, the unknown l of its length, the value over
+// l, and g, what a step adds to it — read on the form of the step.
+length_state :: proc(k: ^Kernel, f: ^Fold, span: syn.Span) -> (i: int, l: ^Unknown, value: Type, g: Type, ok: bool) {
 	length := run_law(k, .Length, {f.value}, span)
-	next: for z, i in f.states {
+	next: for z, j in f.states {
+		// a state that is a run: what has a length
+		if family, known := family_of(k, f.inits[j]); !known || family != .Scope do continue
 		if reads(k, f.effects, z) do continue
-		for t, j in f.updates do if j != i && reads(k, t, z) do continue next
-		l := new_unknown(k, nil)
+		for t, m in f.updates do if m != j && reads(k, t, z) do continue next
+		l = new_unknown(k, nil)
 		l.layout = COUNTS
-		at := append_read(nil, new_operation(.Length, z), l)
-		value := rewrite(k, length, at)
+		value = rewrite(k, length, append_read(nil, new_operation(.Length, z), l))
 		if reads(k, value, z) do continue
-		// the length of the step as a term in |z|: ℓ + g, g reading no z
-		one, g := affine_in(k, rewrite(k, run_law(k, .Length, {f.updates[i]}, span), at), l) or_continue
-		if !is_int(one, 1) || reads(k, g, z) || reads(k, g, l) do continue
-		h := new(Fold)
-		h^ = f^
-		h.states, h.inits, h.updates = slice.clone(f.states), slice.clone(f.inits), slice.clone(f.updates)
-		h.states[i], h.value = l, value
-		h.inits[i] = run_law(k, .Length, {f.inits[i]}, span)
-		h.updates[i] = op(k, .Add, l, g)
-		return fold_law(k, h), true
+		g = step_length(k, f.updates[j], z) or_continue
+		return j, l, value, g, true
+	}
+	return
+}
+
+// step_length: |t| - |z|, t a step of z: a run that places z once and pieces
+// around it, each counted by its image — a place one, an expansion what it expands;
+// a pattern, one of its products (§5.3, §6).
+step_length :: proc(k: ^Kernel, t: Type, z: ^Unknown) -> (g: Type, ok: bool) {
+	#partial switch v in given(k, t) {
+	case ^Scope:
+		n: Type = Int(0)
+		placed_z := false
+		for b in run_data(k, v) {
+			part: Type = Int(1)
+			if b.kind == .Expand {
+				x := binding_value(k, b)
+				if u, is_state := x.(^Unknown); is_state && same_unknown(u, z) {
+					if placed_z do return
+					placed_z = true
+					continue
+				}
+				if reads(k, x, z) do return
+				// what it expands: the length of a run written here, by its pieces; of
+				// any other, by the length law on it
+				if w, written := given(k, x).(^Scope); written {
+					part = COUNTS
+					if c, read := length_image(k, w); read do part = c
+				} else do part = run_law(k, .Length, {x}, b.span)
+			}
+			n = op(k, .Add, n, part)
+		}
+		return n, placed_z
+	case ^Pattern:
+		if has_effect(v) || reads(k, v.target, z) do return
+		parts := make([]Type, len(v.branches))
+		for b, j in v.branches do parts[j] = step_length(k, b.product, z) or_return
+		return or_law(k, parts), true
 	}
 	return
 }
@@ -1445,6 +1508,20 @@ length_image :: proc(k: ^Kernel, layout: Type) -> (n: Type, ok: bool) {
 		return
 	}
 	s := layout.(^Scope) or_return
+	// a run of values: the sum of its pieces (§5.3) — a place is one, an expansion what
+	// it expands, any length when that is not a run written here
+	if !is_shape(k, s) && !recursive(s) {
+		n = Int(0)
+		for b in run_data(k, s) {
+			part: Type = Int(1)
+			if b.kind == .Expand {
+				part = COUNTS
+				if x, written := given(k, binding_value(k, b)).(^Scope); written do if l, read := length_image(k, x); read do part = l
+			}
+			n = exact_law(k, .Add, {n, part}, b.span)
+		}
+		return n, true
+	}
 	shape := s
 	if recursive(s) do shape = arden(k, s) or_return
 	if !is_shape(k, shape) do return
