@@ -144,3 +144,11 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - 2ab6976's bug: the image of ~S was the complement of what S *may* hold; now of what S holds for every value of its unknowns (§4.1). Also `>m` with m a single value no longer read as everything.
 - Verified on clean master a39b450: corpus 583/5, code tests green, six outputs identical on x86 and C, bt2 x = y = z = 18.
 - respond runs out of memory since 2ab6976 (runs_in's length clause); being fixed. Next for that agent: extra errors in lru/graph/scene/words/particles, the field law for scopes and runs, blur 72:10.
+
+## Step: strlist at Goose's size (6f53047 … f7b92e1) — 04:20 UTC
+- split is a fold building its run (§4.13/§5.6): one bound prover for calls and folds (`Recursion`), patterns distributed in the ring, a Σ over what a fold builds passed through the fold, runs grown in their own memory.
+- Soundness fixes on the way: a place written with a value admits only it; a step reading a state the call changes is not an orbit.
+- Verified on clean master f7b92e1: corpus 583/5, code tests, six outputs, bt2 = 18, strlist 400000 → 400000 368751732 (= Goose).
+- strlist at 400000: C 27.8 ms, x86 42.7 ms, Goose 29.9 ms; 12.9 MB (= Goose).
+- For the user to review: loop fusion along one orbit and loop-invariant hoisting are backend rules, not yet written as laws in specs/types.md. Hoisting must not run a trapping term when a loop has zero turns: being fixed (placement law).
+- 8/16 compile now.
