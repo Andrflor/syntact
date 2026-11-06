@@ -313,9 +313,11 @@ powers :: proc(g: ^Graph, c: Class) -> []Power {
 	return out[:]
 }
 
-// gathered: x ** i * x ** j = x ** (i + j).
+// gathered: x ** i * x ** j = x ** (i + j) — a product whose facts give one
+// integer is that integer (known): its powers add no computation.
 gathered :: proc(g: ^Graph, c: Class, n: Node) {
 	if n.kind != .Binary || n.op != .Mul do return
+	if _, constant := g.facts[find(g, c)].constant.?; constant do return
 	for p in powers(g, n.args[0]) do for q in powers(g, n.args[1]) {
 		if p.base == q.base do equal(g, c, binary(g, .Pow, p.base, add(g, int_node(p.count + q.count))))
 	}
