@@ -152,3 +152,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - strlist at 400000: C 27.8 ms, x86 42.7 ms, Goose 29.9 ms; 12.9 MB (= Goose).
 - For the user to review: loop fusion along one orbit and loop-invariant hoisting are backend rules, not yet written as laws in specs/types.md. Hoisting must not run a trapping term when a loop has zero turns: being fixed (placement law).
 - 8/16 compile now.
+
+## Step: length of a run as the sum of its pieces (aa8cd77) — 04:40 UTC
+- Verified on clean master aa8cd77: green, bt2 = 18.
+- respond: 2 errors in 7.4 s with aa8cd77 on the base before 95260f7; out of memory again with 95260f7 (Σ through a fold).
+- Launched: (A) respond memory + kernel compile time; (B) §5.6 field law for scopes, runs and fold states (lru, zip tests, sexp text, particles), extra errors, blur 72:10, calc/graph/scene. Running: words round, x86 code quality + hoisting soundness.
