@@ -56,6 +56,8 @@ gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
 	if c, read := call_read(v); read {
 		if f, known := call_family(k, c, read_of(v)); known && f == .Scope do return true
 	}
+	// its family, read on its form: every value of a term of the scopes is one
+	if f, known := family_of(k, v); known do return f == .Scope
 	set, ok := values(k, v)
 	if !ok do return false
 	if holds, is_call := scopes(k, set); is_call do return holds
@@ -1046,9 +1048,13 @@ different_structures :: proc(k: ^Kernel, a, b: Type) -> bool {
 
 // same: two normal forms are the same term. Two scopes are equal when their
 // bindings are, in order: the same names, the same kinds, equal values (§5.3).
-same :: proc(k: ^Kernel, a, b: Type) -> bool {
+// What a term binds — the index and states of a fold, the index of a Σ or a μ, what
+// an effect gives back — is its own: bound, b's unknown that a's stands for, the
+// two compared by that correspondence, nothing rewritten.
+same :: proc(k: ^Kernel, a, b: Type, bound: Rewrite = nil) -> bool {
 	if a == nil || b == nil do return a == nil && b == nil
-	if a == b do return true // the very term
+	// the very term, reading nothing bound apart
+	if a == b && !reads_bound(k, a, bound) do return true
 	switch x in a {
 	case Char:
 		y, ok := b.(Char)
@@ -1070,69 +1076,71 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		return ok
 	case ^Unknown:
 		y, ok := b.(^Unknown)
-		return ok && same_unknown(x, y) // the same unknown, whatever layout a branch gives it
+		if !ok do return false
+		if t, mapped := rewritten(bound, y); mapped do if u, is_unknown := t.(^Unknown); is_unknown do return same_unknown(x, u)
+		return same_unknown(x, y) // the same unknown, whatever layout a branch gives it
 	case ^Effect:
 		// the same effect wrapping the same computation: what it gives back is bound
 		// in it, whatever its index
 		y, ok := b.(^Effect)
 		if !ok || x.id != y.id || (x.answer == nil) != (y.answer == nil) do return false
 		if (x.choice == nil) != (y.choice == nil) do return false
-		if x.choice != nil && !same(k, x.choice, y.choice) do return false
+		if x.choice != nil && !same(k, x.choice, y.choice, bound) do return false
 		// the same emission, of the same value
 		if (x.emission == nil) != (y.emission == nil) do return false
-		if x.emission != nil && (x.emission.id != y.emission.id || !same(k, x.emission.sent, y.emission.sent)) do return false
+		if x.emission != nil && (x.emission.id != y.emission.id || !same(k, x.emission.sent, y.emission.sent, bound)) do return false
 		// the same write: of the same place, the same value
 		if (x.write == nil) != (y.write == nil) do return false
-		if x.write != nil && (x.write.place == nil || y.write.place == nil || !same_unknown(x.write.place, y.write.place) || !same(k, x.write.value, y.write.value)) do return false
-		if x.answer == nil do return same(k, x.then, y.then)
+		if x.write != nil && (x.write.place == nil || y.write.place == nil || !same_unknown(x.write.place, y.write.place) || !same(k, x.write.value, y.write.value, bound)) do return false
+		if x.answer == nil do return same(k, x.then, y.then, bound)
 		if (x.call == nil) != (y.call == nil) do return false
-		if x.call != nil && !same(k, x.call, y.call) do return false
+		if x.call != nil && !same(k, x.call, y.call, bound) do return false
 		if (x.fold == nil) != (y.fold == nil) do return false
-		if x.fold != nil && !same(k, x.fold, y.fold) do return false
-		if !same(k, layout_of(k, x.answer), layout_of(k, y.answer)) do return false
-		return same(k, x.then, rewrite(k, y.then, rewriting(nil, y.answer, x.answer)))
+		if x.fold != nil && !same(k, x.fold, y.fold, bound) do return false
+		if !same(k, layout_of(k, x.answer), layout_of(k, y.answer), bound) do return false
+		return same(k, x.then, y.then, rewriting(bound, y.answer, x.answer))
 	case ^Or:
 		y, ok := b.(^Or)
-		return ok && same_all(k, x.terms, y.terms)
+		return ok && same_all(k, x.terms, y.terms, bound)
 	case ^And:
 		y, ok := b.(^And)
-		return ok && same_all(k, x.terms, y.terms)
+		return ok && same_all(k, x.terms, y.terms, bound)
 	case ^Not:
 		y, ok := b.(^Not)
-		return ok && same(k, x.term, y.term)
+		return ok && same(k, x.term, y.term, bound)
 	case ^Is:
 		y, ok := b.(^Is)
-		return ok && same(k, x.term, y.term)
+		return ok && same(k, x.term, y.term, bound)
 	case ^Range:
 		y, ok := b.(^Range)
-		return ok && x.family == y.family && same(k, x.lo, y.lo) && same(k, x.hi, y.hi)
+		return ok && x.family == y.family && same(k, x.lo, y.lo, bound) && same(k, x.hi, y.hi, bound)
 	case ^Operation:
 		y, ok := b.(^Operation)
-		return ok && x.op == y.op && same_all(k, x.args, y.args)
+		return ok && x.op == y.op && same_all(k, x.args, y.args, bound)
 	case ^Name:
 		y, ok := b.(^Name)
 		return ok && x.binding == y.binding
 	case ^Scope:
 		y, ok := b.(^Scope)
-		return ok && same_scope(k, x, y)
+		return ok && same_scope(k, x, y, bound)
 	case ^Access:
 		y, ok := b.(^Access)
-		return ok && x.name == y.name && x.ordinal == y.ordinal && same(k, x.target, y.target)
+		return ok && x.name == y.name && x.ordinal == y.ordinal && same(k, x.target, y.target, bound)
 	case ^Collapse:
 		y, ok := b.(^Collapse)
-		return ok && x.recursive == y.recursive && slice.equal(x.answered, y.answered) && same(k, x.target, y.target)
+		return ok && x.recursive == y.recursive && slice.equal(x.answered, y.answered) && same(k, x.target, y.target, bound)
 	case ^Carve:
 		y, ok := b.(^Carve)
-		if !ok || len(x.args) != len(y.args) || !same(k, x.target, y.target) do return false
-		for a, i in x.args do if a.name != y.args[i].name || a.ordinal != y.args[i].ordinal || !same(k, a.value, y.args[i].value) do return false
+		if !ok || len(x.args) != len(y.args) || !same(k, x.target, y.target, bound) do return false
+		for a, i in x.args do if a.name != y.args[i].name || a.ordinal != y.args[i].ordinal || !same(k, a.value, y.args[i].value, bound) do return false
 		return true
 	case ^Default:
 		y, ok := b.(^Default)
-		return ok && same(k, x.color, y.color)
+		return ok && same(k, x.color, y.color, bound)
 	case ^Pattern:
 		y, ok := b.(^Pattern)
-		if !ok || len(x.branches) != len(y.branches) || !same(k, x.target, y.target) do return false
-		for br, i in x.branches do if !same(k, br.cover, y.branches[i].cover) || !same(k, br.product, y.branches[i].product) do return false
+		if !ok || len(x.branches) != len(y.branches) || !same(k, x.target, y.target, bound) do return false
+		for br, i in x.branches do if !same(k, br.cover, y.branches[i].cover, bound) || !same(k, br.product, y.branches[i].product, bound) do return false
 		return true
 	case ^Fold:
 		// the same fold: what it binds — k, its states, what its effects give back —
@@ -1141,36 +1149,42 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		if !ok || len(x.states) != len(y.states) do return false
 		xs, ys := chain_answers(x.effects), chain_answers(y.effects)
 		if len(xs) != len(ys) do return false
-		bound := rewriting(nil, y.index, x.index)
-		for u, i in y.states do bound = rewriting(bound, u, x.states[i])
+		inner := rewriting(bound, y.index, x.index)
+		for u, i in y.states do inner = rewriting(inner, u, x.states[i])
 		for u, i in ys {
 			if (u == nil) != (xs[i] == nil) do return false
-			if u != nil do bound = rewriting(bound, u, xs[i])
+			if u != nil do inner = rewriting(inner, u, xs[i])
 		}
-		return same_all(k, fold_parts(x), rewrite_all(k, fold_parts(y), bound))
+		return same_all(k, fold_parts(x), fold_parts(y), inner)
 	case ^Least:
 		y, ok := b.(^Least)
-		return ok && same(k, x.holds, rewrite(k, y.holds, rewriting(nil, y.index, x.index)))
+		return ok && same(k, x.holds, y.holds, rewriting(bound, y.index, x.index))
 	case ^Recurrent:
 		y, ok := b.(^Recurrent)
-		if !ok || len(x.coefficients) != len(y.coefficients) || !same_all(k, x.initial, y.initial) || !same(k, x.at, y.at) do return false
+		if !ok || len(x.coefficients) != len(y.coefficients) || !same_all(k, x.initial, y.initial, bound) || !same(k, x.at, y.at, bound) do return false
 		for c, i in x.coefficients do if c != y.coefficients[i] do return false
 		return true
 	case ^Series:
 		y, ok := b.(^Series)
-		return ok && x.op == y.op && same(k, x.lo, y.lo) && same(k, x.hi, y.hi) && same(k, x.term, rewrite(k, y.term, rewriting(nil, y.index, x.index)))
+		return ok && x.op == y.op && same(k, x.lo, y.lo, bound) && same(k, x.hi, y.hi, bound) && same(k, x.term, y.term, rewriting(bound, y.index, x.index))
 	}
 	return false
 }
 
-same_all :: proc(k: ^Kernel, a, b: []Type) -> bool {
+same_all :: proc(k: ^Kernel, a, b: []Type, bound: Rewrite = nil) -> bool {
 	if len(a) != len(b) do return false
-	for x, i in a do if !same(k, x, b[i]) do return false
+	for x, i in a do if !same(k, x, b[i], bound) do return false
 	return true
 }
 
-same_scope :: proc(k: ^Kernel, a, b: ^Scope) -> bool {
-	if a == b do return true
+// reads_bound: t reads an unknown bound apart in a comparison (same).
+reads_bound :: proc(k: ^Kernel, t: Type, bound: Rewrite) -> bool {
+	for x in bound do if x.unknown != nil && reads(k, t, x.unknown) do return true
+	return false
+}
+
+same_scope :: proc(k: ^Kernel, a, b: ^Scope, bound: Rewrite = nil) -> bool {
+	if a == b && !reads_bound(k, a, bound) do return true
 	// two carves of one scope: s{x -> v} = s{x -> w} when v = w; s{x -> s.x} = s
 	if root := origin(a); root == origin(b) {
 		for x in root.bindings {
@@ -1179,17 +1193,17 @@ same_scope :: proc(k: ^Kernel, a, b: ^Scope) -> bool {
 			if !in_a && !in_b do continue
 			if !in_a do v = binding_type(k, x)
 			if !in_b do w = binding_type(k, x)
-			if !same(k, v, w) do return false
+			if !same(k, v, w, bound) do return false
 		}
 		return true
 	}
-	return same_bindings(k, a, b, true)
+	return same_bindings(k, a, b, true, bound)
 }
 
 // same_bindings: the bindings of two scopes are, in order, the same names, kinds
 // and values (§5.3) — as terms, the same colors too: `{u8:}` and `{i8:}` give the
 // same value, not the same set.
-same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
+same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool, bound: Rewrite = nil) -> bool {
 	// the places of their shapes: a run without a value places no value, but it is
 	// a place, compared by its color
 	ps, qs := placed(k, a, .Shape), placed(k, b, .Shape)
@@ -1197,7 +1211,7 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 	for p, i in ps {
 		q := qs[i]
 		if p.name != q.name || p.kind != q.kind || (p.value == nil) != (q.value == nil) do return false
-		if p.value == nil && !same(k, binding_color(k, p), binding_color(k, q)) do return false
+		if p.value == nil && !same(k, binding_color(k, p), binding_color(k, q), bound) do return false
 	}
 	xs := placed(k, a, .Value)
 	ys := placed(k, b, .Value)
@@ -1205,8 +1219,8 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 	for x, i in xs {
 		y := ys[i]
 		if x.name != y.name || x.kind != y.kind do return false
-		if colors && !same(k, binding_color(k, x), binding_color(k, y)) do return false
-		if !same(k, binding_type(k, x), binding_type(k, y)) do return false
+		if colors && !same(k, binding_color(k, x), binding_color(k, y), bound) do return false
+		if !same(k, binding_type(k, x), binding_type(k, y), bound) do return false
 	}
 	return true
 }
@@ -1237,6 +1251,8 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 		if is_put do return run_law(k, .Length, put.args[:1], span) // |x{#k -> v}| = |x|
 		// a run a fold builds: the fold of its lengths
 		if f, is_fold := x.(^Fold); is_fold do if n, read := fold_length(k, f, span); read do return n
+		// a binding of a run a fold builds, or a field of it: what the step places
+		if n, read := built_length(k, x, span); read do return n
 		// a call whose equation places a field at the head of what it gives:
 		// |f{out -> o}!| = |o| + |f{out -> {}}!| (§5.6, runs compose)
 		if c, is_call := as_call(x); is_call && !is_pending_call(k, x) {
@@ -1479,14 +1495,41 @@ built_item :: proc(k: ^Kernel, f: ^Fold, a: Type) -> (value: Type, read: bool) {
 // built_field: x.#t.a, x a run the fold f builds one binding a step, the field a of
 // what it places reading only the step: that field at the step t (§5.6).
 built_field :: proc(k: ^Kernel, f: ^Fold, t: Type, a: ^Access) -> (value: Type, read: bool) {
+	value = step_placed(k, f, t, a) or_return
+	for z in f.states do if reads(k, value, z) do return nil, false
+	return value, true
+}
+
+// step_placed: what the step t of the fold f places, f building one binding a step —
+// its field a, when a is given —, over the states of that step (§5.6).
+step_placed :: proc(k: ^Kernel, f: ^Fold, t: Type, a: ^Access) -> (value: Type, read: bool) {
 	_, es, builds := built(k, f)
 	if !builds || len(es) != 1 do return
-	placed_scope := given(k, es[0]).(^Scope) or_return
-	b := occurrence(placed(k, placed_scope, .Value), a.name, a.ordinal, true) or_return
-	value = binding_value(k, b)
-	for z in f.states do if reads(k, value, z) do return nil, false
+	value = es[0]
+	if a != nil {
+		placed_scope := given(k, value).(^Scope) or_return
+		b := occurrence(placed(k, placed_scope, .Value), a.name, a.ordinal, true) or_return
+		value = binding_value(k, b)
+	}
 	lo, _ := counter_range(k, f) or_return
 	return rewrite(k, value, rewriting(nil, f.index, op(k, .Add, lo, t))), true
+}
+
+// built_length: |x.#t|, |x.#t.a|, x a run the fold f builds one binding a step: the
+// length of what the step t places, when it is the same whatever the states of that
+// step hold (§5.3, §5.6).
+built_length :: proc(k: ^Kernel, x: Type, span: syn.Span) -> (n: Type, read: bool) {
+	t := x
+	a: ^Access
+	if access, is_access := x.(^Access); is_access do a, t = access, access.target
+	item := t.(^Operation) or_return
+	if item.op != .Item do return
+	f := item.args[0].(^Fold) or_return
+	value := step_placed(k, f, item.args[1], a) or_return
+	n = run_law(k, .Length, {value}, span)
+	if is_invalid(n) do return nil, false
+	for z in f.states do if reads(k, n, z) do return nil, false
+	return n, true
 }
 
 // length_image: the lengths of the runs a layout admits: a place one binding, a

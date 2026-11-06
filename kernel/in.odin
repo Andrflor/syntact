@@ -544,8 +544,11 @@ runs_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) {
 	fixed, colors, counts := run_form(k, s) or_return
 	set := values(k, x) or_return
 	if _, same_scope := set.(^Scope); same_scope && set == Type(s) do return
-	items := item_image(k, set) or_return
-	for c in colors do if !included(k, items, c) do return
+	// each of its bindings in the colors of the shape, when it has some
+	if len(colors) > 0 {
+		items := item_image(k, set) or_return
+		for c in colors do if !included(k, items, c) do return
+	}
 	// the image of its length, the sum of its pieces' (§5.3): in what the shape admits,
 	// or out of it, decides; otherwise its length as a term
 	// a run a fold builds: the image of the fold of its lengths
@@ -585,13 +588,24 @@ fold_induction :: proc(k: ^Kernel, f: ^Fold, c: Type) -> bool {
 			assumed = rewriting(assumed, z, u)
 		}
 		stays := true
-		for t, i in f.updates do if taken[i] && !holds(k, rewrite(k, t, assumed), c) {
+		for t, i in f.updates do if taken[i] && !assumed_holds(k, t, assumed, c) {
 			taken[i], stays = false, false
 			break
 		}
 		if stays do break
 	}
-	return holds(k, rewrite(k, f.value, assumed), c)
+	return assumed_holds(k, f.value, assumed, c)
+}
+
+// assumed_holds: t is in c, its states in c by hypothesis: in c whatever they are,
+// or else under the hypothesis — a term the hypothesis is not needed for is not
+// rewritten.
+assumed_holds :: proc(k: ^Kernel, t: Type, assumed: Rewrite, c: Type) -> bool {
+	verdict, _ := prove(k, in_law(k, t, c))
+	if verdict == .Proven do return true
+	if len(assumed) == 0 do return false
+	verdict, _ = prove(k, in_law(k, rewrite(k, t, assumed), c))
+	return verdict == .Proven
 }
 
 // shape_in: every scope the shape l admits is in s: shapes of one structure are

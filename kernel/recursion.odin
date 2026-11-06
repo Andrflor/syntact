@@ -997,15 +997,14 @@ run_affine :: proc(k: ^Kernel, v: Type, y: ^Unknown) -> (prefix, suffix: []^Bind
 		return nil, nil, known && family == .Scope
 	}
 	if p, is_pattern := v.(^Pattern); is_pattern && !has_effect(p) && !reads(k, p.target, y) {
-		products := make([dynamic]Type)
-		leaves(k, p, &products)
-		ps, qs := make([]Type, len(products)), make([]Type, len(products))
-		for t, i in products {
-			before, after := run_affine(k, t, y) or_return
-			ps[i], qs[i] = run_scope(k, before), run_scope(k, after)
+		// each product read once, in its branch; a branch no value reaches, as written
+		read, _ := in_branches(k, p)
+		ps, qs := make([]Branch, len(p.branches)), make([]Branch, len(p.branches))
+		for b, i in p.branches {
+			before, after := run_affine(k, read[i] == nil ? b.product : read[i], y) or_return
+			ps[i], qs[i] = with_product(b, run_scope(k, before)), with_product(b, run_scope(k, after))
 		}
-		at, after := 0, 0
-		return as_expansion(k, with_leaves(k, p, ps, &at)), as_expansion(k, with_leaves(k, p, qs, &after)), true
+		return as_expansion(k, branching(p, ps)), as_expansion(k, branching(p, qs)), true
 	}
 	s := v.(^Scope) or_return
 	xs := run_data(k, s)
