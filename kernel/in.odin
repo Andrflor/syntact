@@ -33,6 +33,16 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
+	// an integer term in a range: the negation and the axioms of its terms
+	// unsatisfiable, by the theory of linear arithmetic (lia.odin)
+	if !is_constant(x) && is_constant(c) {
+		#partial switch _ in x {
+		case ^Operation, ^Fold, ^Series:
+			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) {
+				if f, known := family_of(k, x); known && f == .Int && lia_in(k, x, lo, hi) do return Bool(true)
+			}
+		}
+	}
 	// a recursive call, by induction on its equation: in c, or in ~c — then not in c (§4.1)
 	if call, ok := x.(^Collapse); ok && call.recursive {
 		if call_in(k, call, c) do return Bool(true)
@@ -596,4 +606,10 @@ produced_within :: proc(k: ^Kernel, s: ^Scope, c: ^Or) -> bool {
 		found = true
 	}
 	return found
+}
+
+// maybe_int: an end of a range, nil for none.
+maybe_int :: proc(x: Maybe(i128)) -> Type {
+	if v, has := x.?; has do return Int(v)
+	return nil
 }

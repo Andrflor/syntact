@@ -275,7 +275,7 @@ SPEC_CASES := []Spec_Case {
 	// calls along a counter that differ by one field are the bindings of one call
 	{"g -> {u8:n -> ??  u8:p -> 0  -> n ? {0 -> p  -> (g{n -> n - 1  p -> p}! * 3 + p) % 251}}\ns -> {\n  u8:p -> 0\n  acc -> 0\n  -> p ? {>=4 -> acc  -> s{p -> p + 1  acc -> (acc + g{n -> ??::u8  p -> p}!) % 1000}!}\n}\nx -> s!", "", {}},
 	// a bitwise operation summed over a range is summed bit by bit
-	{"v -> ??::(0..999)\ns -> {\n  u8:p -> 0\n  acc -> 0\n  -> p ? {>=8 -> acc  -> s{p -> p + 1  acc -> acc + (v ^ p)}!}\n}\nx -> s!", "8 * (?0 [&] 1016) + 28", {}},
+	{"v -> ??::(0..999)\ns -> {\n  u8:p -> 0\n  acc -> 0\n  -> p ? {>=8 -> acc  -> s{p -> p + 1  acc -> acc + (v ^ p)}!}\n}\nx -> s!", "8 * ?0 - 8 * (?0 [&] 7) + 28", {}},
 	{"s -> {\n  u8:p -> 17\n  acc -> 0\n  -> p ? {>=201 -> acc  -> s{p -> p + 1  acc -> acc + (123 [|] p)}!}\n}\nx -> s!", "32344", {}},
 	{"s -> {\n  u8:p -> 3\n  acc -> 0\n  -> p ? {>=13 -> acc  -> s{p -> p + 1  acc -> acc + (999 [&] p)}!}\n}\nx -> s!", "35", {}},
 	// a run a fold builds, read by a fold at its own step, is never built

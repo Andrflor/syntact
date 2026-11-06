@@ -644,6 +644,11 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 	if proven_in(k, n, NONPOSITIVE) do return identity
 	if s.op == .Add {
 		if sum, closed := faulhaber(k, s); closed do return sum
+		if x, bitwise := bitwise_sum(k, s); bitwise do return x
+		if f, summed := summed_fold(k, s); summed do return f
+		// a Σ is the fold that adds its terms (x ↦ x + g(i)): reading, along its
+		// index, a run a fold builds, it is that fold, the run never built
+		if f, carried := carried_sum(k, s); carried do return f
 		return s
 	}
 	if !reads(k, s.term, s.index) do return op(k, .Pow, s.term, n)
@@ -689,6 +694,101 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 	}
 	if same(k, s.term, s.index) && proven_in(k, s.lo, NONPOSITIVE) && proven_in(k, s.hi, COUNTS) do return Int(0)
 	return s
+}
+
+// summed_fold: Σ(j: lo..hi, ⟳(…; x: 0 ↦ x + g; x)) = ⟳(…; x: 0 ↦ x + Σ(j: lo..hi, g); x),
+// when nothing else in the fold reads j: a sum of sums is the sum of their terms.
+summed_fold :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
+	f := s.term.(^Fold) or_return
+	if !is_none(f.effects) do return
+	x := -1
+	for z, i in f.states do if same(k, f.value, z) do x = i
+	if x < 0 || !is_int(f.inits[x], 0) do return
+	_, g, affine := affine_in(k, f.updates[x], f.states[x])
+	if !affine || !same(k, f.updates[x], op(k, .Add, f.states[x], g)) do return
+	for t, i in fold_parts(f) do if t != nil && i != 4 + len(f.states) + x && reads(k, t, s.index) do return
+	inner := new(Series)
+	inner^ = s^
+	inner.term = g
+	summed := new(Fold)
+	summed^ = f^
+	summed.updates = slice.clone(f.updates)
+	summed.updates[x] = op(k, .Add, f.states[x], series_law(k, inner))
+	return fold_law(k, summed), true
+}
+
+// bitwise_sum: Σ(i: lo..hi, v ⊕ i), ⊕ one of ^ [&] [|], v not reading i, 0 ≤ lo ≤ hi
+// known: summed bit by bit. With w the bits of hi, m = 2ʷ - 1, v ⊕ i is
+// (v - v [&] m) + (v [&] m ⊕ i) for ^ and [|], v [&] m [&] i for [&]. With N the
+// count of i and C_b the count of those whose bit b is 1, bit b < w gives 2ᵇ times:
+// C_b + v_b·(N - 2·C_b) for ^, v_b·C_b for [&], C_b + v_b·(N - C_b) for [|]; the
+// bits of v with the same factor K are one mask: K·(v [&] mask) (§5.6).
+bitwise_sum :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
+	o := s.term.(^Operation) or_return
+	if o.op != .Xor && o.op != .Bit_And && o.op != .Bit_Or || len(o.args) != 2 do return
+	// v ⊕ (i + c): the sum over j = i + c, from lo + c to hi + c
+	v: Type
+	shift: i128 = 0
+	for a, j in o.args {
+		slope, c, affine := affine_in(k, a, s.index)
+		at, constant := c.(Int)
+		if affine && is_int(slope, 1) && constant do v, shift = o.args[1 - j], i128(at)
+	}
+	if v == nil || reads(k, v, s.index) do return
+	lo := i128(s.lo.(Int) or_return) + shift
+	hi := i128(s.hi.(Int) or_return) + shift
+	if lo < 0 || hi < lo do return
+	width := uint(0)
+	for (i128(1) << width) <= hi do width += 1
+	// ones(n, b): the integers of 0..n-1 whose bit b is 1
+	ones :: proc(n: i128, b: uint) -> i128 {
+		block := i128(1) << (b + 1)
+		return (n / block) << b + max(n % block - i128(1) << b, 0)
+	}
+	n := hi - lo + 1
+	constant: i128 = 0
+	factors := make([]i128, width)
+	for b in 0 ..< width {
+		c := ones(hi + 1, b) - ones(lo, b)
+		#partial switch o.op {
+		case .Xor:
+			constant += c << b
+			factors[b] = n - 2 * c
+		case .Bit_And:
+			factors[b] = c
+		case .Bit_Or:
+			constant += c << b
+			factors[b] = n - c
+		}
+	}
+	out = Int(constant)
+	// the bits above w: v's own, N times, for ^ and [|]
+	if o.op != .Bit_And do out = op(k, .Add, out, op(k, .Mul, Int(n), op(k, .Sub, v, op(k, .Bit_And, v, Int((i128(1) << width) - 1)))))
+	done := make([]bool, width)
+	for b in 0 ..< width {
+		if done[b] || factors[b] == 0 do continue
+		mask: i128 = 0
+		for x in b ..< width do if !done[x] && factors[x] == factors[b] {
+			mask |= i128(1) << x
+			done[x] = true
+		}
+		out = op(k, .Add, out, op(k, .Mul, Int(factors[b]), op(k, .Bit_And, v, Int(mask))))
+	}
+	return out, true
+}
+
+// carried_sum: Σ(i: lo..hi, t) as the fold ⟳(i: lo ↦ i + 1 until (hi + 1)..;
+// x: 0 ↦ x + t; x), when t reads a run a fold builds along i: that fold carries it.
+carried_sum :: proc(k: ^Kernel, s: ^Series) -> (Type, bool) {
+	f := new(Fold)
+	f.index, f.span = s.index, s.span
+	f.start, f.next, f.stop = s.lo, op(k, .Add, s.index, Int(1)), new_range(op(k, .Add, s.hi, Int(1)), nil, .Int)
+	x := new_unknown(k, nil)
+	x.layout = family_term(.Int)
+	f.states, f.inits, f.updates = slice.clone([]^Unknown{x}), slice.clone([]Type{Int(0)}), slice.clone([]Type{op(k, .Add, x, s.term)})
+	f.value, f.effects = x, None{}
+	if b, _ := run_reads(k, f); b == nil do return nil, false
+	return folded(k, f), true
 }
 
 // faulhaber: Σ(i: lo..hi, t), t a polynomial in i over atoms that do not read i:

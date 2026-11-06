@@ -1117,11 +1117,13 @@ d = 2, the roots of x² - c₁·x - c₂ integers, by the discriminant c₁² + 
 ```text
 Σ(i: lo..hi, t), t a polynomial in i       G(hi) - G(lo - 1)     G(m) = t(0) + … + t(m), by the sums of powers
 Σ(j: lo..hi, ⟳(…; x: 0 ↦ x + g; x))        ⟳(…; x: 0 ↦ x + Σ(j: lo..hi, g); x)     nothing else in the fold reads j
-Σ(i: lo..hi, v ⊕ i), ⊕ in ^ [&] [|]       bit by bit: v ≥ 0 not reading i, N the count of i, C_b of those whose
-                                                     bit b is 1; bit b gives 2ᵇ·(C_b + v_b·(N - 2·C_b)) for ^,
-                                                     2ᵇ·v_b·C_b for [&], 2ᵇ·(C_b + v_b·(N - C_b)) for [|];
-                                                     the bits with one factor K are one mask, K·(v [&] mask)
-Σ(i: 0..7, v ^ i), v in 0..999             28 + 8 · (v [&] 1016)
+Σ(i: lo..hi, v ⊕ i), ⊕ in ^ [&] [|]       bit by bit: v not reading i, 0 ≤ lo ≤ hi, w the bits of hi, m = 2ʷ - 1,
+                                                     N the count of i, C_b of those whose bit b is 1; the bits
+                                                     above w give N·(v - v [&] m) for ^ and [|], 0 for [&]; bit
+                                                     b < w gives 2ᵇ·(C_b + v_b·(N - 2·C_b)) for ^, 2ᵇ·v_b·C_b
+                                                     for [&], 2ᵇ·(C_b + v_b·(N - C_b)) for [|]; the bits with
+                                                     one factor K are one mask, K·(v [&] mask)
+Σ(i: 0..7, v ^ i)                          28 + 8 · v - 8 · (v [&] 7)
 Σ(j: lo..hi, f{x  p -> j}!)                F{x}!     f's products a term and calls that keep p: F is f, its
                                                      terms Σ(j: lo..hi, term), its calls F's, without p
 Π(i: lo..hi, t), t not reading i           t ** n
