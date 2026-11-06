@@ -174,6 +174,7 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	// covered branches each calling the equation with the same fields are one (§6)
 	p = calls_joined(k, p, root)
 	calls := calls_in(k, p, root)
+	if len(calls) > 1 do return window(k, eq, p, calls)
 	if len(calls) != 1 do return nil
 	call := calls[0]
 	u, on_field := p.target.(^Unknown)
@@ -218,6 +219,9 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 		next[eq.params[b] or_else nil] = v
 	}
 	if nil in next || u not_in next do return nil
+	// an orbit of u: its step reads u alone (§5.6); one that reads another field the
+	// call moves is no orbit, and the call stays
+	for w in next do if w != u && reads(k, next[u], w) do return nil
 	// effects after the call run coming back up, from the base: the fold of the
 	// definition along its orbit, from its end
 	if len(post) > 0 do return from_base(k, p, u, stop, base, pre[:], post[:], step, y, next)
@@ -475,3 +479,66 @@ runs_of :: proc(k: ^Kernel, pieces, lo, hi: Type, at: Type) -> ^Scope {
 	return out
 }
 
+
+// window: f(m) = v(m, f(m − c₁), …, f(m − c_r)), each call moving m alone by a constant:
+// the points of one orbit m − g·i, g the gcd of the cⱼ. The fold comes back up from
+// the base, d = max(cⱼ) / g states, the values at the d points after kᵢ: a window of
+// states (§5.6). The points past the end of the orbit are bases (continues).
+window :: proc(k: ^Kernel, eq: ^Recursion, p: ^Pattern, calls: []^Collapse) -> Type {
+	root := eq.root
+	u, on_field := p.target.(^Unknown)
+	if !on_field do return nil
+	stop, base, step, split := bases_and_steps(k, p, root, u)
+	if !split || has_effect(step) || has_effect(base) do return nil
+	family, known := family_of(k, base)
+	if !known do return nil
+	shifts := make([]i128, len(calls))
+	g: i128 = 0
+	for c, j in calls {
+		changes := c.target.(^Scope).changes
+		if len(changes) != 1 do return nil
+		for b, v in changes {
+			if eq.params[b] != u do return nil
+			alpha, beta, affine := affine_in(k, v, u)
+			if !affine || !is_int(alpha, 1) do return nil
+			minus, constant := beta.(Int)
+			if !constant || minus >= 0 do return nil
+			shifts[j] = -i128(minus)
+		}
+		g = gcd(g, shifts[j])
+	}
+	ahead := make([]int, len(calls))
+	d := 0
+	for x, j in shifts {
+		ahead[j] = int(x / g)
+		d = max(d, ahead[j])
+	}
+	i := new_unknown(k, nil)
+	i.layout = COUNTS
+	ki, closed := orbit(k, op(k, .Sub, u, Int(g)), u, u, i)
+	if !closed do return nil
+	j := new_unknown(k, nil)
+	j.layout = COUNTS
+	n := least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), stop), p.span)
+	if d > 1 && !continues(k, stop, ki, i) do return nil
+	at :: proc(k: ^Kernel, ki: Type, i: ^Unknown, t: Type) -> Type {return rewrite(k, ki, rewriting(nil, i, t))}
+	f := new(Fold)
+	f.span = p.span
+	f.index = new_unknown(k, nil)
+	f.index.layout = COUNTS
+	f.start, f.next, f.stop = op(k, .Sub, n, Int(1)), op(k, .Sub, f.index, Int(1)), new_range(nil, Int(-1), .Int)
+	states := make([]^Unknown, d)
+	inits := make([]Type, d)
+	for &z, x in states {
+		z = new_unknown(k, nil)
+		z.layout = family_term(family)
+		inits[x] = rewrite(k, base, rewriting(nil, u, at(k, ki, i, op(k, .Add, n, Int(x)))))
+	}
+	inside := rewriting(nil, u, at(k, ki, i, f.index))
+	for c, x in calls do inside = rewriting_call(inside, c, states[ahead[x] - 1])
+	updates := make([]Type, d)
+	updates[0] = rewrite(k, step, inside)
+	for x in 1 ..< d do updates[x] = states[x - 1]
+	f.states, f.inits, f.updates, f.value, f.effects = states, inits, updates, states[0], None{}
+	return folded(k, f)
+}

@@ -750,7 +750,14 @@ field_color :: proc(k: ^Kernel, layout: Type, name: string) -> (color: Type, ok:
 	}
 	s := layout.(^Scope) or_return
 	if !is_shape(k, s) {
-		return produced_field(k, s, name)
+		// what the productions of s give, read once: while it is read, the field of s
+		// itself adds nothing, X = X | P (§5.6)
+		for f in k.fields do if f.scope == s && f.name == name do return f.color, f.color != nil
+		at := len(k.fields)
+		append(&k.fields, Field{s, name, nil})
+		color, ok = produced_field(k, s, name)
+		k.fields[at].color = ok ? color : nil
+		return
 	}
 	c, has := shape_field(k, s, name, nil) or_return
 	return c, has
