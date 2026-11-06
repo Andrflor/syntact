@@ -1074,3 +1074,38 @@ read_in :: proc(k: ^Kernel, p: Product, t: Type) -> Type {
 	if len(p.rewrite) == 0 do return t
 	return rewrite(k, t, p.rewrite)
 }
+
+// fold_type: the type of a fold whose value is a state x: s ↦ x + g, along a counter
+// of n steps (§5.6): x is s plus n terms, each in the image p..q of g, so in
+// (s + n·p)..(s + n·q), a range whose ends are terms over s and n.
+fold_type :: proc(k: ^Kernel, f: ^Fold) -> (t: Type, ok: bool) {
+	if !is_none(f.effects) do return
+	lo, hi := counter_range(k, f) or_return
+	for z, i in f.states {
+		if !same(k, f.value, z) do continue
+		one, g := affine_in(k, f.updates[i], z) or_return
+		if !is_int(one, 1) do return
+		return summed_type(k, f.inits[i], op(k, .Add, op(k, .Sub, hi, lo), Int(1)), g)
+	}
+	return
+}
+
+// series_type: the type of Σ(i: lo..hi, t): n = hi - lo + 1 terms, each in the image
+// p..q of t, so in (n·p)..(n·q).
+series_type :: proc(k: ^Kernel, s: ^Series) -> (t: Type, ok: bool) {
+	if s.op != .Add do return
+	return summed_type(k, Int(0), op(k, .Add, op(k, .Sub, s.hi, s.lo), Int(1)), s.term)
+}
+
+// summed_type: s plus n terms, each in the image p..q of g: (s + n·p)..(s + n·q), an
+// end without bound open.
+summed_type :: proc(k: ^Kernel, s, n, g: Type) -> (t: Type, ok: bool) {
+	each := layout_image(k, g) or_return
+	if !is_constant(each) do return
+	p, q := int_bounds(k, each) or_return
+	from, to: Type
+	if x, has := p.?; has do from = op(k, .Add, s, op(k, .Mul, n, Int(x)))
+	if x, has := q.?; has do to = op(k, .Add, s, op(k, .Mul, n, Int(x)))
+	if from == nil && to == nil do return
+	return new_range(from, to, .Int), true
+}

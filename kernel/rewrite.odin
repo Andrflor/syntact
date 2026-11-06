@@ -484,9 +484,6 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 			// the term computes exactly: only a rounding rounds (format.odin)
 			if v.op == .Round do image = round_law(k, args[0], bits_format(args[1]), v.span)
 			else do image = exact_law(k, v.op, args, v.span)
-		} else if related, read := related_image(k, t); read {
-			// over layouts that read other unknowns: read with what relates them (§6)
-			image = related
 		}
 		if plain {
 			known, _ = plain_of(k, v)
@@ -540,19 +537,25 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return nil, false
 	case ^Collapse:
 		// a call that stays: giving scopes, the scope of its equation, read as a color
-		// (§5.4); otherwise the family it is proven in
+		// (§5.4); giving integers, its type (call_type), read on its image; otherwise the
+		// family it is proven in
 		f := family_of(k, v) or_return
+		if f == .Int || f == .Count do if type, typed := call_type(k, v); typed do if image, read := layout_image(k, type); read && is_constant(image) do return image, true
 		if f == .Scope do if s, is_scope := v.target.(^Scope); is_scope do if eq, read := equation_of(k, origin(s), call_key(s)); read do return eq.generic, true
 		return family_term(f), true
 	case ^Fold:
 		// a run it builds: a run of what its steps place
 		if image, known := built_image(k, v); known do return image, true
+		// a state that adds at each step (fold.odin)
+		if type, summed := fold_type(k, v); summed do if image, read := layout_image(k, type); read && is_constant(image) do return image, true
 		// its value, over the layouts of its states
 		if image, known := layout_image(k, v.value); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Least:
 		return COUNTS, true
 	case ^Series:
+		// n terms (fold.odin)
+		if type, summed := series_type(k, v); summed do if image, read := layout_image(k, type); read && is_constant(image) do return image, true
 		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Recurrent:
 		if f, known := family_of(k, t); known do return family_term(f), true
@@ -618,13 +621,6 @@ image_ends :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128)) {
 // factors, each operator distributing over | (§4.5).
 related_image :: proc(k: ^Kernel, t: Type, eliminated: []int = nil) -> (image: Type, ok: bool) {
 	if is_constant(t) do return t, true
-	// an image being read has none yet: its reading does not come back to it
-	node := node_of(t)
-	if node != nil {
-		if node in k.imaging do return
-		k.imaging[node] = true
-		defer delete_key(&k.imaging, node)
-	}
 	back: Rewrite
 	p := atomized(k, t, &back)
 	ms, divisor, ring := monomials(p)
@@ -708,8 +704,9 @@ related_image :: proc(k: ^Kernel, t: Type, eliminated: []int = nil) -> (image: T
 				image, read = layout_image(k, x)
 			case is_constant(layout_of(k, f)):
 				image, read = layout_of(k, f), true
-			case !slice.contains(eliminated, f.id):
-				// a layout over others: the same law, the unknown on its own
+			case !slice.contains(eliminated, f.id) && !(len(ms) == 1 && len(factors(m)) == 1):
+				// a layout over others: the same law, the unknown on its own — the term
+				// alone already read it above
 				image, read = related_image(k, f, eliminated)
 			}
 			if !read || !is_constant(image) do return

@@ -31,6 +31,8 @@ Recursion :: struct {
 	solution: Type, // the term without calls of root, when the laws give one
 	reading:  bool, // being read: its calls are the hypothesis (§5.6)
 	values:   Type, // the type of its calls, once found (call_values)
+	type:     Type, // the type of its calls that give integers, over its fields (call_type)
+	typed:    bool,
 	valued:   bool,
 }
 
@@ -283,6 +285,125 @@ instances :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	}
 	if len(r) == 0 do return eq.term
 	return rewrite(k, eq.term, r)
+}
+
+// call_type: the type of a call that stays that gives integers: the least solution
+// of its definition read on types (§5.6). Along the field u its calls move, each call
+// one value y of the type T(s(u)), the step gives α·y + β, α ≥ 0 a constant — one of
+// several, a pattern —; T(u) is the range L(u)..H(u): H(u) = hi(β) + α·H(s(u)),
+// hi(base) where the bases take u — the maps compose along the orbit of u, a fold
+// its laws close —, L likewise. Found once for the equation, over its fields; read
+// at the values of the call.
+call_type :: proc(k: ^Kernel, call: ^Collapse) -> (t: Type, ok: bool) {
+	s := call.target.(^Scope) or_return
+	key, through := call_key(s), through_of(k, s)
+	eq, found := equation_found(k, origin(s), key, through)
+	if !found do eq = equation_of(k, origin(s), key, through) or_return
+	if eq.term == nil || eq.reading do return
+	if !eq.typed {
+		eq.typed = true
+		lo, hi, _ := equation_type(k, eq)
+		if lo != nil || hi != nil do eq.type = new_range(lo, hi, .Int)
+	}
+	if eq.type == nil do return
+	return rewrite(k, eq.type, values_of_call(k, eq, s)), true
+}
+
+// equation_type: the ends of the type of the equation over its fields (call_type).
+equation_type :: proc(k: ^Kernel, eq: ^Recursion) -> (lo, hi: Type, ok: bool) {
+	root := eq.root
+	p := eq.term.(^Pattern) or_return
+	p = calls_joined(k, p, root)
+	u := p.target.(^Unknown) or_return
+	stop, base, step := bases_and_steps(k, p, root, u) or_return
+	if has_effect(base) || has_effect(step) do return
+	calls := calls_in(k, step, root)
+	if len(calls) == 0 do return
+	y := new_unknown(k, nil)
+	y.layout = family_term(.Int)
+	r: Rewrite
+	moved: Type
+	for c in calls {
+		fields, next := moves(k, eq, c) or_return
+		if u not_in next do return
+		// an orbit of u: its step reads u alone, as narrowed by a branch or not
+		for w in fields do if w != u && reads(k, next[u], w) do return
+		m := rewrite(k, next[u], rewriting(nil, u, u))
+		if moved != nil && !same(k, moved, m) do return
+		moved = m
+		r = rewriting_call(r, c, y)
+	}
+	// the step gives one of its products (§6), each α·y + β, α ≥ 0 a constant: the
+	// type of the call is in the union of their images
+	leaves := make([dynamic]Product)
+	products(k, step, &leaves)
+	a_lo, a_hi: i128 = max(i128), 0
+	qlo, qhi: Maybe(i128)
+	q_nonnegative, p_nonnegative := true, true
+	for leaf in leaves {
+		if is_none(leaf.term) do continue
+		term := read_in(k, leaf, leaf.term)
+		alpha, beta := affine_in(k, rewrite(k, term, r), y) or_return
+		a := i128(alpha.(Int) or_return)
+		if a < 0 || !solved(beta, root) do return
+		a_lo, a_hi = min(a_lo, a), max(a_hi, a)
+		l, h := image_ends(k, beta)
+		if x, has := h.?; has {
+			if q, known := qhi.?; !known || x > q do qhi = x
+			q_nonnegative &&= x >= 0
+		} else {
+			qhi, a_hi = nil, -1
+		}
+		if x, has := l.?; has {
+			if q, known := qlo.?; !known || x < q do qlo = x
+			p_nonnegative &&= x >= 0
+		} else {
+			qlo, a_lo = nil, -1
+		}
+	}
+	if a_hi < 0 && a_lo < 0 do return
+	// the fold of the maps h ↦ q + α·h along the orbit of u, from where the call is,
+	// until the bases take it: Aₙ·b + Bₙ, A: 1 ↦ α·A, B: 0 ↦ B + q·A
+	along :: proc(k: ^Kernel, p: ^Pattern, u: ^Unknown, stop, moved: Type, a, b, q: i128) -> Type {
+		f := new(Fold)
+		f.span = p.span
+		x := new_unknown(k, nil)
+		x.layout = and_law(k, {layout_of(k, u), not_law(k, stop)})
+		A, B := new_unknown(k, nil), new_unknown(k, nil)
+		A.layout, B.layout = family_term(.Int), family_term(.Int)
+		f.index, f.start, f.next, f.stop = x, u, rewrite(k, moved, rewriting(nil, u, x)), stop
+		f.states, f.inits = slice.clone([]^Unknown{A, B}), slice.clone([]Type{Int(1), Int(0)})
+		f.updates = slice.clone([]Type{op(k, .Mul, Int(a), A), op(k, .Add, B, op(k, .Mul, Int(q), A))})
+		f.effects, f.value = None{}, op(k, .Add, op(k, .Mul, A, Int(b)), B)
+		return folded(k, f)
+	}
+	// the maps of different α bound by one: α·h ≤ α_max·h where h ≥ 0 — the bases and
+	// every β nonnegative, h is —; likewise α_min from below
+	blo, bhi: Maybe(i128)
+	bases := make([dynamic]Product)
+	products(k, base, &bases)
+	// the least and greatest any base gives: none bounded when one is not
+	low_bounded, high_bounded := true, true
+	for leaf in bases {
+		if is_none(leaf.term) do continue
+		term := read_in(k, leaf, leaf.term)
+		l, h := image_ends(k, term)
+		if x, has := l.?; has && low_bounded {
+			if b, known := blo.?; !known || x < b do blo = x
+		} else do low_bounded = false
+		if y, has := h.?; has && high_bounded {
+			if b, known := bhi.?; !known || y > b do bhi = y
+		} else do high_bounded = false
+	}
+	if !low_bounded do blo = nil
+	if !high_bounded do bhi = nil
+	if b, has := blo.?; has && a_lo >= 0 && (a_lo == a_hi || b >= 0 && p_nonnegative) {
+		if q, has_q := qlo.?; has_q do lo = along(k, p, u, stop, moved, a_lo, b, q)
+	}
+	if b, has := bhi.?; has && a_hi >= 0 && (a_lo == a_hi || b >= 0 && q_nonnegative) {
+		if q, has_q := qhi.?; has_q do hi = along(k, p, u, stop, moved, a_hi, b, q)
+	}
+	return lo, hi, lo != nil || hi != nil
 }
 
 // call_values: the values of a call that stays that gives runs: the least solution

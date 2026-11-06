@@ -1094,6 +1094,15 @@ x ↦ r·x + g(i)      x = P(n) + (x₀ - P(0)) * r ** n     r ≠ 1 an integer,
                                                        P(t + 1) = r·P(t) + g(t), by its coefficients
 ```
 
+The type of a state that adds at each step, read where the fold is checked: x is s
+plus n terms, each one of the values g may take, so x lies in s + n·(p..q) when g lies
+in p..q; Σ likewise. The ends are terms over s and n, read on their images (§7):
+
+```text
+⟳(…; x: s ↦ x + g; x), n steps, g in p..q      in (s + n·p)..(s + n·q)
+Σ(i: lo..hi, t), t in p..q                     in (n·p)..(n·q), n = hi - lo + 1
+```
+
 States whose updates are a linear map with integer coefficients, `x ↦ M·x + b`, are
 each a C-finite sequence: by Cayley–Hamilton, each satisfies the recurrence of the
 characteristic polynomial of M — b a state of its own, always 1. `C⟨c₁ … c_d |

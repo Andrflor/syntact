@@ -46,7 +46,6 @@ Kernel :: struct {
 	read:       map[Read_Key]bool, // whether a node reads an unknown, once asked (rewrite.odin)
 	valued:     map[rawptr]Type, // what a shared node may hold, once read (size.odin)
 	built:      map[^Fold]Built, // what a fold builds, once read (fold.odin)
-	imaging:    map[rawptr]bool, // the terms whose image is being read (rewrite.odin)
 	rewritten:  map[Rewrite_Key]Type, // within one rewrite, each shared node rewritten once (rewrite.odin)
 	rewrites:   int, // the depth of the rewrites under way
 	markers:    int, // the unknowns that stand for a hole while it is inferred
