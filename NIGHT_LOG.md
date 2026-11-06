@@ -48,3 +48,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - Euclid with a symbolic divisor (s % v); place carve in run shapes; particles stack overflow fixed; fold length through its step.
 - Errors now: respond 3, sexp 22, calc 32, lru 7, graph 12, words ~32, blur 4, particles 7.
 - Kernel round 3 launched: values of a field across a recursion as the image of its orbit (blur, calc, sexp, graph, lru); runs compose for call lengths (respond); reals in the ring (particles); words gaps.
+
+## Check 01:22 UTC (master 398831f)
+- Compile clean: sum, tree, interp, bintrees, records, push, strlist (7/16).
+- Fail: scene (stub, real input), respond 4, sexp 18 (Product form), calc 33, lru 8, graph 13, words 33, blur 5, particles 8 (error lines).
+- Running: backend round 2, kernel round 3.
