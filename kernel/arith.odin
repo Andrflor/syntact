@@ -286,7 +286,7 @@ exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Typ
 		if r, exact := compute(k, op, sig, args); exact do return r
 		return new_operation(op, ..args)
 	}
-	if op == .Pow do return single(k, power_law(k, sig, args[0], args[1], span))
+	if op == .Pow do return power_law(k, sig, args[0], args[1], span)
 	out: Type
 	#partial switch sig.args[0] {
 	case .Int, .Real:
@@ -299,7 +299,7 @@ exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Typ
 		if op == .Add do out = concatenation(args)
 	}
 	if out == nil do out = new_operation(op, ..args)
-	return single(k, out)
+	return out
 }
 
 // distributed: op on operands whose values are of several families: an operator
@@ -345,14 +345,6 @@ family_pieces :: proc(k: ^Kernel, t: Type) -> []Type {
 	out := make([dynamic]Type)
 	for _, cs in by do append(&out, or_law(k, cs[:]))
 	return out[:]
-}
-
-// single: a term over unknowns whose layout is one primitive is that primitive:
-// ?ₖ::p = p, and so is what an operator gives of it (§4.5, §7).
-single :: proc(k: ^Kernel, t: Type) -> Type {
-	if _, is_op := t.(^Operation); !is_op || is_constant(t) do return t
-	if image, ok := layout_image(k, t); ok && is_primitive(image) do return image
-	return t
 }
 
 is_comparison :: proc(op: Operator) -> bool {
