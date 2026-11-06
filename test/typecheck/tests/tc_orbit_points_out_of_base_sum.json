@@ -1,0 +1,7 @@
+{
+  "name": "tc_orbit_points_out_of_base_sum",
+  "description": "The points of an orbit before its μ are out of its base: d + 2i & ~(max + 1..), read where max and d are unknowns, then at 8 and 4, gives 4 + 6 + 8. What ~S may hold is out of what S holds whatever its unknowns.",
+  "source": "depths -> {\n  (0..30):max -> 15\n  (4..32):d -> 4\n  -> d ? {\n    >max -> 0\n    -> d + depths{max -> max  d -> d + 2}!\n  }\n}\ny -> depths{max -> 8  d -> 4}!",
+  "type": "18",
+  "expect_errors": []
+}

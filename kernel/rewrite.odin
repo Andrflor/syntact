@@ -476,7 +476,9 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if len(terms) == 0 do return nil, false
 		return and_law(k, terms[:]), true
 	case ^Not:
-		return not_law(k, layout_image(k, v.term) or_return), true
+		// what ~S may hold: out of what S holds whatever its unknowns (§4.1)
+		if is_constant(t) do return t, true
+		return outer_set(k, t)
 	case ^Is:
 		return is_law(layout_image(k, v.term) or_return), true
 	case ^Range:
@@ -783,9 +785,7 @@ related_image :: proc(k: ^Kernel, term: Type, image: Type) -> Type {
 			if direction := monotone_in(k, t, u); direction != 0 do out = monotone_image(k, t, u, layout, direction, out)
 			continue
 		}
-		terms := []Type{layout}
-		if both, narrowed := layout.(^And); narrowed do terms = both.terms
-		for x in terms {
+		for x in layout_ranges(k, layout) {
 			bounds, is_range := x.(^Range)
 			if !is_range || is_constant(x) do continue
 			lo, hi := bounds.lo, bounds.hi
@@ -797,6 +797,38 @@ related_image :: proc(k: ^Kernel, term: Type, image: Type) -> Type {
 			if least == nil && most == nil do continue
 			out = and_law(k, {int_hull(k, out), range_law(k, least, most, .Int, {})})
 		}
+	}
+	return out
+}
+
+// layout_ranges: the terms of a layout, the complement of ranges read as the range
+// between them over the integers: ~(..p | q..) = (p + 1)..(q - 1) (§4.1, §4.3).
+layout_ranges :: proc(k: ^Kernel, layout: Type) -> []Type {
+	terms := []Type{layout}
+	if both, narrowed := layout.(^And); narrowed do terms = both.terms
+	out := make([]Type, len(terms))
+	for x, i in terms {
+		out[i] = x
+		n, negated := x.(^Not)
+		if !negated || is_constant(x) do continue
+		parts := []Type{n.term}
+		if o, either := n.term.(^Or); either do parts = o.terms
+		lo, hi: Type
+		between := len(parts) <= 2
+		for p in parts {
+			r, is_range := p.(^Range)
+			if !is_range || r.family != .Int && r.family != .Any do between = false
+			if !between do break
+			switch {
+			case r.lo == nil && r.hi != nil && lo == nil:
+				lo = op(k, .Add, r.hi, Int(1))
+			case r.hi == nil && r.lo != nil && hi == nil:
+				hi = op(k, .Sub, r.lo, Int(1))
+			case:
+				between = false
+			}
+		}
+		if between do out[i] = new_range(lo, hi, .Int)
 	}
 	return out
 }
@@ -850,9 +882,7 @@ monotone_in :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> int {
 // values at those bounds — each a term over the others, read by its own image.
 monotone_image :: proc(k: ^Kernel, t: Type, u: ^Unknown, layout: Type, direction: int, out: Type) -> Type {
 	out := out
-	terms := []Type{layout}
-	if both, narrowed := layout.(^And); narrowed do terms = both.terms
-	for x in terms {
+	for x in layout_ranges(k, layout) {
 		bounds, is_range := x.(^Range)
 		if !is_range || is_constant(x) do continue
 		lo, hi := bounds.lo, bounds.hi
