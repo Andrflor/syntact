@@ -243,13 +243,18 @@ base_family :: proc(k: ^Kernel, c: ^Collapse, fields := Read{}) -> (Family, bool
 	s, is_scope := c.target.(^Scope)
 	if !is_scope do return {}, false
 	root := origin(s)
-	eq, read := equation_of(k, root, call_key(s), through_of(k, s))
+	key, through := call_key(s), through_of(k, s)
+	// its bases are known once its term is, while it is read too
+	eq, read := equation_found(k, root, key, through)
+	if !read do eq, read = equation_of(k, root, key, through)
 	if !read || eq.term == nil do return {}, false
 	bases := make([dynamic]Type)
 	base_cases(eq.term, root, &bases)
 	family: Family
 	found := false
 	for base in bases {
+		// none adds no value, an invalid base is reported where it is
+		if is_none(base) || is_invalid(base) do continue
 		f, known := read_family(k, given(k, base), fields)
 		if !known || found && f != family do return {}, false
 		family, found = f, true
