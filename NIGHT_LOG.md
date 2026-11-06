@@ -76,3 +76,13 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - {} items none (workaround removed). strlist compile 25 s → 0.8 s (1 * 1 no longer gathers powers).
 - scene: faithful port pushed, does not type (exponential node count, f32 ranges through the recursion); sent to kernel round 3.
 - strlist at 400000 still crashes: split-as-fold agent launched (fold states bounded by the same induction as calls; backend loop writing at the run's end).
+
+## Step: kernel round 3 (2228152, a4cbbaa)
+- 2228152 (proposed law, top of this log): a field moved by every call from a constant
+  default read in the image of its orbit. words: 2 ** μ(...) at 246/260 resolved, the
+  downstream gaps (distinct, |split|, .#) surface: 31 → 50 errors, 4 s → 6 s.
+- a4cbbaa runs compose for the length of a call (§5.6); a pattern's products affine with
+  one α. respond 195:6 now reads the fold of lengths; still open: the image of
+  |escape{s -> items.#x.sku}| (a field of a run a fold builds). respond 4 s → 17–21 s.
+- Not done: kept fields in the image of the entry value (blur row y, lru keys), Task C
+  (ring over rationals), Task D.
