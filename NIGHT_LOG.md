@@ -139,3 +139,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - Format values lie within their extremes (§4.10): f32 − 0.0625 rounds into f32. euclid_image reads one quotient at a time: words 5.6 s / 4.8 GB → ~1 s / 0.8 GB.
 - particles 5, sexp 18, words 32 errors. The "proposed law" above for sexp is §5.6's field law applied to runs (a field carved to its own suffix holds the suffixes of what the call gives); assigned to the field-bounds agent with scopes (lru, particles) and runs (sexp, zip).
 - Round 6 launched: words (inclusion through expansions, narrower-rest cover, dict fold bound, distinct, (a*a)/vocab).
+
+## Step: soundness fixed, one reading landed (de9538c, 9ff6b55, 123d788, a39b450) — 03:50 UTC
+- 2ab6976's bug: the image of ~S was the complement of what S *may* hold; now of what S holds for every value of its unknowns (§4.1). Also `>m` with m a single value no longer read as everything.
+- Verified on clean master a39b450: corpus 583/5, code tests green, six outputs identical on x86 and C, bt2 x = y = z = 18.
+- respond runs out of memory since 2ab6976 (runs_in's length clause); being fixed. Next for that agent: extra errors in lru/graph/scene/words/particles, the field law for scopes and runs, blur 72:10.
