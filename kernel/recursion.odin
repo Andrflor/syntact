@@ -1408,28 +1408,32 @@ ring_at :: proc(t: Type, u: ^Unknown, v: Type) -> (out: Type, ok: bool) {
 
 // atomized: t as a polynomial (ring.odin) over atoms: each term the ring does not
 // read — a μ, a pattern — is named by an unknown of its own, which back rewrites to
-// it.
-atomized :: proc(k: ^Kernel, t: Type, back: ^Rewrite) -> Type {
+// it. In the field (ring.odin), over the reals.
+atomized :: proc(k: ^Kernel, t: Type, back: ^Rewrite, field := false) -> Type {
 	#partial switch v in t {
-	case Int, ^Unknown:
+	case ^Unknown:
 		return t
+	case Int:
+		if !field do return t
+	case Real:
+		if field do return t
 	case ^Operation:
 		#partial switch v.op {
 		case .Add, .Sub, .Mul:
-			out := atomized(k, v.args[0], back)
+			out := atomized(k, v.args[0], back, field)
 			for a in v.args[1:] {
-				next, ok := ring_law(v.op, {out, atomized(k, a, back)})
+				next, ok := ring_law(v.op, {out, atomized(k, a, back, field)}, field)
 				if !ok do break
 				out = next
 			}
-			if _, _, ring := monomials(out); ring do return out
+			if _, _, ring := monomials(out, field); ring do return out
 		case .Neg:
-			if out, ok := ring_law(.Neg, {atomized(k, v.args[0], back)}); ok do return out
+			if out, ok := ring_law(.Neg, {atomized(k, v.args[0], back, field)}, field); ok do return out
 		}
 	}
 	for x in back do if x.unknown != nil && same(k, x.term, t) do return x.unknown
 	u := new_unknown(k, nil)
-	u.layout = family_term(.Int)
+	u.layout = family_term(field ? .Real : .Int)
 	back^ = rewriting(back^, u, t)
 	return u
 }
