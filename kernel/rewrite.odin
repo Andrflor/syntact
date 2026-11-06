@@ -778,7 +778,26 @@ related_image :: proc(k: ^Kernel, term: Type, image: Type) -> Type {
 	out := image
 	for u in read {
 		layout := layout_of(k, u)
-		if is_constant(layout) do continue
+		// over constant bounds, a term monotone in u lies between its values there: what
+		// relates u to the others is kept
+		if is_constant(layout) {
+			// alone in one monomial of degree 1, u is read by its layout exactly
+			if !correlated(k, t, u) do continue
+			if direction := monotone_in(k, t, u); direction != 0 {
+				out = monotone_image(k, t, u, layout, direction, out)
+				continue
+			}
+			// u = l + v, v ≥ 0: the same polynomial read from the least bound of u, where
+			// it may be monotone
+			least, most, bounded := int_bounds(k, layout)
+			l, from := least.?
+			if !bounded || !from || l == 0 do continue
+			v := new_unknown(k, nil)
+			v.layout = range_law(k, Int(0), most != nil ? Int(most.? - l) : nil, .Int, {})
+			shifted := rewrite(k, t, rewriting(nil, u, op(k, .Add, Int(l), v)))
+			if direction := monotone_in(k, shifted, v); direction != 0 do out = monotone_image(k, shifted, v, v.layout, direction, out)
+			continue
+		}
 		alpha, r, affine := affine_in(k, t, u)
 		a, constant := alpha.(Int)
 		if !affine || !constant || a == 0 {
@@ -879,14 +898,50 @@ monotone_in :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> int {
 	return direction
 }
 
+// correlated: in the polynomial t, u is not read by its layout on its own — it is of
+// degree 2 or more, in more than one monomial, or in one with an unknown that is.
+correlated :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
+	back: Rewrite
+	ms, divisor, ring := monomials(atomized(k, t, &back))
+	if !ring || divisor < 1 do return false
+	// the monomials each unknown is in, and its greatest degree
+	Seen :: struct {
+		count, degree: int,
+	}
+	seen := make(map[int]Seen)
+	for m in ms {
+		degrees := make(map[int]int)
+		for f in factors(m) do degrees[f.id] += 1
+		for id, d in degrees {
+			x := seen[id]
+			x.count += 1
+			x.degree = max(x.degree, d)
+			seen[id] = x
+		}
+	}
+	own := seen[u.id]
+	if own.count > 1 || own.degree > 1 do return true
+	for m in ms {
+		fs := factors(m)
+		holds := false
+		for f in fs do holds ||= same_unknown(f, u)
+		if !holds do continue
+		for f in fs do if !same_unknown(f, u) && (seen[f.id].count > 1 || seen[f.id].degree > 1) do return true
+	}
+	return false
+}
+
 // monotone_image: t, monotone in u between bounds over other unknowns, lies between its
 // values at those bounds — each a term over the others, read by its own image.
 monotone_image :: proc(k: ^Kernel, t: Type, u: ^Unknown, layout: Type, direction: int, out: Type) -> Type {
 	out := out
 	for x in layout_ranges(k, layout) {
-		bounds, is_range := x.(^Range)
-		if !is_range || is_constant(x) do continue
-		lo, hi := bounds.lo, bounds.hi
+		// a value is its own bounds
+		lo, hi := x, x
+		if bounds, is_range := x.(^Range); is_range do lo, hi = bounds.lo, bounds.hi
+		else if _, value := x.(Int); !value do continue
+		// a bound over u itself says nothing of it
+		if lo != nil && reads(k, lo, u) || hi != nil && reads(k, hi, u) do continue
 		if direction < 0 do lo, hi = hi, lo
 		least, most: Type
 		if lo != nil do least, _ = term_bound(k, rewrite(k, t, rewriting(nil, u, lo)), true)
