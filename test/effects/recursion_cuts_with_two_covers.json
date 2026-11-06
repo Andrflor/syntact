@@ -1,0 +1,8 @@
+{
+  "name": "recursion_cuts_with_two_covers",
+  "description": "A run is the orbit of its positions (§5.6) whatever the number of branches that cut its head: t ? {c0 -> f{…}!  c1 -> f{…}!  -> b} is t ? {c0 | c1 -> f{x -> t ? {c0 -> a0  -> a1}}!  -> b} (§6), a fold whose step is the pattern of the carves",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nA -> Array{u8}\nescape -> {\n  A:out -> {}\n  A:s -> {}\n  -> s ? {\n    {34  ...A:(t)} -> escape{out -> {...out  92 34}  s -> t}!\n    {u8(c)  ...A:(t)} -> escape{out -> {...out  c}  s -> t}!\n    -> out\n  }\n}\nx -> escape{out -> {1}  s -> {3  34  4}}!",
+  "type": "⟳(x: 0 ↦ x + 1 until 3..; y: {1} ↦ ({3  34  4} from x) ? {{34  ...A:} -> {...y  92  34}  -> {...y  {3  34  4}.#x}}; y)",
+  "productions": {},
+  "expect_errors": []
+}
