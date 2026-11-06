@@ -203,20 +203,6 @@ or_law :: proc(k: ^Kernel, terms: []Type) -> Type {
 }
 
 and_law :: proc(k: ^Kernel, terms: []Type) -> Type {
-	// a set the laws keep written, u8 * u8, lies in the range that bounds it: within
-	// what that range is within, out of what it is out of
-	for t, i in terms {
-		o, written := t.(^Operation)
-		if !written || o.op == .In || !is_constant(t) || len(terms) < 2 do continue
-		h := int_hull(k, t)
-		if same(k, h, t) do continue
-		others := make([dynamic]Type)
-		for x, j in terms do if j != i do append(&others, x)
-		rest := len(others) == 1 ? others[0] : and_law(k, others[:])
-		if !is_constant(rest) do continue
-		if is_none(and_law(k, {h, rest})) do return None{}
-		if is_none(and_law(k, {h, not_law(k, rest)})) do return t
-	}
 	// t & S, t one value: t where t in S is true, none where false (§4.1)
 	at := -1
 	for t, i in terms {

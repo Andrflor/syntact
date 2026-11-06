@@ -1566,14 +1566,15 @@ machine_of_layout :: proc(k: ^kernel.Kernel, layout: kernel.Type) -> Machine {
 // width an integer crosses a boundary in. A boolean is a byte.
 int_width :: proc(k: ^kernel.Kernel, layout: kernel.Type) -> (bits: int, signed: bool) {
 	if f, known := kernel.layout_family(k, layout); known && f == .Bool do return 8, false
-	r, is_range := layout.(^kernel.Range)
-	if !is_range do return 64, true
-	lo, has_lo := r.lo.(kernel.Int)
-	hi, has_hi := r.hi.(kernel.Int)
+	// the least and the greatest of a constant set of integers
+	l, h, bounded := kernel.int_bounds(k, layout)
+	if !bounded do return 64, true
+	lo, has_lo := l.?
+	hi, has_hi := h.?
 	if !has_lo || !has_hi do return 64, true
 	for b in ([]uint{8, 16, 32}) {
-		if lo >= 0 && i128(hi) < i128(1) << b do return int(b), false
-		if i128(lo) >= -(i128(1) << (b - 1)) && i128(hi) < i128(1) << (b - 1) do return int(b), true
+		if lo >= 0 && hi < i128(1) << b do return int(b), false
+		if lo >= -(i128(1) << (b - 1)) && hi < i128(1) << (b - 1) do return int(b), true
 	}
 	return 64, lo < 0
 }

@@ -459,8 +459,6 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 				f := family_of(k, a) or_continue
 				set = family_term(f)
 			}
-			// a set the laws keep written, u8 % 3: the range that bounds it
-			if _, written := set.(^Operation); written do set = int_hull(k, set)
 			append(&terms, set)
 		}
 		if len(terms) == 0 do return nil, false
@@ -480,15 +478,12 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if f == .Scope do if eq, read := equation_of(k, v); read do return eq.generic, true
 		return family_term(f), true
 	case ^Fold:
-		// a sum along the fold: its init, and as many terms as steps
-		if image, known := sum_image(k, v); known do return image, true
 		// a run it builds: a run of what its steps place
 		if image, known := built_image(k, v); known do return image, true
 		// its value, over the layouts of its states
 		if image, known := layout_image(k, v.value); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Least:
-		if image, known := least_image(k, v); known do return image, true
 		return COUNTS, true
 	case ^Series:
 		if v.op == .Add {
@@ -506,8 +501,6 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 				}
 				if split do return total, true
 			}
-			term := rewrite(k, v.term, rewriting(nil, v.index, narrowing(v.index, range_law(k, v.lo, v.hi, .Int, v.span))))
-			if image, known := hull_times(k, op(k, .Add, op(k, .Sub, v.hi, v.lo), Int(1)), term); known do return image, true
 		}
 		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Recurrent:
@@ -556,14 +549,6 @@ plain_of :: proc(k: ^Kernel, o: ^Operation) -> (Plain, bool) {
 	return entry, entry.plain
 }
 
-// int_hull: the integers from the least to the greatest of a constant set of
-// integers, one range: what bounds it, as a set the laws compute on.
-int_hull :: proc(k: ^Kernel, t: Type) -> Type {
-	lo, hi, ok := int_bounds(k, t)
-	if !ok do return t
-	return discrete_cell(.Int, lo, hi)
-}
-
 // one_affine: t = a·u + b, u its one unknown, a = ±1.
 one_affine :: proc(k: ^Kernel, t: Type) -> (u: ^Unknown, a: i128, b: Type, ok: bool) {
 	read := make([dynamic]^Unknown)
@@ -596,19 +581,16 @@ euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 	related :: proc(k: ^Kernel, t: Type, out: Type, reading: Rewrite) -> Type {
 		read, known := layout_image(k, rewrite(k, t, reading))
 		if !known || !is_constant(read) do return out
-		return and_law(k, {int_hull(k, out), int_hull(k, read)})
+		return and_law(k, {out, read})
 	}
 	for d in quotients {
 		n, b := d.args[0], d.args[1]
 		c, constant := b.(Int)
 		// n / c, n % b themselves: nothing beside them to relate
 		if Type(d) == t && (constant || d.op == .Mod) do continue
-		at_least, _ := term_bound(k, n, true)
-		low, bounded := at_least.(Int)
-		natural := bounded && low >= 0
+		natural := proven_in(k, n, COUNTS)
 		if !constant {
-			divisor, _ := term_bound(k, b, true)
-			if one, known := divisor.(Int); !known || one < 1 do continue
+			if !proven_in(k, b, range_law(k, Int(1), nil, .Int, {})) do continue
 			if d.op == .Mod {
 				r := new_unknown(k, nil)
 				top := op(k, .Sub, b, Int(1))
@@ -670,8 +652,7 @@ divided_by :: proc(k: ^Kernel, n, b: Type, natural: bool) -> (whole: Type, ok: b
 	if reads(k, r, z) do return
 	back = rewriting(back, z, b)
 	q, r = rewrite(k, q, back), rewrite(k, r, back)
-	least, _ := term_bound(k, r, true)
-	if low, known := least.(Int); !known || low < 0 do return
+	if !proven_in(k, r, COUNTS) do return
 	whole = op(k, .Add, q, op(k, .Div, r, b))
 	if !natural {
 		e := new_unknown(k, nil)
@@ -696,11 +677,7 @@ related_image :: proc(k: ^Kernel, term: Type, image: Type) -> Type {
 		if is_constant(layout) do continue
 		alpha, r, affine := affine_in(k, t, u)
 		a, constant := alpha.(Int)
-		if !affine || !constant || a == 0 {
-			// a term monotone in u lies between its values at the bounds of u
-			if direction := monotone_in(k, t, u); direction != 0 do out = monotone_image(k, t, u, layout, direction, out)
-			continue
-		}
+		if !affine || !constant || a == 0 do continue
 		terms := []Type{layout}
 		if both, narrowed := layout.(^And); narrowed do terms = both.terms
 		for x in terms {
@@ -713,73 +690,8 @@ related_image :: proc(k: ^Kernel, term: Type, image: Type) -> Type {
 			if lo != nil do least, _ = term_bound(k, op(k, .Add, op(k, .Mul, alpha, lo), r), true)
 			if hi != nil do most, _ = term_bound(k, op(k, .Add, op(k, .Mul, alpha, hi), r), false)
 			if least == nil && most == nil do continue
-			out = and_law(k, {int_hull(k, out), range_law(k, least, most, .Int, {})})
+			out = and_law(k, {out, range_law(k, least, most, .Int, {})})
 		}
-	}
-	return out
-}
-
-// monotone_in: t grows with u (1), or decreases (-1), u ≥ 0 among its bounds; 0 when
-// not known. A polynomial grows with u when each monomial reading u has a coefficient
-// of one sign and its other atoms ≥ 0; n / d, d ≥ 1 not reading u, as n does: / rounds
-// toward 0, an order preserved.
-monotone_in :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> int {
-	if o, is_op := t.(^Operation); is_op && o.op == .Div && len(o.args) == 2 && !reads(k, o.args[1], u) {
-		least, _ := term_bound(k, o.args[1], true)
-		if one, known := least.(Int); !known || one < 1 do return 0
-		return monotone_in(k, o.args[0], u)
-	}
-	// a polynomial: its atoms are terms inside it
-	o, is_op := t.(^Operation)
-	if !is_op do return 0
-	#partial switch o.op {
-	case .Add, .Sub, .Mul, .Neg:
-	case:
-		return 0
-	}
-	at_least, _ := term_bound(k, u, true)
-	if low, known := at_least.(Int); !known || low < 0 do return 0
-	back: Rewrite
-	p := atomized(k, t, &back)
-	ms, divisor, ring := monomials(p)
-	if !ring || divisor < 1 do return 0
-	direction := 0
-	for m in ms {
-		fs := factors(m)
-		reading := false
-		for f in fs {
-			if same_unknown(f, u) {
-				reading = true
-				continue
-			}
-			atom := rewrite(k, f, back)
-			least, _ := term_bound(k, atom, true)
-			if low, known := least.(Int); !known || low < 0 do return 0
-		}
-		if !reading do continue
-		sign := coefficient(m) > 0 ? 1 : -1
-		if direction != 0 && sign != direction do return 0
-		direction = sign
-	}
-	return direction
-}
-
-// monotone_image: t, monotone in u between bounds over other unknowns, lies between its
-// values at those bounds — each a term over the others, read by its own image.
-monotone_image :: proc(k: ^Kernel, t: Type, u: ^Unknown, layout: Type, direction: int, out: Type) -> Type {
-	out := out
-	terms := []Type{layout}
-	if both, narrowed := layout.(^And); narrowed do terms = both.terms
-	for x in terms {
-		bounds, is_range := x.(^Range)
-		if !is_range || is_constant(x) do continue
-		lo, hi := bounds.lo, bounds.hi
-		if direction < 0 do lo, hi = hi, lo
-		least, most: Type
-		if lo != nil do least, _ = term_bound(k, rewrite(k, t, rewriting(nil, u, lo)), true)
-		if hi != nil do most, _ = term_bound(k, rewrite(k, t, rewriting(nil, u, hi)), false)
-		if least == nil && most == nil do continue
-		out = and_law(k, {int_hull(k, out), range_law(k, least, most, .Int, {})})
 	}
 	return out
 }
@@ -816,58 +728,9 @@ built_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 	piece := new_scope(nil, f.span)
 	piece.source, piece.complete, piece.reached = piece, true, true
 	place := new_binding(piece, .Push, f.span)
-	// what a binding may hold: a set the laws keep written, by the range that bounds it
 	place.color = or_law(k, values_of)
-	if _, written := place.color.(^Operation); written do place.color = int_hull(k, place.color)
 	place.typed_color = place.color
 	return repeated(k, piece, COUNTS, f.span), true
-}
-
-// sum_image: the values of a fold whose value is a state x: c ↦ x + g, g not
-// reading x: c, and n terms of g, n its steps.
-sum_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
-	// the steps: along a counter, from lo to hi; otherwise the length of the orbit of
-	// the index from its start (§5.6), the index where its layout says
-	steps: Type
-	along: Rewrite
-	if lo, hi, counter := counter_range(k, f); counter {
-		steps = op(k, .Add, op(k, .Sub, hi, lo), Int(1))
-		along = rewriting(nil, f.index, narrowing(f.index, range_law(k, lo, hi, .Int, f.span)))
-	} else {
-		// the orbit of the start: its points from what the start may be
-		start := new_unknown(k, nil)
-		start.layout = layout_image(k, f.start) or_return
-		n := orbit_length(k, start, rewrite(k, f.next, rewriting(nil, f.index, start)), f.stop, f.span) or_return
-		steps = rewrite(k, n, rewriting(nil, start, f.start))
-	}
-	for z, i in f.states {
-		if !same(k, f.value, z) do continue
-		// x ↦ x + g: the ring reads the update as 1·x + g
-		one, g := affine_in(k, f.updates[i], z) or_return
-		if !is_int(one, 1) do return
-		terms := hull_times(k, steps, rewrite(k, g, along)) or_return
-		start := layout_image(k, f.inits[i]) or_return
-		return exact_law(k, .Add, {start, terms}, f.span), true
-	}
-	return
-}
-
-// hull_times: the integers from n·a to n·b, n ≥ 0 the counts of steps, a..b the
-// bounds of the values of g: what n terms of g sum to.
-hull_times :: proc(k: ^Kernel, n, g: Type) -> (image: Type, ok: bool) {
-	steps := layout_image(k, n) or_return
-	terms := layout_image(k, g) or_return
-	slo, shi := int_bounds(k, steps) or_return
-	glo, ghi := int_bounds(k, terms) or_return
-	nl := max(slo.? or_return, 0)
-	nh := shi.? or_return
-	a := glo.? or_return
-	b := ghi.? or_return
-	la := mul_checked(nl, a) or_return
-	ha := mul_checked(nh, a) or_return
-	lb := mul_checked(nl, b) or_return
-	hb := mul_checked(nh, b) or_return
-	return range_law(k, Int(min(la, ha)), Int(max(lb, hb)), .Int, {}), true
 }
 
 // field_color: the color of the field `name` in the shape a layout holds — in a
@@ -958,24 +821,3 @@ is_call_of :: proc(t: Type, s: ^Scope) -> bool {
 	return origin(target) == origin(s)
 }
 
-// least_image: μ(i: m / c ** i in B), B holding 0: the orbit reaches 0, the later the
-// greater |m| — at most the count of the digits of |m| in base c, at its bound.
-least_image :: proc(k: ^Kernel, l: ^Least) -> (image: Type, ok: bool) {
-	holds := l.holds.(^Operation) or_return
-	if holds.op != .In || !is_bool(in_law(k, Int(0), holds.args[1]), true) do return
-	div := holds.args[0].(^Operation) or_return
-	if div.op != .Div do return
-	power := div.args[1].(^Operation) or_return
-	if power.op != .Pow do return
-	c := power.args[0].(Int) or_return
-	at, by_index := power.args[1].(^Unknown)
-	if !by_index || !same_unknown(at, l.index) || c < 2 || reads(k, div.args[0], l.index) do return
-	lo, hi := int_bounds(k, layout_image(k, div.args[0]) or_return) or_return
-	// / rounds toward 0 (§4.5): |m / c ** i| = |m| / c ** i
-	least, top := lo.? or_return, hi.? or_return
-	if least == min(i128) do return
-	top = max(top, -least)
-	digits: i128 = 0
-	for x := top; x > 0; x /= i128(c) do digits += 1
-	return range_law(k, Int(0), Int(digits), .Int, l.span), true
-}

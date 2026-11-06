@@ -1505,7 +1505,7 @@ suffix :: proc(k: ^Kernel, layout: Type, at: Type) -> (out: Type, ok: bool) {
 			if !repeats || o.op != .Mul do return
 			piece := length_image(k, o.args[0]) or_return
 			if !is_int(piece, 1) do return
-			fewer := and_law(k, {int_hull(k, exact_law(k, .Sub, {layout_image(k, o.args[1]) or_return, c - Int(fixed)}, rest[0].span)), COUNTS})
+			fewer := and_law(k, {exact_law(k, .Sub, {layout_image(k, o.args[1]) or_return, c - Int(fixed)}, rest[0].span), COUNTS})
 			b := new(Binding)
 			b^ = rest[0]^
 			b.color = new_operation(.Mul, o.args[0], fewer)
@@ -1673,7 +1673,6 @@ run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
 		piece.source, piece.complete, piece.reached = piece, true, true
 		place := new_binding(piece, .Push, o.span)
 		place.color = or_law(k, {items, values(k, o.args[2]) or_return})
-		if _, written := place.color.(^Operation); written do place.color = int_hull(k, place.color)
 		place.typed_color = place.color
 		return repeated(k, piece, n, o.span), true
 	}

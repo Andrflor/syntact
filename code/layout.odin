@@ -60,7 +60,7 @@ layout_of_set :: proc(l: ^Lowering, written: kernel.Type) -> (lay: ^Layout, ok: 
 	}
 	if m := machine_of_layout(l.k, set); m != .None {
 		bits, signed := 64, m == .Int
-		if m == .Int do bits, signed = int_width(l.k, kernel.int_hull(l.k, set))
+		if m == .Int do bits, signed = int_width(l.k, set)
 		return new_clone(Layout{kind = .Word, machine = m, bits = bits, signed = signed, size = bits / 8, align = bits / 8}), true
 	}
 	if s, is_scope := set.(^kernel.Scope); is_scope && !kernel.recursive(s) && kernel.is_shape(l.k, s) {
