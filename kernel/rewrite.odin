@@ -474,10 +474,8 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// what it may hold: from the least of its lower bound to the greatest of its upper
 		return outer_set(k, t)
 	case ^Collapse:
-		// a call that stays: bounded by the recursion of its bounds (§5.6); giving
-		// scopes, the scope of its equation, read as a color (§5.4); otherwise the
-		// family it is proven in
-		if image, known := call_image(k, v); known do return image, true
+		// a call that stays: giving scopes, the scope of its equation, read as a color
+		// (§5.4); otherwise the family it is proven in
 		f := family_of(k, v) or_return
 		if f == .Scope do if eq, read := equation_of(k, v); read do return eq.generic, true
 		return family_term(f), true
@@ -508,8 +506,6 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 				}
 				if split do return total, true
 			}
-			// Σ(x: 0..|X| - 1, g(X.#x)), X a call: what bounds that sum of the call (§5.6)
-			if image, known := summed_image(k, v); known do return image, true
 			term := rewrite(k, v.term, rewriting(nil, v.index, narrowing(v.index, range_law(k, v.lo, v.hi, .Int, v.span))))
 			if image, known := hull_times(k, op(k, .Add, op(k, .Sub, v.hi, v.lo), Int(1)), term); known do return image, true
 		}
@@ -960,32 +956,6 @@ is_call_of :: proc(t: Type, s: ^Scope) -> bool {
 	c := as_call(t) or_return
 	target := c.target.(^Scope) or_return
 	return origin(target) == origin(s)
-}
-
-// summed_image: Σ(x: 0..|X| - 1, g(X.#x)), X a recursive call, its terms reading X
-// only at x: the bounds of that sum of what the call gives (§5.6).
-summed_image :: proc(k: ^Kernel, v: ^Series) -> (image: Type, ok: bool) {
-	if !is_int(v.lo, 0) do return
-	reads_at :: proc(t: Type, i: ^Unknown, out: ^[dynamic]^Collapse) {
-		if o, is_op := t.(^Operation); is_op && o.op == .Item {
-			if c, is_call := as_call(o.args[0]); is_call do if u, at := o.args[1].(^Unknown); at && same_unknown(u, i) do append(out, c)
-		}
-		for p in parts(t) do reads_at(p, i, out)
-	}
-	calls := make([dynamic]^Collapse)
-	reads_at(v.term, v.index, &calls)
-	for c in calls {
-		if !same(k, v.hi, op(k, .Sub, run_law(k, .Length, {c}, v.span), Int(1))) do continue
-		// at: a binding of X, what X holds at a place
-		item := new_operation(.Item, c, v.index)
-		at := new_unknown(k, nil)
-		at.layout = layout_image(k, item) or_continue
-		g := rewrite(k, v.term, append_read(nil, item, at))
-		if holds_invalid(g) do continue
-		if reads(k, g, v.index) do continue
-		return call_image(k, c, Measure{.Sum, g, at})
-	}
-	return
 }
 
 // least_image: μ(i: m / c ** i in B), B holding 0: the orbit reaches 0, the later the
