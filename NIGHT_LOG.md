@@ -1,47 +1,11 @@
 # Night log
 
-## Proposed law, waiting for the user (round 5: sexp, the type of a built text)
-Not implemented. sexp's `number` is right to fail on a text of type A: a run of 20
-digits overflows i64. It types only if the kernel reads `parse_all{t -> text}!` at
-the type of `text`, the language `forms` builds. §5.6 reads a call where what it
-carves is an unknown of its *color* (A). Proposed text, after "A call reads its
-equation where what it carves …":
-
-> A field the call gives a value of a type T narrower than its color, that every
-> call of the equation carves to a suffix of itself — the rest a cover cuts,
-> `t from c` — or keeps, is an unknown of the runs that end a run of T, Suff(T):
-> closed under those carves, what the induction proves holds for every value of it.
->
-> The run a recursion builds is in the language of its productions: each call that
-> places a run, `...f{…}!`, is the variable X of the equation (a field that threads
-> the run, `text -> {...text  P}`, places the run before P). Arden solves X when it
-> is at the edge; otherwise X is within {...(Σ * 0..):}, Σ the union of the pieces
-> the productions write beside the calls.
-
-With both, number's scan reads `t & Suff(L)`, L = ({atom} | {40} | {41 32})*, atoms
-{(97..122) * 3..14} 32 and {(48..57) * 1..5} 32 (format_int's fold of μ(y: v / 10 ** y
-in 0) ≤ 5 steps): its orbit stops at the first place out of 48..57, after 5 steps
-at most, and v ≤ 99999. The scan bound itself (the orbit of a run scan stops at the
-first point no cover of a call takes; μ(i: (m from i) in ~{H ...A:}) lies within the
-longest run of places in H the layout of m opens with) follows from the existing μ
-law; a draft is in scratchpad w/scan_mu.patch, kept out because it touches the orbit
-code the field-bounds agent is fixing (2ab6976).
-
-## Proposed law, waiting for the user
-§5.6 reads a call's equation where every field its calls carve is an unknown of its
-color. The values a field takes across a recursion are not stated. Proposed text,
-after "A call reads its equation where what it carves …":
-
-> A field the call leaves at its value, a constant a, and that every call of the
-> equation carves by the same step s, is a state of the fold the equation is: its
-> init a, its update s. In the equation it is an unknown in the image of its orbit
-> — sⁱ(a) for i in 0..n, n = μ(i: sⁱ(a) in B), B the cover of the base case of a
-> pattern on it, every i without one —, not of its color, when the orbit has a
-> closed form; otherwise of its color. What a call proves holds for those values.
-
-Implemented alone in one commit (call_equation, orbit_narrowings), easy to revert.
-Not yet proposed: a field every call keeps read in the image of what the call
-gives it (needed by blur's row y, lru's keys); see the round report.
+The values a field takes across a recursion — an integer, a scope field by field,
+a run carved to suffixes of itself (Suff(T)) — are what the call gives it closed
+under what each call carves it to: §5.6's law, already in the spec, not a new one.
+Integers are read so (one reading); scopes and runs are next. Still to be proposed
+by the next round: the language the productions of a recursion build (Arden on the
+run they place), the other half for sexp.
 
 Each step: the law, the commit, the benchmarks' status. Every commit is green
 (kernel corpus 581/5 unchanged, code tests, sum tree interp bintrees records push
