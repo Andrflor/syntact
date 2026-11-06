@@ -212,7 +212,8 @@ family_holds :: proc(f, of: Family) -> bool {
 	return f == of || f == domain(of) || (f == .String && of == .Char)
 }
 
-// layout_family: the one family the elements of a layout are in.
+// layout_family: the one family the elements of a layout are in, read from its form:
+// that of each of its cells, the same for all — never tried family by family.
 layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
 	#partial switch v in layout {
 	case ^Operation:
@@ -222,8 +223,38 @@ layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
 		// what each term holds: the family of one that has one
 		for t in v.terms do if f, one := layout_family(k, t); one do return f, true
 	}
-	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) {
-		if proven_in(k, layout, family_term(f)) do return f, true
+	one: [1]Type
+	cells, negated := cells_in(layout, &one)
+	if negated || len(cells) == 0 do return {}, false
+	family: Family
+	found := false
+	for c in cells {
+		f, known := cell_family_of(k, c)
+		if !known || found && f != family do return {}, false
+		family, found = f, true
+	}
+	return family, found
+}
+
+// cell_family_of: the family of the elements of one cell, by its form.
+cell_family_of :: proc(k: ^Kernel, c: Type) -> (Family, bool) {
+	#partial switch v in c {
+	case ^Scope:
+		return .Scope, true
+	case ^Is:
+		return family_of(k, v.term)
+	}
+	#partial switch cell_family(c) {
+	case .Int:
+		return .Int, true
+	case .Real:
+		return .Real, true
+	case .Char:
+		return .Char, true
+	case .Text:
+		return .String, true
+	case .Bool:
+		return .Bool, true
 	}
 	return {}, false
 }
@@ -236,14 +267,16 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 	next: for sig in signatures(op) {
 		for a, i in args {
 			if is_pending_call(k, a) do continue
-			// an operation is in the family its signature gives: 100 / (n + 1) is an
-			// integer; a pattern, in that of its products, one of which it gives; a
-			// divisor, a count, is still proven
-			#partial switch _ in a {
-			case ^Operation, ^Pattern, ^Access:
-				if f, known := family_of(k, a); known && family_holds(sig.args[min(i, 1)], f) do continue
+			// the family of an operand is read from its form (family_of): 100 / (n + 1)
+			// is an integer, a pattern in that of its products. One the signature holds
+			// asks nothing more, one apart from it no proof gives; a part of it — a
+			// divisor, a count — is proven
+			asked := sig.args[min(i, 1)]
+			if f, known := family_of(k, a); known {
+				if family_holds(asked, f) do continue
+				if !family_holds(f, asked) do continue next
 			}
-			if !proven_in(k, a, family_term(sig.args[min(i, 1)])) do continue next
+			if !proven_in(k, a, family_term(asked)) do continue next
 		}
 		return sig, true
 	}
