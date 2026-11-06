@@ -118,7 +118,11 @@ lower_program :: proc(k: ^kernel.Kernel) -> (prog: Program, err: string) {
 	if len(k.errors) > 0 do return prog, "the program has errors"
 	append(&prog.funcs, new_clone(Func{name = "main"}))
 	l := Lowering{k = k, prog = &prog, f = prog.funcs[0]}
-	l.f.body = lower_body(&l, program_type(k), false)
+	program := program_type(k)
+	outer, bound := open_body(&l, &l.f.body)
+	together(&l, program)
+	l.f.body.values = held_as(&l, program, nil)
+	close_body(&l, outer, bound)
 	if l.error != "" do return prog, l.error
 	inject_at(&l.f.body.insts, 0, ..l.entry[:])
 	impure_by_memory(&prog)
@@ -452,36 +456,71 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> []Value {
 // A state that is a run is laid out in memory: the value's as the fold is held
 // (into), another as the kernel types it; one that grows is reserved whole before
 // the first step, and each update stores what it appends in its place (grows).
-fold :: proc(l: ^Lowering, f: ^kernel.Fold, into: ^Layout = nil) -> []Value {
+fold :: proc(l: ^Lowering, f: ^kernel.Fold, into: ^Layout = nil, also: []^kernel.Fold = nil) -> []Value {
 	start := lower(l, f.start)
 	if l.error != "" do return nil
 	if machine_of(l.f, start) != .Int do return fail_values(l, "a fold whose orbit is not of integers is not code yet")
+	// the folds along this orbit computed in this loop: this one, and those beside it,
+	// their states their own (together)
+	members := make([dynamic]^kernel.Fold)
+	append(&members, f)
+	append(&members, ..also)
+	// each state: its fold, and which of its states it is
+	Member_State :: struct {
+		fold: ^kernel.Fold,
+		i:    int,
+	}
+	entries := make([dynamic]Member_State)
+	for g in members do for _, i in g.states do append(&entries, Member_State{g, i})
 	// where it stops and what its steps compute, the same at every step: once, before
 	bound_in := make([dynamic]^kernel.Unknown)
-	append(&bound_in, f.index)
-	append(&bound_in, ..f.states)
-	for x in kernel.chain_answers(f.effects) do if x != nil do append(&bound_in, x)
 	steps := make([dynamic]kernel.Type)
-	append(&steps, ..f.updates)
+	for g in members {
+		append(&bound_in, g.index)
+		append(&bound_in, ..g.states)
+		for x in kernel.chain_answers(g.effects) do if x != nil do append(&bound_in, x)
+		append(&steps, ..g.updates)
+	}
 	append(&steps, f.stop)
 	before_loop(l, bound_in[:], steps[:])
 	if l.error != "" do return nil
+	// a state of a fold beside it with the init and the update of one before, its
+	// orbit the same, is that state: the same values at every step
+	same_as := make([]int, len(entries))
+	renamed: kernel.Rewrite
+	for g in members[1:] do renamed = kernel.rewriting(renamed, g.index, f.index)
+	for e, j in entries {
+		same_as[j] = -1
+		if e.fold == f do continue
+		for d, i in entries[:j] {
+			if same_as[i] >= 0 || !kernel.same(l.k, e.fold.inits[e.i], d.fold.inits[d.i]) do continue
+			if !kernel.same(l.k, kernel.rewrite(l.k, e.fold.updates[e.i], renamed), kernel.rewrite(l.k, d.fold.updates[d.i], renamed)) do continue
+			same_as[j] = i
+			renamed = kernel.rewriting(renamed, e.fold.states[e.i], d.fold.states[d.i])
+			break
+		}
+	}
 	params := make([dynamic]Value)
 	starts := make([dynamic]Value)
 	append(&params, value(l.f, .Int))
 	append(&starts, start)
-	runs := make([]^Layout, len(f.states))
-	held := make([][]Value, len(f.states))
-	for init, i in f.inits {
-		runs[i] = state_run(l, f, i, into)
+	runs := make([]^Layout, len(entries))
+	held := make([][]Value, len(entries))
+	for e, j in entries {
+		g, i := e.fold, e.i
+		if same_as[j] >= 0 {
+			runs[j], held[j] = runs[same_as[j]], held[same_as[j]]
+			continue
+		}
+		runs[j] = state_run(l, g, i, g == f ? into : nil)
 		vs: []Value
 		switch {
-		case runs[i] != nil && grows(l, f, i):
-			vs = grown(l, f, i, runs[i])
-		case runs[i] != nil:
-			vs = build(l, init, runs[i])
+		case runs[j] != nil && grows(l, g, i):
+			vs = grown(l, g, i, runs[j])
+		case runs[j] != nil:
+			vs = build(l, g.inits[i], runs[j])
 		case:
-			vs = lower_values(l, init)
+			vs = lower_values(l, g.inits[i])
 		}
 		if l.error != "" do return nil
 		first := len(params)
@@ -489,39 +528,54 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold, into: ^Layout = nil) -> []Value {
 			append(&params, value(l.f, machine_of(l.f, v)))
 			append(&starts, v)
 		}
-		held[i] = params[first:]
-		if runs[i] != nil do hold(l, runs[i], held[i])
+		held[j] = params[first:]
+		if runs[j] != nil do hold(l, runs[j], held[j])
 	}
 	loop := Loop{params = params[:], init = starts[:]}
 	outer, bound := open_body(l, &loop.body)
 	// k at the head of a turn: any point of the orbit, the last too; its layout,
 	// out of stop, is the step's, read through a Narrow
-	head := new_clone(f.index^)
-	head.layout, head.written, head.call = nil, nil, nil
-	append(&l.bound, Bound{unknown = head, values = single(params[0])})
-	for x, i in f.states do append(&l.bound, Bound{unknown = x, values = held[i]})
+	for g in members {
+		head := new_clone(g.index^)
+		head.layout, head.written, head.call = nil, nil, nil
+		append(&l.bound, Bound{unknown = head, values = single(params[0])})
+	}
+	for e, j in entries do append(&l.bound, Bound{unknown = e.fold.states[e.i], values = held[j]})
 	arms := make([]Arm, 2)
-	// where it stops, the value: {...x Q}, x a state that grows, built in its place
-	value_into := into
-	for run, i in runs do if run != nil && run == into && extends(l, f.value, f.states[i]) && grows(l, f, i) do value_into = after(run, held[i])
-	arms[0].body = lower_body(l, f.value, false, value_into)
+	// where it stops, the value of each: {...x Q}, x a state that grows, built in its
+	// place
+	value_outer, value_bound := open_body(l, &arms[0].body)
+	values := make([dynamic]Value)
+	widths := make([]int, len(members))
+	for g, m in members {
+		value_into := g == f ? into : nil
+		for e, j in entries do if e.fold == g && runs[j] != nil && runs[j] == into && extends(l, g.value, g.states[e.i]) && grows(l, g, e.i) do value_into = after(runs[j], held[j])
+		vs := held_as(l, g.value, value_into)
+		widths[m] = len(vs)
+		append(&values, ..vs)
+	}
+	arms[0].body.values = values[:]
+	close_body(l, value_outer, value_bound)
 	// arms[1] ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
-	lower(l, f.effects)
+	for g in members do lower(l, g.effects)
 	args := make([dynamic]Value)
 	append(&args, NONE) // the next k, once the states are given
-	for t, i in f.updates {
+	for e, j in entries {
+		if same_as[j] >= 0 do continue
+		g, i := e.fold, e.i
+		t := g.updates[i]
 		xs: []Value
 		switch {
-		case runs[i] != nil && grows(l, f, i):
-			xs = build(l, t, after(runs[i], held[i]))
-		case runs[i] != nil:
-			xs = build(l, t, runs[i])
+		case runs[j] != nil && grows(l, g, i):
+			xs = build(l, t, after(runs[j], held[j]))
+		case runs[j] != nil:
+			xs = build(l, t, runs[j])
 		case:
 			xs = lower_values(l, t)
 		}
 		if l.error != "" do break
-		if !slice.equal(machines_of(l.f, xs), machines_of(l.f, held[i])) do fail(l, "the update of a fold gives %v, its state is %v", machines_of(l.f, xs), machines_of(l.f, held[i]))
+		if !slice.equal(machines_of(l.f, xs), machines_of(l.f, held[j])) do fail(l, "the update of a fold gives %v, its state is %v", machines_of(l.f, xs), machines_of(l.f, held[j]))
 		append(&args, ..xs)
 	}
 	args[0] = lower(l, f.next)
@@ -530,7 +584,7 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold, into: ^Layout = nil) -> []Value {
 	// a step passes on no memory it reserves: its states hold none, or grow in a
 	// memory of their own, their bindings holding none
 	passes := false
-	for run, i in runs do passes ||= run != nil && (!grows(l, f, i) || holds_memory(run.item))
+	for run, j in runs do passes ||= run != nil && (!grows(l, entries[j].fold, entries[j].i) || holds_memory(run.item))
 	if !passes do scoped(l, &arms[1].body)
 	// where k stops: the cells of stop, or its membership
 	target := params[0]
@@ -543,7 +597,65 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold, into: ^Layout = nil) -> []Value {
 		arms[0].cover = Cover{ints = taken}
 	}
 	loop.body.values = close_match(l, target, arms)
-	return close_loop(l, loop, outer, bound)
+	dst := close_loop(l, loop, outer, bound)
+	if l.error != "" do return nil
+	// the values of the folds beside it: computed, read again where they stand
+	at := widths[0]
+	for g, m in members[1:] {
+		append(&l.bound, Bound{term = g, values = dst[at:][:widths[m + 1]]})
+		at += widths[m + 1]
+	}
+	return dst[:widths[0]]
+}
+
+// together: the folds a program computes whatever its effects give back — reading
+// none of their answers, none with effects of its own —, grouped by their orbit:
+// the folds along one orbit, their states each their own, are one fold of all of
+// them, computed in one loop before the first effect (§5.6), each read again where
+// it stands. Only where they stand whatever happens: in the effects of the program,
+// what they give, what they compute.
+together :: proc(l: ^Lowering, t: kernel.Type) {
+	answers := make([dynamic]^kernel.Unknown)
+	found := make([dynamic]^kernel.Fold)
+	collect :: proc(l: ^Lowering, t: kernel.Type, answers: ^[dynamic]^kernel.Unknown, found: ^[dynamic]^kernel.Fold) {
+		#partial switch v in t {
+		case ^kernel.Effect:
+			if v.answer != nil do append(answers, v.answer)
+			if v.call != nil && !v.call.recursive {
+				if s, is_scope := v.call.target.(^kernel.Scope); is_scope do for b in kernel.placed(l.k, s, .Value) {
+					if b.kind == .Push || b.kind == .Pull do collect(l, kernel.binding_value(l.k, b), answers, found)
+				}
+			}
+			collect(l, v.then, answers, found)
+		case ^kernel.Fold:
+			if kernel.is_none(v.effects) do append(found, v)
+		case ^kernel.Operation:
+			for a in v.args do collect(l, a, answers, found)
+		}
+	}
+	collect(l, t, &answers, &found)
+	free :: proc(l: ^Lowering, f: ^kernel.Fold, answers: []^kernel.Unknown) -> bool {
+		for u in answers do if kernel.reads(l.k, f, u) do return false
+		// a value held in values: a run is laid out where it is held
+		if run, laid := layout_of_term(l, f); laid && run.kind != .Word do return false
+		return true
+	}
+	taken := make([]bool, len(found))
+	for f, i in found {
+		if taken[i] || !free(l, f, answers[:]) do continue
+		also := make([dynamic]^kernel.Fold)
+		for g, j in found[i + 1:] {
+			if taken[i + 1 + j] || !free(l, g, answers[:]) do continue
+			if !kernel.same(l.k, g.start, f.start) || !kernel.same(l.k, g.stop, f.stop) do continue
+			if !kernel.same(l.k, kernel.rewrite(l.k, g.next, kernel.rewriting(nil, g.index, f.index)), f.next) do continue
+			taken[i + 1 + j] = true
+			append(&also, g)
+		}
+		if len(also) == 0 do continue
+		vs := fold(l, f, nil, also[:])
+		if l.error != "" do return
+		append(&l.bound, Bound{term = f, values = vs})
+	}
 }
 
 // before_loop: what a loop over the unknowns bound computes in terms, the same at
@@ -1462,7 +1574,9 @@ in_run :: proc(l: ^Lowering, x: kernel.Type, c: kernel.Type) -> Value {
 	}
 	lengths, read := kernel.length_image(l.k, c)
 	if !read do return fail(l, "a cover %s on a run is not code yet", kernel.print_type(c))
-	fits := member(l, lower(l, kernel.op(l.k, .Length, x)), lengths)
+	// the lengths the cover admits: tested, unless the kernel proves x has one
+	length := kernel.op(l.k, .Length, x)
+	fits := kernel_proves(l, kernel.in_law(l.k, length, lengths)) ? constant(l, 1) : member(l, lower(l, length), lengths)
 	shape, is_scope := c.(^kernel.Scope)
 	if !is_scope do return fits
 	if kernel.recursive(shape) do shape = kernel.arden(l.k, shape) or_else shape
