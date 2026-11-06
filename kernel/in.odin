@@ -38,27 +38,16 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if _, read := x.(^Operation); read && !is_constant(c) {
 		if set, known := values(k, x); known && included(k, set, c) do return Bool(true)
 	}
-	// a term in a range over unknowns, lo..hi: t - lo ≥ 0 and hi - t ≥ 0, by the
-	// theory of linear arithmetic
-	if r, is_range := c.(^Range); is_range && !is_constant(c) && r.family == .Int {
-		if f, known := family_of(k, x); known && (f == .Int || f == .Count) {
-			holds := (r.lo == nil || lia_in(k, op(k, .Sub, x, r.lo), 0, nil)) && (r.hi == nil || lia_in(k, op(k, .Sub, r.hi, x), 0, nil))
-			if holds do return Bool(true)
+	// an integer term in a range lo..hi, its ends constants or terms: t - lo ≥ 0 and
+	// hi - t ≥ 0, each by eliminating its unknowns on their layouts (at_least)
+	if !is_constant(x) {
+		r, is_range := c.(^Range)
+		if !is_range && is_constant(c) {
+			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) do r, is_range = range_law(k, maybe_int(lo), maybe_int(hi), .Int, {}).(^Range)
 		}
-	}
-	// an integer term in a range: the negation and the axioms of its terms
-	// unsatisfiable, by the theory of linear arithmetic (lia.odin)
-	if !is_constant(x) && is_constant(c) {
-		#partial switch v in x {
-		case ^Unknown:
-			// a layout over other unknowns: its ends, read by the theory
-			if is_constant(layout_of(k, v)) do break
-			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) {
-				if f, known := family_of(k, x); known && (f == .Int || f == .Count) && lia_in(k, x, lo, hi) do return Bool(true)
-			}
-		case ^Operation, ^Fold, ^Series, ^Collapse:
-			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) {
-				if f, known := family_of(k, x); known && (f == .Int || f == .Count) && lia_in(k, x, lo, hi) do return Bool(true)
+		if is_range && r.family == .Int {
+			if f, known := family_of(k, x); known && (f == .Int || f == .Count) {
+				if (r.lo == nil || at_least(k, op(k, .Sub, x, r.lo))) && (r.hi == nil || at_least(k, op(k, .Sub, r.hi, x))) do return Bool(true)
 			}
 		}
 	}
@@ -644,4 +633,95 @@ produced_within :: proc(k: ^Kernel, s: ^Scope, c: ^Or) -> bool {
 maybe_int :: proc(x: Maybe(i128)) -> Type {
 	if v, has := x.?; has do return Int(v)
 	return nil
+}
+
+// at_least: d ≥ 0 for every value of its unknowns, by the type algebra (§4.3, §4.5):
+// d of degree 1 in an unknown u — or in a term the ring does not read, an unknown
+// whose layout is its type —, α its coefficient, u in l..h: d is at least d with u
+// at l when α > 0, at h when α < 0, a term over the other unknowns. Each step a
+// type, until a constant; an unknown eliminated is never brought back.
+at_least :: proc(k: ^Kernel, d: Type, eliminated: []int = nil) -> bool {
+	if c, constant := d.(Int); constant do return c >= 0
+	back: Rewrite
+	p := atomized(k, d, &back)
+	ms, divisor, ring := monomials(p)
+	if !ring || divisor != 1 do return false
+	for m in ms {
+		fs := factors(m)
+		if len(fs) != 1 do continue
+		u := fs[0]
+		// u: an unknown in its layout, or a term in its type
+		term: Type = u
+		if x, atom := rewritten(back, u); atom do term = x
+		set: Type
+		if w, is_unknown := term.(^Unknown); is_unknown {
+			if slice.contains(eliminated, w.id) do continue
+			set = layout_of(k, w)
+		} else {
+			set = values(k, term) or_continue
+		}
+		alpha := coefficient(m)
+		terms := []Type{set}
+		if both, meet := set.(^And); meet do terms = both.terms
+		for t in terms {
+			end := alpha > 0 ? least_of(k, t) : greatest_of(k, t)
+			if end == nil do continue
+			// an end over an unknown eliminated: no step back
+			brought := false
+			for id in eliminated do brought ||= reads_id(end, id)
+			if brought do continue
+			at := rewrite(k, unatomized(p, back), rewriting_term(term, end))
+			next := eliminated
+			if w, is_unknown := term.(^Unknown); is_unknown {
+				grown := make([]int, len(eliminated) + 1)
+				copy(grown, eliminated)
+				grown[len(eliminated)] = w.id
+				next = grown
+			}
+			if at_least(k, at, next) do return true
+		}
+	}
+	return false
+}
+
+// least_of, greatest_of: the end of a set an element of it is at least, at most: a
+// range its end, a value itself; ~(..h) is h + 1.., ~(l..) is ..l - 1.
+least_of :: proc(k: ^Kernel, s: Type) -> Type {
+	#partial switch v in s {
+	case ^Range:
+		return v.lo
+	case ^Is:
+		return v.term
+	case ^Not:
+		if r, is_range := v.term.(^Range); is_range && r.lo == nil && r.hi != nil do return op(k, .Add, r.hi, Int(1))
+	}
+	if is_constant(s) do if lo, _, bounded := int_bounds(k, s); bounded do if l, has := lo.?; has do return Int(l)
+	return nil
+}
+
+greatest_of :: proc(k: ^Kernel, s: Type) -> Type {
+	#partial switch v in s {
+	case ^Range:
+		return v.hi
+	case ^Is:
+		return v.term
+	case ^Not:
+		if r, is_range := v.term.(^Range); is_range && r.hi == nil && r.lo != nil do return op(k, .Sub, r.lo, Int(1))
+	}
+	if is_constant(s) do if _, hi, bounded := int_bounds(k, s); bounded do if h, has := hi.?; has do return Int(h)
+	return nil
+}
+
+// reads_id: t reads the unknown of this id.
+reads_id :: proc(t: Type, id: int) -> bool {
+	read := make([dynamic]^Unknown)
+	read_unknowns(t, &read)
+	for u in read do if u.id == id do return true
+	return false
+}
+
+// rewriting_term: the rewrite of the term t, an unknown or a term read, into v.
+rewriting_term :: proc(t: Type, v: Type) -> Rewrite {
+	if u, is_unknown := t.(^Unknown); is_unknown do return rewriting(nil, u, v)
+	return append_read(nil, t, v)
 }
