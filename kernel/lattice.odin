@@ -1308,6 +1308,15 @@ included :: proc(k: ^Kernel, a, b: Type) -> bool {
 		verdict, _ := prove(k, in_law(k, one.term, b))
 		return verdict == .Proven
 	}
+	// l..h ⊆ L..H, its ends over unknowns: each end in L..H, a range being convex (§4.3)
+	if r, is_range := a.(^Range); is_range && !is_constant(a) && r.family == .Int {
+		if c, is_interval := b.(^Range); is_interval && is_constant(b) {
+			if r.lo == nil && c.lo != nil || r.hi == nil && c.hi != nil do return false
+			low, _ := prove(k, r.lo == nil ? Bool(true) : in_law(k, r.lo, b))
+			high, _ := prove(k, r.hi == nil ? Bool(true) : in_law(k, r.hi, b))
+			return low == .Proven && high == .Proven
+		}
+	}
 	return is_none(and_law(k, {a, not_law(k, b)}))
 }
 

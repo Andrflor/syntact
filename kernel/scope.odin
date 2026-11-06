@@ -339,9 +339,27 @@ carve_problem :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) -> Type {
 		if color == nil do continue
 		// what holds the hypothesis, a call whose equation is being read, is proven
 		// once the equation is given (check.odin)
-		if p := in_problem(k, v, color, span); p != nil && !holds_call(k, v, true) do return p
+		if p := in_problem(k, v, color, span); p != nil && !holds_call(k, v, true) {
+			// over the fields of an equation being built, an integer field: what it
+			// takes is read on its state (L1, §5.6), once the equation is solved
+			r, integers := color.(^Range)
+			if eq, building := building_equation(k, origin(c), v); building && b.source != nil && integers && r.family == .Int {
+				append(&eq.deferred, Deferred{field = b.source, value = v, color = color, span = span})
+				continue
+			}
+			return p
+		}
 	}
 	return nil
+}
+
+// building_equation: the equation of root being built whose fields v reads.
+building_equation :: proc(k: ^Kernel, root: ^Scope, v: Type) -> (^Recursion, bool) {
+	for eq in k.equations {
+		if eq.root != root || !eq.reading || eq.term != nil do continue
+		for _, u in eq.params do if reads(k, v, u) do return eq, true
+	}
+	return nil, false
 }
 
 // holds_call: t holds a recursive call, or reads one; pending, one whose equation is

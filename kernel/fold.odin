@@ -1109,3 +1109,24 @@ summed_type :: proc(k: ^Kernel, s, n, g: Type) -> (t: Type, ok: bool) {
 	if from == nil && to == nil do return
 	return new_range(from, to, .Int), true
 }
+
+// state_type: the type of the state i of the fold at every step (§5.6): s ↦ x + g
+// along n steps, g in p..q, takes s + k·g for k in 0..n — from s + n·min(p, 0) to
+// s + n·max(q, 0), a range whose ends are terms over s and n.
+state_type :: proc(k: ^Kernel, f: ^Fold, i: int) -> (t: Type, ok: bool) {
+	g := f
+	if h, along := along_orbit(k, f); along do g = h
+	lo, hi := counter_range(k, g) or_return
+	z := g.states[i]
+	one, d := affine_in(k, g.updates[i], z) or_return
+	if !is_int(one, 1) do return
+	each := layout_image(k, d) or_return
+	if !is_constant(each) do return
+	p, q := int_bounds(k, each) or_return
+	n := op(k, .Add, op(k, .Sub, hi, lo), Int(1))
+	s := g.inits[i]
+	from, to: Type
+	if x, has := p.?; has do from = x < 0 ? op(k, .Add, s, op(k, .Mul, n, Int(x))) : s
+	if x, has := q.?; has do to = x > 0 ? op(k, .Add, s, op(k, .Mul, n, Int(x))) : s
+	return new_range(from, to, .Int), true
+}

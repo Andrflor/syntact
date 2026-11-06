@@ -2,6 +2,7 @@ package kernel
 
 import syn "../syntax"
 import "core:slice"
+import "core:fmt"
 
 // THE EQUATION OF A RECURSION, AND ITS SOLUTION (specs/types.md §5.6)
 //
@@ -34,6 +35,26 @@ Recursion :: struct {
 	type:     Type, // the type of its calls that give integers, over its fields (call_type)
 	typed:    bool,
 	valued:   bool,
+	deferred: [dynamic]Deferred, // carves of its fields not proven on the fields alone
+	states:   [dynamic]State_Check, // each field such a carve gives: its state, in its color
+}
+
+// Deferred: a carve of a field of the equation, its value read over the fields: not
+// in its color for every value of the fields — what the state takes is read once
+// the equation is solved.
+Deferred :: struct {
+	field:   ^Binding,
+	value:   Type,
+	color:   Type,
+	span:    syn.Span,
+	solved:  bool,
+}
+
+// State_Check: the type of the state of a field at every step of the fold, over the
+// fields: in its color at the values of each call.
+State_Check :: struct {
+	type, color: Type,
+	span:        syn.Span,
 }
 
 // call_key: the fields a carve of root changes, in their order.
@@ -127,6 +148,9 @@ equation_built :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map
 			}
 			params[b], changes[b] = u, u
 		}
+		// the fields so far: a carve that reads them is read over them (Deferred)
+		eq.params = params
+		clear(&eq.deferred)
 		generic, derived := derive(k, root, changes, root.span).(^Scope)
 		if !derived do return eq
 		p, found := first_production(k, generic)
@@ -141,6 +165,13 @@ equation_built :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map
 		eq.generic, eq.term, eq.params = generic, term, params
 		eq.term = instances(k, eq)
 		eq.solution = solve(k, eq)
+		// a carve of a field no state answers is not proven: the equation is not
+		// given, as when the carve fails over the fields alone
+		for d in eq.deferred do if !d.solved {
+			eq.generic, eq.term, eq.solution = nil, nil, nil
+			clear(&eq.states)
+			break
+		}
 		return eq
 	}
 }
@@ -148,7 +179,13 @@ equation_built :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map
 // solution_at: the solution of the equation at the values a carve of root gives its
 // fields, its bound unknowns its own (§5.6).
 solution_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
-	return renamed(k, rewrite(k, eq.solution, values_of_call(k, eq, s)))
+	at := values_of_call(k, eq, s)
+	// what each state takes, at the values of the call, in its color
+	for c in eq.states {
+		t := rewrite(k, c.type, at)
+		if !proven_in(k, t, c.color) do report(k, .Constraint_Mismatch, c.span, fmt.tprintf("what this field takes, %s, is not proven to be in %s", print_type(t), print_type(c.color)))
+	}
+	return renamed(k, rewrite(k, eq.solution, at))
 }
 
 // values_of_call: each unknown of the equation at the value the carve s gives its
@@ -270,6 +307,17 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 		}
 	}
 	f.states, f.inits, f.updates = states[:], inits[:], updates[:]
+	// each field a deferred carve gives: its state at every step, in its color
+	for &d in eq.deferred {
+		for w, j in inits {
+			field, is_field := w.(^Unknown)
+			if !is_field || eq.params[d.field] != field do continue
+			if t, typed := state_type(k, f, j); typed {
+				append(&eq.states, State_Check{t, d.color, d.span})
+				d.solved = true
+			}
+		}
+	}
 	return folded(k, f)
 }
 
