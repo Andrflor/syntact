@@ -1234,6 +1234,11 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 		if is_put do return run_law(k, .Length, put.args[:1], span) // |x{#k -> v}| = |x|
 		// a run a fold builds: the fold of its lengths
 		if f, is_fold := x.(^Fold); is_fold do if n, read := fold_length(k, f, span); read do return n
+		// a call whose equation places a field at the head of what it gives:
+		// |f{out -> o}!| = |o| + |f{out -> {}}!| (§5.6, runs compose)
+		if c, is_call := as_call(x); is_call && !is_pending_call(k, x) {
+			if o, rest, composed := composed_call(k, c, span); composed do return op(k, .Add, run_law(k, .Length, {o}, span), run_law(k, .Length, {rest}, span))
+		}
 		s, known := x.(^Scope)
 		if !known {
 			// every run x may be has length n: |x| = n

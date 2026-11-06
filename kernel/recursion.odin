@@ -795,6 +795,68 @@ run_affine :: proc(k: ^Kernel, v: Type, y: ^Unknown) -> (prefix, suffix: []^Bind
 	return xs[:at], xs[at + 1:], true
 }
 
+// composed_call: f{out -> o}! = {...o  ...f{out -> {}}!} — runs compose (§5.6): a
+// field that every product of the equation places once at its head, as a run, and
+// carves in every call to a run that places it once at its head, nothing else
+// reading it, is the run A of the maps A ↦ {...A ...P(k)}, which compose. o is the
+// value the call gives that field, rest the call where it gives {}.
+composed_call :: proc(k: ^Kernel, c: ^Collapse, span: syn.Span) -> (o, rest: Type, ok: bool) {
+	s := c.target.(^Scope) or_return
+	root := origin(s)
+	for b, v in s.changes {
+		if empty, is_scope := given(k, v).(^Scope); is_scope && len(run_data(k, empty)) == 0 do continue
+		if !gives_scope(k, v) do continue
+		eq := equation_of(k, c) or_continue
+		u := eq.params[b].(^Unknown) or_continue
+		was := eq.read
+		read_equation(k, eq, true)
+		heads := run_heads(k, eq.equation, root, b, u)
+		read_equation(k, eq, was)
+		if !heads do continue
+		changes := make(map[^Binding]Type)
+		for x, w in s.changes do changes[x] = w
+		changes[b] = run_scope(k, {})
+		carved := derive(k, root, changes, span)
+		target := carved.(^Scope) or_continue
+		return v, recursive_call(k, target, span), true
+	}
+	return
+}
+
+// run_heads: every product of t places u once at its head, as a run, the rest not
+// reading it — u itself, or {...u ...Q} —; a call of root keeps that form in the
+// field b, and its other fields, and what the patterns read, do not read u.
+run_heads :: proc(k: ^Kernel, t: Type, root: ^Scope, b: ^Binding, u: ^Unknown) -> bool {
+	headed :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
+		if x, is_unknown := t.(^Unknown); is_unknown do return same_unknown(x, u)
+		s := t.(^Scope) or_return
+		xs := run_data(k, s)
+		if len(xs) == 0 || xs[0].kind != .Expand do return false
+		head := binding_value(k, xs[0]).(^Unknown) or_return
+		if !same_unknown(head, u) do return false
+		for x in xs[1:] do if reads(k, binding_value(k, x), u) do return false
+		return true
+	}
+	if p, is_pattern := t.(^Pattern); is_pattern {
+		if has_effect(p) || reads(k, p.target, u) do return false
+		for x in p.branches {
+			if x.cover != nil && reads(k, x.cover, u) do return false
+			if !run_heads(k, x.product, root, b, u) do return false
+		}
+		return true
+	}
+	if is_call_of(t, root) {
+		c, _ := as_call(t)
+		for x, v in c.target.(^Scope).changes {
+			if x == b {
+				if !headed(k, v, u) do return false
+			} else if reads(k, v, u) do return false
+		}
+		return true
+	}
+	return headed(k, t, u)
+}
+
 // joined: the run of the runs first, the bindings of the run between, rewritten by
 // r, then the runs last: {...a₀ … ...aₙ  x₀ … xₘ  ...b₀ … ...bₗ}. A run known to
 // be a scope places its bindings (§5.3).
@@ -980,9 +1042,33 @@ affine_in :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: b
 	}
 	alpha = unatomized(ring_term(as[:], 1) or_return, back)
 	beta = unatomized(ring_term(bs[:], 1) or_return, back)
-	// an atom that holds y: t is not of degree 1 in y
-	if reads(k, alpha, y) || reads(k, beta, y) do return nil, nil, false
-	return alpha, beta, true
+	// an atom that holds y: a pattern gives one of its products, an operation on it
+	// the operation on each (§6): t of degree 1 in y in each, with one α, is α·y +
+	// the pattern of the β. Otherwise t is not of degree 1 in y
+	if !reads(k, alpha, y) && !reads(k, beta, y) do return alpha, beta, true
+	p := pattern_reading(k, t, y) or_return
+	branches := make([]Branch, len(p.branches))
+	alpha = nil
+	for b, i in p.branches {
+		a, beta_i := affine_in(k, rewrite(k, t, append_read(nil, p, b.product)), y) or_return
+		if alpha != nil && !same(k, alpha, a) do return nil, nil, false
+		alpha, branches[i] = a, with_product(b, beta_i)
+	}
+	return alpha, pattern_law(k, branching(p, branches)), true
+}
+
+// pattern_reading: a pattern without effects among the operands of t, whose products
+// read y and whose target and covers do not.
+pattern_reading :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (^Pattern, bool) {
+	#partial switch v in t {
+	case ^Pattern:
+		if has_effect(v) || reads(k, v.target, y) do return nil, false
+		for b in v.branches do if b.cover != nil && reads(k, b.cover, y) do return nil, false
+		return v, reads(k, v, y)
+	case ^Operation:
+		for a in v.args do if p, read := pattern_reading(k, a, y); read do return p, true
+	}
+	return nil, false
 }
 
 // at_calls: a step of the equation, cut at its calls of f: the effects before
@@ -2218,7 +2304,7 @@ measure_of :: proc(k: ^Kernel, t: Type, root: ^Scope, m: Measure, calls: ^[dynam
 	case .Value, .Length:
 		v := m.kind == .Length ? run_law(k, .Length, {t}, root.span) : t
 		r: Rewrite
-		for x in calls_in(k, t, root) {
+		for x in calls_in(k, v, root) {
 			y := taken(k, x, calls, ys)
 			if m.kind == .Value do r = rewriting_call(r, x, y)
 			else do r = append_read(r, new_operation(.Length, x), y)
