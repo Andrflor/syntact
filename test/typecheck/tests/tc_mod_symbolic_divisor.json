@@ -1,0 +1,1 @@
+{"name": "tc_mod_symbolic_divisor", "description": "Euclid (\u00a74.5): for b \u2265 1 and n \u2265 0, n % b lies in 0..b - 1, b an unknown as well as a constant", "source": "s -> ??::u64\nv -> ??::(1..2147483647)\nf -> {\n  (0..(v - 1)):a -> s % v\n}\nx -> f!", "expect_errors": []}
