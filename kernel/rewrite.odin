@@ -475,7 +475,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// a call that stays: giving scopes, the scope of its equation, read as a color
 		// (§5.4); otherwise the family it is proven in
 		f := family_of(k, v) or_return
-		if f == .Scope do if eq, read := equation_of(k, v); read do return eq.generic, true
+		if f == .Scope do if s, is_scope := v.target.(^Scope); is_scope do if eq, read := equation_of(k, origin(s)); read do return eq.generic, true
 		return family_term(f), true
 	case ^Fold:
 		// a run it builds: a run of what its steps place
@@ -750,18 +750,6 @@ field_color :: proc(k: ^Kernel, layout: Type, name: string) -> (color: Type, ok:
 	}
 	s := layout.(^Scope) or_return
 	if !is_shape(k, s) {
-		// the scope of an equation, read as a color (§5.4): reading it is reading the
-		// equation — its calls the hypothesis meanwhile (§5.6) —, once
-		for x in k.equations {
-			if x.generic != s do continue
-			for f in k.fields do if f.scope == s && f.name == name do return f.color, f.color != nil
-			if reading(k, x.root) do return nil, false
-			x.read = true
-			color, ok = produced_field(k, s, name)
-			x.read = false
-			append(&k.fields, Field{s, name, ok ? color : nil})
-			return
-		}
 		return produced_field(k, s, name)
 	}
 	c, has := shape_field(k, s, name, nil) or_return

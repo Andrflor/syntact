@@ -35,7 +35,7 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 		if b.value == nil && b.color == nil do continue
 		v := binding_value(k, b) // an expansion of a run places what the run gives
 		if x, known := v.(^Scope); known do append(&out, ..placed(k, x, view))
-		else if gives_scope(k, v) || is_pending_call(k, v) do append(&out, b) // a call being read: the hypothesis
+		else if gives_scope(k, v) || as_call_any(v) do append(&out, b) // a call: what it gives
 	}
 	return out[:]
 }
@@ -133,8 +133,8 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 			if f, is_fold := v.args[0].(^Fold); is_fold do if out, read := built_field(k, f, v.args[1], a); read do return out
 		}
 	}
-	// a scope not known yet, or a call being given (the hypothesis): the access stays
-	if gives_scope(k, target) || is_pending_call(k, target) {
+	// a scope not known yet, or a call: the access stays
+	if gives_scope(k, target) || as_call_any(target) {
 		out := new(Access)
 		out^ = a^
 		out.target = target
@@ -172,13 +172,6 @@ product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 		// the call stays: as it is, or as the effect of an equation with effects
 		stays, is_call := call.(^Collapse)
 		if e, is_effect := call.(^Effect); is_effect && e.call != nil do stays, is_call = e.call, true
-		if is_call && stays.target == s {
-			if solution, solved := generic_solution(k, s.carved, s.changes); solved {
-				// each call runs the effects of the solution: what they give back is new
-				run: Rewrite
-				return renewed(k, solution, &run)
-			}
-		}
 		return call
 	}
 	if p, found := first_production(k, s); found do return product(k, p)
@@ -355,7 +348,7 @@ carve_problem :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) -> Type {
 // being read — the hypothesis. A scope holds what its bindings place, and what a carve
 // changed in it.
 holds_call :: proc(k: ^Kernel, t: Type, pending: bool) -> bool {
-	if c, is_call := as_call(t); is_call do return !pending || is_pending_call(k, c)
+	if _, is_call := as_call(t); is_call do return !pending
 	#partial switch v in t {
 	case ^Scope:
 		for b in v.bindings {
@@ -387,7 +380,6 @@ Copier :: struct {
 	substitute: bool,
 	outer:      Rewrite,
 	pieces:     map[^Binding]Type,
-	tuple:      ^Tupling, // a copy for a field of a tupled equation (recursion.odin)
 }
 
 copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope {
@@ -507,9 +499,6 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		a.target = copy_term(k, m, v.target, scope)
 		return a
 	case ^Collapse:
-		if m.tuple != nil {
-			if read, tupled := tupled_call(k, m, v, scope); tupled do return read
-		}
 		c := new(Collapse)
 		c^ = v^
 		c.target = copy_term(k, m, v.target, scope)
@@ -1616,9 +1605,6 @@ item_image :: proc(k: ^Kernel, layout: Type) -> (c: Type, ok: bool) {
 // is read, its calls the hypothesis.
 produced_items :: proc(k: ^Kernel, s: ^Scope) -> (c: Type, ok: bool) {
 	root := origin(s)
-	if reading(k, root) do return
-	for x in k.equations do if x.generic == s do x.read = true
-	defer for x in k.equations do if x.generic == s do x.read = false
 	leaves := make([dynamic]Product)
 	for p in placed(k, s, .Shape) do if p.kind == .Product && p.value != nil do products(k, binding_type(k, p), &leaves)
 	own :: proc(t: Type, root: ^Scope) -> bool {

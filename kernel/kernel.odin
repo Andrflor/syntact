@@ -40,19 +40,16 @@ Kernel :: struct {
 	effects:    int, // the effects written: their ids
 	emissions:  int, // the emissions written: their ids
 	answering:  [dynamic]^Binding, // the handlers whose run is being typed: one that answers itself again is an infinite recursion
-	summed:     [dynamic]Summed,
-	tupled:     [dynamic]Tupled, // the equations of an equation over a range of one of its fields (recursion.odin) // the equations of sums of an equation over one of its fields (recursion.odin)
 	induced:    [dynamic]Induced, // whether the calls of an equation are in a set, proven once (in.odin)
 	fields:     [dynamic]Field, // the colors of the fields of the scope of an equation, read once (rewrite.odin)
 	plain:      map[^Operation]Plain, // what is known of an operation over plain unknowns, once (rewrite.odin)
 	read:       map[Read_Key]bool, // whether a node reads an unknown, once asked (rewrite.odin)
 	valued:     map[rawptr]Type, // what a shared node may hold, once read (size.odin)
-	generics:   [dynamic]Generic, // the solutions of equations where what is given is unknown, once (recursion.odin)
-	equations:  [dynamic]^Call_Equation, // the equations calls read, where what they carve is unknown, once (recursion.odin)
 	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file
 	scratch:    [dynamic]Type, // what the laws gather, in an arena of its own (scratch.odin)
+	equations:  map[^Scope]^Recursion, // the equation of each recursive scope, read once (solve.odin)
 	interned:   ^Interned, // its shared terms (intern.odin)
 }
 

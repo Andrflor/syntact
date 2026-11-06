@@ -283,42 +283,24 @@ read_of :: proc(t: Type) -> Read {
 // production at the values its carve gives (§5.3), its calls the hypothesis meanwhile.
 call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool {
 	s := call.target.(^Scope) or_return
-	root := origin(s)
-	eq, derived := equation_of(k, call)
-	if derived do return induction(k, eq, c, fields)
-	if eq == nil || reading(k, root) do return false
-	p := first_production(k, s) or_return
-	if p.state == .In_Progress do return false
-	eq.read = true
-	defer eq.read = false
-	return holds_in(k, binding_type(k, p), c, fields, root)
+	eq := equation_of(k, origin(s)) or_return
+	for x in k.induced do if x.equation == eq.generic && x.fields == fields && same(k, x.set, c) do return x.proven
+	at := len(k.induced)
+	append(&k.induced, Induced{eq.generic, c, fields, false})
+	// the proof reads the equation: meanwhile its calls are the hypothesis
+	eq.reading = true
+	proven := induced(k, eq.root, eq.term, c, fields)
+	eq.reading = false
+	k.induced[at].proven = proven
+	return proven
 }
 
-// induction: the calls of the equation eq are in c when the equation is, each call it
-// makes taken in c (§5.6); with a read, the same read of each scope the equation gives,
-// that read of its calls taken in c — a call it gives adds nothing: X = X | P. While
-// it is read, its calls are the hypothesis: nothing is proven yet.
+// Induced: an induction once proven, or not, for an equation, a set and a read.
 Induced :: struct {
 	equation: ^Scope,
 	set:      Type,
 	fields:   Read,
 	proven:   bool,
-}
-
-induction :: proc(k: ^Kernel, eq: ^Call_Equation, c: Type, fields: Read) -> bool {
-	for x in k.induced do if x.equation == eq.generic && x.fields == fields && same(k, x.set, c) do return x.proven
-	if reading(k, eq.root) do return false
-	at := len(k.induced)
-	append(&k.induced, Induced{eq.generic, c, fields, false})
-	// the proof reads the equation: meanwhile its calls are the hypothesis
-	eq.read = true
-	proven := induced(k, eq.root, eq.equation, c, fields)
-	eq.read = false
-	// a field whose induction reads other fields: every field taken in c, the stronger
-	// hypothesis (§5.6)
-	if !proven && fields.name != "" do proven = induction(k, eq, c, {true, ""})
-	k.induced[at].proven = proven
-	return proven
 }
 
 induced :: proc(k: ^Kernel, root: ^Scope, e: Type, c: Type, fields: Read) -> bool {
