@@ -324,7 +324,7 @@ call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool 
 		// the call is its production at the values its carve gives (§5.3), its calls
 		// the hypothesis meanwhile
 		p := first_production(k, s) or_return
-		if p.state == .In_Progress do return false
+		if typing(p) do return false
 		eq.reading = true
 		defer eq.reading = false
 		return holds_in(k, binding_type(k, p), c, fields, eq.root)

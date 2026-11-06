@@ -179,7 +179,7 @@ product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 // product: what a production's value gives, before the effects above it.
 product :: proc(k: ^Kernel, p: ^Binding) -> Type {
 	t := binding_type(k, p)
-	if p.state != .Done do return t // asked while it is given: the problem
+	if typing(p) do return t // asked while it is given: the problem
 	return p.typed_product
 }
 

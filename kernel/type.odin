@@ -350,12 +350,6 @@ Kind :: enum u8 {
 	Handler, // E -< e {…}: the handler of E, a scope in which e is what is sent (§4.9)
 }
 
-Typing :: enum u8 {
-	Not_Asked,
-	In_Progress,
-	Done,
-}
-
 // Binding: a binding as written — its color and its value are terms — and their
 // normal forms, given once, when asked.
 Binding :: struct {
@@ -372,10 +366,9 @@ Binding :: struct {
 	scope:       ^Scope,
 	source:      ^Binding, // in a copy made by a carve: the binding it copies
 	carved:      bool, // in a copy: its value is the carve's
-	typed_color: Type,
-	typed_value: Type,
+	typed_color: Type, // the normal form of its color, once
+	type:        Type, // nil until it is typed; while it is, a reference to itself (§5.6); then the normal form of its value, once
 	typed_product: Type, // a production: what its value gives, before the effects above it
-	state:       Typing,
 }
 
 // Scope: an ordered sequence of bindings — a type. A carve derives a scope: a copy

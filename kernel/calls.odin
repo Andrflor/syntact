@@ -199,7 +199,7 @@ production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	root := origin(b.scope)
 	if !recursive(root) do return normal(k, b.value)
 	first, found := first_production(k, root)
-	if found && first != b && first.state == .Not_Asked do binding_type(k, first)
+	if found && first != b && first.type == nil do binding_type(k, first)
 	if first != b do return normal(k, b.value)
 	value := normal(k, b.value)
 	if !root.effectful && has_effect(with_effects(k, root, b, value)) {
@@ -311,7 +311,7 @@ is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
 	s, is_scope := c.target.(^Scope)
 	if !is_scope do return false
 	root := origin(s)
-	if p, found := first_production(k, root); found && p.state == .In_Progress do return true
+	if p, found := first_production(k, root); found && typing(p) do return true
 	for x in k.equations do if x.root == root && x.reading do return true
 	return false
 }

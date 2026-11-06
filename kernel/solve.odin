@@ -53,7 +53,7 @@ equation_of :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map[^B
 		if x.reading do return nil, false
 		return x, true
 	}
-	if p, found := first_production(k, root); found && p.state == .In_Progress do return nil, false
+	if p, found := first_production(k, root); found && typing(p) do return nil, false
 	return equation_built(k, root, given, through), true
 }
 

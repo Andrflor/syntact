@@ -405,14 +405,12 @@ binding_color :: proc(k: ^Kernel, b: ^Binding) -> Type {
 // without a value has the default of its color (§5.5); `??` takes the layout of
 // its color. Asked again while it is given, it is an infinite recursion.
 binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
-	switch b.state {
-	case .Done:
-		return b.typed_value
-	case .In_Progress:
-		return problem(.Infinite_Recursion, b.span, "this value places itself again")
-	case .Not_Asked:
-	}
-	b.state = .In_Progress
+	if typing(b) do return problem(.Infinite_Recursion, b.span, "this value places itself again")
+	if b.type != nil do return b.type
+	// while it is typed, its type is a reference to itself
+	self := new(Name)
+	self.binding, self.span = b, b.span
+	b.type = self
 	color := binding_color(k, b)
 	value: Type
 	if b.value == nil {
@@ -444,8 +442,14 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 		if recursive(shape) do shape = arden(k, shape) or_else nil
 		if s, is_scope := value.(^Scope); is_scope && shape != nil && is_shape(k, shape) do value = colored(k, s, shape)
 	}
-	b.typed_value, b.state = value, .Done
+	b.type = value
 	return value
+}
+
+// typing: b is being typed: its type is still the reference to itself.
+typing :: proc(b: ^Binding) -> bool {
+	self, is_name := b.type.(^Name)
+	return is_name && self.binding == b
 }
 
 // binding_value: what a binding gives back: what its name reads. Its effects are run
@@ -570,7 +574,7 @@ written_first :: proc(k: ^Kernel, t: Type) -> (Type, bool) {
 // asks itself again: an infinite recursion. The equation is read as written: under
 // the defaults, a pattern on a known value is gone, not its guard.
 places_itself :: proc(k: ^Kernel, s: ^Scope, p: ^Binding) -> bool {
-	if p.state == .In_Progress do return false
+	if typing(p) do return false
 	if calls_itself(p.value) do return true
 	shape, is_scope := binding_type(k, p).(^Scope)
 	if !is_scope do return false
