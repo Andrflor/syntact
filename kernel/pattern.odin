@@ -248,8 +248,16 @@ restricting :: proc(k: ^Kernel, r: Rewrite, t, s: Type) -> Rewrite {
 // copied likewise: they are the scopes of that branch.
 branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite, target: Type, outer: Rewrite = nil) -> Type {
 	b := b
-	// a product rewritten with its target: in its branch, where its reach holds
-	if outer != nil do b.product = rewrite(k, normal(k, b.product), outer)
+	// a product rewritten with its target: in its branch, where its reach holds — what
+	// outer puts in place of an unknown read there, in one rewrite
+	if outer != nil {
+		inside := make([]Rewriting, len(outer))
+		for x, i in outer {
+			inside[i] = x
+			inside[i].term = rewrite(k, x.term, r)
+		}
+		b.product = rewrite(k, normal(k, b.product), inside)
+	}
 	// the pieces of the value that reaches the branch: the target, narrowed
 	pieces := cover_pieces(k, b, rewrite(k, target, r))
 	if b.scope == nil || len(r) == 0 && len(pieces) == 0 do return rewrite(k, normal(k, b.product), r)

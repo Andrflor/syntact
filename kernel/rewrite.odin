@@ -531,8 +531,13 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 ordered_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	#partial switch v in t {
 	case ^Fold:
-		// a sum along the fold: its init, and as many terms as steps
-		if image, known := sum_image(k, v); known do return image, true
+		// a sum along the fold: its init, and as many terms as steps; what it gathers,
+		// bounded as the recursion it solves: both hold
+		summed, by_steps := sum_image(k, v)
+		gathered, by_recursion := fold_image(k, v, Measure{})
+		if by_steps && by_recursion do return and_law(k, {summed, gathered}), true
+		if by_steps do return summed, true
+		if by_recursion do return gathered, true
 		// a run it builds: a run of what its steps place
 		if image, known := built_image(k, v); known do return image, true
 		// its value, over the layouts of its states
@@ -1182,10 +1187,9 @@ is_call_of :: proc(t: Type, s: ^Scope) -> bool {
 	return origin(target) == origin(s)
 }
 
-// summed_image: Σ(x: 0..|X| - 1, g(X.#x)), X a recursive call or a fold that
-// builds a run, its terms reading X only at x: the bounds of that sum of what X
-// gives (§5.6).
-summed_image :: proc(k: ^Kernel, v: ^Series) -> (image: Type, ok: bool) {
+// summed_run: Σ(x: 0..|X| - 1, g(X.#x)), X a recursive call or a fold, its terms
+// reading X only at x: X, and the sum as a measure of it — g over at, a binding of X.
+summed_run :: proc(k: ^Kernel, v: ^Series) -> (x: Type, m: Measure, ok: bool) {
 	if !is_int(v.lo, 0) do return
 	reads_at :: proc(t: Type, i: ^Unknown, out: ^[dynamic]Type) {
 		if o, is_op := t.(^Operation); is_op && o.op == .Item {
@@ -1206,11 +1210,18 @@ summed_image :: proc(k: ^Kernel, v: ^Series) -> (image: Type, ok: bool) {
 		g := rewrite(k, v.term, append_read(nil, item, at))
 		if holds_invalid(g) do continue
 		if reads(k, g, v.index) do continue
-		if f, is_fold := x.(^Fold); is_fold do return fold_image(k, f, Measure{.Sum, g, at})
-		c, _ := as_call(x)
-		return call_image(k, c, Measure{.Sum, g, at})
+		return x, Measure{.Sum, g, at}, true
 	}
 	return
+}
+
+// summed_image: Σ(x: 0..|X| - 1, g(X.#x)) (summed_run): the bounds of that sum of
+// what X gives (§5.6).
+summed_image :: proc(k: ^Kernel, v: ^Series) -> (image: Type, ok: bool) {
+	x, m := summed_run(k, v) or_return
+	if f, is_fold := x.(^Fold); is_fold do return fold_image(k, f, m)
+	c, _ := as_call(x)
+	return call_image(k, c, m)
 }
 
 // least_image: μ(i: m / c ** i in B), B holding 0: the orbit reaches 0, the later the
