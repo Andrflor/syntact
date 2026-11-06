@@ -585,7 +585,8 @@ int_opposite :: proc(k: ^Kernel, cells: []Type) -> (opposite: []Type, ok: bool) 
 	return pushed(k, from), true
 }
 
-// real_sum: (a..b) + (c..d) = (a + c)..(b + d), open where either bound is.
+// real_sum: (a..b) + (c..d) = (a + c)..(b + d), open where either bound is; a bound
+// beyond the integers written here moved outward.
 real_sum :: proc(k: ^Kernel, a, b: []Type) -> (sum: Type, ok: bool) {
 	from := mark(k)
 	defer release(k, from)
@@ -594,10 +595,10 @@ real_sum :: proc(k: ^Kernel, a, b: []Type) -> (sum: Type, ok: bool) {
 			p, q := real_bounds(x), real_bounds(y)
 			r: Real_Bounds
 			if u, has_u := p.lo.?; has_u {
-				if v, has_v := q.lo.?; has_v do r.lo, r.lo_open = real_add(u, v) or_return, p.lo_open || q.lo_open
+				if v, has_v := q.lo.?; has_v do r.lo, r.lo_open = real_add_toward(u, v, .Down) or_return, p.lo_open || q.lo_open
 			}
 			if u, has_u := p.hi.?; has_u {
-				if v, has_v := q.hi.?; has_v do r.hi, r.hi_open = real_add(u, v) or_return, p.hi_open || q.hi_open
+				if v, has_v := q.hi.?; has_v do r.hi, r.hi_open = real_add_toward(u, v, .Up) or_return, p.hi_open || q.hi_open
 			}
 			push(k, real_cell(r))
 		}

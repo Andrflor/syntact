@@ -62,7 +62,10 @@ monomials :: proc(t: Type, field := false) -> (terms: []Type, divisor: i128, ok:
 	case Int:
 		if !field do return slice.clone([]Type{t}), 1, true
 	case Real:
-		if field do return slice.clone([]Type{Int(v.num)}), v.den, true
+		if field {
+			num, den := real_quotient(v) or_return
+			return slice.clone([]Type{Int(num)}), den, true
+		}
 	case ^Operation:
 		#partial switch v.op {
 		case .Add, .Sub:
@@ -101,8 +104,9 @@ monomials :: proc(t: Type, field := false) -> (terms: []Type, divisor: i128, ok:
 				// a / (n / m) = (a * m) / n
 				c, constant := v.args[1].(Real)
 				if !constant || c.num == 0 do return
-				over := scale(ms, c.num < 0 ? -c.den : c.den) or_return
-				e := mul_checked(d, abs(c.num)) or_return
+				num, den := real_quotient(c) or_return
+				over := scale(ms, num < 0 ? -den : den) or_return
+				e := mul_checked(d, abs(num)) or_return
 				return over, e, true
 			}
 			// (k * a) / k = a: a division the ring reads is exact — the polynomial over
@@ -346,7 +350,7 @@ ring_law :: proc(op: Operator, args: []Type, field := false) -> (t: Type, ok: bo
 			// a / (n / m) = a * (m / n)
 			c, constant := args[1].(Real)
 			if !constant || c.num == 0 do return
-			inverse := real_of(c.den, c.num) or_return
+			inverse := real_div(real_int(1), c) or_return
 			return ring_law(.Mul, {args[0], inverse}, true)
 		}
 		// (k * a) / k = a: every coefficient divisible by the constant

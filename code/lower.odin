@@ -2,6 +2,7 @@ package code
 
 import kernel "../kernel"
 import "core:fmt"
+import "core:math"
 import "core:slice"
 import "core:strings"
 
@@ -1546,7 +1547,7 @@ inf_f64 :: proc() -> f64 {
 }
 
 float_of :: proc(r: kernel.Real) -> f64 {
-	return f64(r.num) / f64(r.den)
+	return math.ldexp(f64(r.num) / f64(r.den), r.exp)
 }
 
 // term_bounds: the least and greatest integers t takes: those of its layout image,

@@ -44,7 +44,8 @@ Type :: union {
 Char :: distinct rune
 Int :: distinct i128
 Real :: struct {
-	num, den: i128, // num / den, den > 0, in lowest terms (real.odin)
+	num, den: i128, // num / den · 2^exp, den > 0, num and den odd, in lowest terms (real.odin)
+	exp:      int,
 }
 Bool :: distinct bool
 None :: struct {}
