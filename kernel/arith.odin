@@ -13,21 +13,24 @@ import "core:slice"
 // primitives. On integers over unknowns, the laws of a ring give the normal form
 // of a sum of products. What no law reduces stays the operation.
 
+// Family: the sort of what a type holds, read from its form: integers, reals,
+// characters, strings — characters included: a character is a string of length 1 —,
+// booleans; Value: what is taken as it is, a scope or =t; Other: a set the laws leave
+// as an operation, of no one sort (lattice.odin). The order is that of the cells in a
+// normal form.
 Family :: enum u8 {
 	Int,
 	Real,
-	String, // characters included: a character is a string of length 1
 	Char,
+	String,
 	Bool,
-	Count, // an integer ≥ 0: the count of a repetition, of a shift
-	Nonzero_Int, // a divisor: int & ~0
-	Nonzero_Real, // float & ~0.0
-	Scope,
+	Value,
+	Other,
 }
 
 // family_term: a family as a type, in normal form.
 family_term :: proc(f: Family) -> Type {
-	switch f {
+	#partial switch f {
 	case .Int:
 		return EVERY_INT
 	case .Real:
@@ -38,58 +41,45 @@ family_term :: proc(f: Family) -> Type {
 		return EVERY_CHAR
 	case .Bool:
 		return BOOLS
-	case .Count:
-		return COUNTS
-	case .Nonzero_Int:
-		return NONZERO_INT
-	case .Nonzero_Real:
-		return NONZERO_REAL
-	case .Scope:
+	case .Value:
 		return EVERY_SCOPE
 	}
 	return None{}
 }
 
+// Signature: the family of each operand and of the result (§4.5); within: the part
+// of its family an operand is asked in — a divisor, a count —, nil for all of it.
 Signature :: struct {
 	args:   [2]Family,
+	within: [2]Type,
 	result: Family,
 }
 
-signatures :: proc(op: Operator) -> []Signature {
-	@(static) add := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .String}, .String}}
-	@(static) sub := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}}
+// SIGNATURES: those of each operator, built once with the constants (type.odin).
+SIGNATURES: [Operator][]Signature
+
+init_signatures :: proc() {
+	all :: proc(a, b, result: Family) -> Signature {return {{a, b}, {nil, nil}, result}}
+	part :: proc(a, b: Family, within: Type, result: Family) -> Signature {return {{a, b}, {nil, within}, result}}
+	sub := slice.clone([]Signature{all(.Int, .Int, .Int), all(.Real, .Real, .Real)})
+	bits := slice.clone([]Signature{all(.Int, .Int, .Int), all(.Bool, .Bool, .Bool)})
+	compare := slice.clone([]Signature{all(.Int, .Int, .Bool), all(.Real, .Real, .Bool), all(.Char, .Char, .Bool)})
+	SIGNATURES[.Add] = slice.clone([]Signature{all(.Int, .Int, .Int), all(.Real, .Real, .Real), all(.String, .String, .String)})
+	SIGNATURES[.Sub], SIGNATURES[.Neg] = sub, sub
 	// a string or a shape repeated a count of times (§4.6, specs/language/08)
-	@(static) mul := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .Count}, .String}, {{.Scope, .Count}, .Scope}}
-	@(static) div := []Signature{{{.Int, .Nonzero_Int}, .Int}, {{.Real, .Nonzero_Real}, .Real}}
-	@(static) modulo := []Signature{{{.Int, .Nonzero_Int}, .Int}}
-	@(static) power := []Signature{{{.Int, .Count}, .Int}, {{.Real, .Count}, .Real}}
-	@(static) shift := []Signature{{{.Int, .Int}, .Int}}
-	@(static) bits := []Signature{{{.Int, .Int}, .Int}, {{.Bool, .Bool}, .Bool}}
-	@(static) compare := []Signature{{{.Int, .Int}, .Bool}, {{.Real, .Real}, .Bool}, {{.Char, .Char}, .Bool}}
-	@(static) round := []Signature{{{.Real, .Int}, .Real}}
-	#partial switch op {
-	case .Round:
-		return round
-	case .Add:
-		return add
-	case .Sub, .Neg:
-		return sub
-	case .Mul:
-		return mul
-	case .Div:
-		return div
-	case .Mod:
-		return modulo
-	case .Pow:
-		return power
-	case .Shl, .Shr:
-		return shift
-	case .Bit_And, .Bit_Or, .Xor, .Bit_Not:
-		return bits
-	case .Less, .Less_Eq, .Greater, .Greater_Eq:
-		return compare
-	}
-	return nil
+	SIGNATURES[.Mul] = slice.clone([]Signature{all(.Int, .Int, .Int), all(.Real, .Real, .Real), part(.String, .Int, COUNTS, .String), part(.Value, .Int, COUNTS, .Value)})
+	SIGNATURES[.Div] = slice.clone([]Signature{part(.Int, .Int, NONZERO_INT, .Int), part(.Real, .Real, NONZERO_REAL, .Real)})
+	SIGNATURES[.Mod] = slice.clone([]Signature{part(.Int, .Int, NONZERO_INT, .Int)})
+	SIGNATURES[.Pow] = slice.clone([]Signature{part(.Int, .Int, COUNTS, .Int), part(.Real, .Int, COUNTS, .Real)})
+	SIGNATURES[.Shl] = slice.clone([]Signature{all(.Int, .Int, .Int)})
+	SIGNATURES[.Shr] = SIGNATURES[.Shl]
+	for op in ([]Operator{.Bit_And, .Bit_Or, .Xor, .Bit_Not}) do SIGNATURES[op] = bits
+	for op in ([]Operator{.Less, .Less_Eq, .Greater, .Greater_Eq}) do SIGNATURES[op] = compare
+	SIGNATURES[.Round] = slice.clone([]Signature{all(.Real, .Int, .Real)})
+}
+
+signatures :: proc(op: Operator) -> []Signature {
+	return SIGNATURES[op]
 }
 
 // family_of: the family of an atom, by its form: a primitive, an unknown whose
@@ -105,7 +95,7 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 	case Bool:
 		return .Bool, true
 	case ^Scope:
-		return .Scope, true
+		return .Value, true
 	case ^Unknown:
 		if v.call != nil do return base_family(k, v.call)
 		// what its layout may hold, when that layout reads other unknowns; its layout
@@ -166,9 +156,9 @@ operation_family :: proc(k: ^Kernel, v: ^Operation) -> (Family, bool) {
 	t := Type(v)
 	#partial switch v.op {
 	case .Length:
-		return .Count, true
+		return .Int, true
 	case .From, .Put:
-		return .Scope, true
+		return .Value, true
 	case .Item:
 		if set, known := values(k, v); known do if f, one := layout_family(k, set); one do return f, true
 		if c, read := call_read(v); read do return base_family(k, c, read_of(v))
@@ -186,30 +176,19 @@ operation_family :: proc(k: ^Kernel, v: ^Operation) -> (Family, bool) {
 			return {}, false
 		}
 	}
-	// the operation was proven legal when it was built: its operands are read in
-	// the families the signature restricts (a divisor, a count, in the integers)
+	// the operation was proven legal when it was built: its operands are read in the
+	// families of its signature
 	next: for sig in signatures(v.op) {
-		for f, i in families[:min(len(v.args), 2)] do if g, known := f.?; known && !family_holds(domain(sig.args[i]), g) do continue next
+		for f, i in families[:min(len(v.args), 2)] do if g, known := f.?; known && !family_holds(sig.args[i], g) do continue next
 		return sig.result, true
 	}
 	return {}, false
 }
 
-// domain: the family a restricted one is taken in.
-domain :: proc(f: Family) -> Family {
-	#partial switch f {
-	case .Nonzero_Int, .Count:
-		return .Int
-	case .Nonzero_Real:
-		return .Real
-	}
-	return f
-}
-
-// family_holds: an atom of the family `of` is in the family `f` without more proof.
+// family_holds: an element of the family `of` is in the family `f`: the same, or a
+// character in the strings.
 family_holds :: proc(f, of: Family) -> bool {
-	// a count is an integer, a character a string
-	return f == of || f == domain(of) || (f == .String && of == .Char)
+	return f == of || (f == .String && of == .Char)
 }
 
 // layout_family: the one family the elements of a layout are in, read from its form:
@@ -229,34 +208,17 @@ layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
 	family: Family
 	found := false
 	for c in cells {
-		f, known := cell_family_of(k, c)
-		if !known || found && f != family do return {}, false
+		f := cell_family(c)
+		// =t holds one value: of the family of t
+		if one, is_one := c.(^Is); is_one {
+			known: bool
+			f, known = family_of(k, one.term)
+			if !known do return {}, false
+		}
+		if f == .Other || found && f != family do return {}, false
 		family, found = f, true
 	}
 	return family, found
-}
-
-// cell_family_of: the family of the elements of one cell, by its form.
-cell_family_of :: proc(k: ^Kernel, c: Type) -> (Family, bool) {
-	#partial switch v in c {
-	case ^Scope:
-		return .Scope, true
-	case ^Is:
-		return family_of(k, v.term)
-	}
-	#partial switch cell_family(c) {
-	case .Int:
-		return .Int, true
-	case .Real:
-		return .Real, true
-	case .Char:
-		return .Char, true
-	case .Text:
-		return .String, true
-	case .Bool:
-		return .Bool, true
-	}
-	return {}, false
 }
 
 // legal_signature: the first signature whose families are proven to hold the
@@ -268,15 +230,15 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 		for a, i in args {
 			if is_pending_call(k, a) do continue
 			// the family of an operand is read from its form (family_of): 100 / (n + 1)
-			// is an integer, a pattern in that of its products. One the signature holds
-			// asks nothing more, one apart from it no proof gives; a part of it — a
-			// divisor, a count — is proven
-			asked := sig.args[min(i, 1)]
+			// is an integer, a pattern in that of its products. All of a family the
+			// signature holds asks nothing more, one apart from it no proof gives; a
+			// part of it — a divisor, a count, a character among strings — is proven
+			asked, within := sig.args[min(i, 1)], sig.within[min(i, 1)]
 			if f, known := family_of(k, a); known {
-				if family_holds(asked, f) do continue
-				if !family_holds(f, asked) do continue next
+				if family_holds(asked, f) && within == nil do continue
+				if !family_holds(asked, f) && !family_holds(f, asked) do continue next
 			}
-			if !proven_in(k, a, family_term(asked)) do continue next
+			if !proven_in(k, a, within != nil ? within : family_term(asked)) do continue next
 		}
 		return sig, true
 	}
@@ -373,7 +335,7 @@ family_pieces :: proc(k: ^Kernel, t: Type) -> []Type {
 	one: [1]Type
 	cells, negated := cells_in(set, &one)
 	if negated || len(cells) < 2 do return clone_types({t})
-	by := make(map[Cell_Family][dynamic]Type)
+	by := make(map[Family][dynamic]Type)
 	for c in cells {
 		f := cell_family(c)
 		if f not_in by do by[f] = make([dynamic]Type)
@@ -554,7 +516,7 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (resu
 	return nil, false
 }
 
-all_of_family :: proc(cells: []Type, f: Cell_Family) -> bool {
+all_of_family :: proc(cells: []Type, f: Family) -> bool {
 	for c in cells do if cell_family(c) != f do return false
 	return true
 }

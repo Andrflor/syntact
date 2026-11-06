@@ -533,6 +533,7 @@ init_constants :: proc "contextless" () {
 	EVERY_SCOPE = new_scope(nil, {})
 	new_binding(EVERY_SCOPE, .Expand, {})
 	EVERY_SCOPE.source, EVERY_SCOPE.complete, EVERY_SCOPE.reached = EVERY_SCOPE, true, true
+	init_signatures() // they ask the constants (arith.odin)
 }
 
 constants :: proc() -> [12]Type {

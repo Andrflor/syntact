@@ -43,7 +43,7 @@ round_law :: proc(k: ^Kernel, t: Type, f: Real_Format, span: syn.Span) -> Type {
 		if v.op == .Round && holds_all(f, rounded_format(v)) do return t
 	}
 	if is_constant(t) do return round_set(k, t, f)
-	if family, known := family_of(k, t); !known || family != .Real && family != .Nonzero_Real do return t
+	if family, known := family_of(k, t); !known || family != .Real do return t
 	if proven_in(k, t, real_cell({format = f})) do return t
 	return new_operation(.Round, t, Int(FORMATS[f].bits))
 }

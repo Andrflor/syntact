@@ -24,17 +24,8 @@ import "core:slice"
 //                                                  whose bounds may be open
 // and, by De Morgan, ~a & ~b = ~(a | b), a | ~b = ~(b & ~a), ~~a = a.
 
-Cell_Family :: enum u8 {
-	Int,
-	Real,
-	Char,
-	Text,
-	Bool,
-	Value,
-	Other,
-}
-
-cell_family :: proc(t: Type) -> Cell_Family {
+// cell_family: the family of a cell, by its form (Family, arith.odin).
+cell_family :: proc(t: Type) -> Family {
 	#partial switch v in t {
 	case Int:
 		return .Int
@@ -56,17 +47,17 @@ cell_family :: proc(t: Type) -> Cell_Family {
 	case ^Scope, ^Is:
 		return .Value
 	case ^And:
-		families: bit_set[Cell_Family]
+		families: bit_set[Family]
 		for x in v.terms do families += {cell_family(x)}
 		// a real cell with open bounds: its range, and the ~ of each open bound
 		if _, ok := v.terms[0].(^Range); ok && families == {.Real} && negates_points(v.terms[1:]) do return .Real
 		if .Value in families do return .Value
-		if families <= {.Text, .Char} do return .Text
+		if families <= {.String, .Char} do return .String
 		return .Other
 	case ^Not:
 		return cell_family(v.term)
 	case ^Operation:
-		if is_text(t) do return .Text
+		if is_text(t) do return .String
 	}
 	return .Other
 }
@@ -258,16 +249,16 @@ union_cells :: proc(k: ^Kernel, cells: []Type) -> []Type {
 	for c in cells do if !is_none(c) do push(k, c)
 	given := pushed(k, from)
 	slice.stable_sort_by(given, proc(a, b: Type) -> bool {return cell_family(a) < cell_family(b)})
-	by: [Cell_Family][]Type
+	by: [Family][]Type
 	at := 0
-	for f in Cell_Family {
+	for f in Family {
 		end := at
 		for end < len(given) && cell_family(given[end]) == f do end += 1
 		by[f], at = given[at:end], end
 	}
 	ints := join_discrete(k, .Int, by[.Int])
 	reals := join_reals(k, by[.Real])
-	texts := unique_cells(k, by[.Text])
+	texts := unique_cells(k, by[.String])
 	// a set of strings in another one is absorbed
 	kept_from := mark(k)
 	for t, i in texts {
@@ -467,7 +458,7 @@ cuttable :: proc(c: Type) -> bool {
 	cells, _ := cells_in(c, &one)
 	for x in cells {
 		#partial switch cell_family(x) {
-		case .Int, .Real, .Char, .Text, .Bool:
+		case .Int, .Real, .Char, .String, .Bool:
 		case:
 			return false
 		}
@@ -541,7 +532,7 @@ meet_cells :: proc(k: ^Kernel, a, b: []Type) -> []Type {
 
 meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 	fx, fy := cell_family(x), cell_family(y)
-	if fx == .Text && fy == .Char do return meet_cell(k, y, x)
+	if fx == .String && fy == .Char do return meet_cell(k, y, x)
 	if fy == .Other && fx != .Other do return meet_cell(k, y, x)
 	switch {
 	case fx == fy && (fx == .Int || fx == .Char):
@@ -552,9 +543,9 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 		return cell(k, real_cell(real_meet(real_bounds(x), real_bounds(y))))
 	case fx == fy && fx == .Bool:
 		return same(k, x, y) ? cell(k, x) : nil
-	case fx == fy && fx == .Text:
+	case fx == fy && fx == .String:
 		return text_meet(k, x, y)
-	case fx == .Char && fy == .Text:
+	case fx == .Char && fy == .String:
 		return chars_in_text(k, x, y, true)
 	case fx == fy && fx == .Value:
 		if same(k, x, y) do return cell(k, x)
@@ -572,7 +563,7 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 		return cell(k, new_and(x, y))
 	case fx == .Other:
 		if same(k, x, y) do return cell(k, x)
-		if fy == .Text || fy == .Char || fy == .Bool || fy == .Value do return nil // a number is none of them
+		if fy == .String || fy == .Char || fy == .Bool || fy == .Value do return nil // a number is none of them
 		if fy == .Int {
 			// the least and greatest elements of x: nothing between them in y, nothing in common
 			if lo, hi, bounded := int_bounds(k, x); bounded {
@@ -609,7 +600,7 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 		}
 		if f == .Char {
 			for y in u {
-				if cell_family(y) != .Text do continue
+				if cell_family(y) != .String do continue
 				next := mark(k)
 				for p in pieces do _ = chars_in_text(k, p, y, false)
 				pieces = pushed(k, next)
@@ -634,8 +625,8 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 		return sink(k,from, pieces)
 	case .Bool:
 		return cell(k, x)
-	case .Text:
-		for y in u do if g := cell_family(y); g == .Text || g == .Char do push(k, y)
+	case .String:
+		for y in u do if g := cell_family(y); g == .String || g == .Char do push(k, y)
 		ys := pushed(k, from)
 		if len(ys) == 0 do return cell(k, x)
 		removed := text_or(ys)
@@ -711,7 +702,7 @@ discrete_bounds :: proc(t: Type) -> (lo, hi: Maybe(i128)) {
 
 // discrete_cell: the integers, or characters, from lo to hi: one primitive, a
 // range, or none.
-discrete_cell :: proc(f: Cell_Family, lo, hi: Maybe(i128)) -> Type {
+discrete_cell :: proc(f: Family, lo, hi: Maybe(i128)) -> Type {
 	lo, hi := lo, hi
 	if f == .Char {
 		lo, hi = max_bound(lo, 0), min_bound(hi, MAX_RUNE)
@@ -727,7 +718,7 @@ discrete_cell :: proc(f: Cell_Family, lo, hi: Maybe(i128)) -> Type {
 }
 
 // join_discrete: a..b | c..d = min(a, c)..max(b, d) when they meet or touch.
-join_discrete :: proc(k: ^Kernel, f: Cell_Family, cells: []Type) -> []Type {
+join_discrete :: proc(k: ^Kernel, f: Family, cells: []Type) -> []Type {
 	from := mark(k)
 	push_all(k, cells)
 	sorted := pushed(k, from)
@@ -754,7 +745,7 @@ join_discrete :: proc(k: ^Kernel, f: Cell_Family, cells: []Type) -> []Type {
 
 // discrete_minus: a..b & ~(c..d) = a..(c - 1) | (d + 1)..b. A piece beyond the
 // integers written here is not computed: a & ~b stays.
-discrete_minus :: proc(k: ^Kernel, f: Cell_Family, x, y: Type) -> []Type {
+discrete_minus :: proc(k: ^Kernel, f: Family, x, y: Type) -> []Type {
 	lo_x, hi_x := discrete_bounds(x)
 	lo_y, hi_y := discrete_bounds(y)
 	if is_none(discrete_cell(f, max_bound(lo_x, lo_y), min_bound(hi_x, hi_y))) do return cell(k, x)
@@ -1318,7 +1309,7 @@ inhabited :: proc(k: ^Kernel, t: Type) -> bool {
 	if negated do return true
 	for c in cells {
 		switch cell_family(c) {
-		case .Int, .Real, .Char, .Text, .Bool:
+		case .Int, .Real, .Char, .String, .Bool:
 			return true
 		case .Value:
 			if _, ok := c.(^Is); ok do return true

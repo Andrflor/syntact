@@ -569,7 +569,7 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 				f.index.layout = COUNTS
 				f.start, f.next, f.stop = Int(0), op(k, .Add, f.index, Int(1)), new_range(v.args[1], nil, .Int)
 				z := new_unknown(k, nil)
-				z.layout = family_term(.Scope)
+				z.layout = family_term(.Value)
 				f.states, f.inits = slice.clone([]^Unknown{z}), slice.clone([]Type{Type(run_scope(k, nil))})
 				item := run_scope(k, nil)
 				d := new_binding(item, .Push, span)
@@ -607,7 +607,7 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 		case .Char:
 			lo, _ := discrete_bounds(cell)
 			return Char(rune(lo.? or_else 0))
-		case .Text:
+		case .String:
 			w, _ := text_witness(cell)
 			return string_value(w)
 		case .Bool:

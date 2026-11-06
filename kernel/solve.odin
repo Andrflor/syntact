@@ -265,7 +265,7 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 		} else if prefix, suffix, runs := run_affine(k, step, y); runs {
 			// {...P ...y ...Q}: the runs compose, {...A ...base ...B} where it stops
 			a, b := new_unknown(k, nil), new_unknown(k, nil)
-			a.layout, b.layout = family_term(.Scope), family_term(.Scope)
+			a.layout, b.layout = family_term(.Value), family_term(.Value)
 			append(&states, a, b)
 			append(&inits, joined(k, nil), joined(k, nil))
 			append(&updates, joined(k, {a}, prefix, along), joined(k, nil, suffix, along, {b}))

@@ -52,11 +52,11 @@ gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
 		c, is_call := as_call(t)
 		if !is_call do return false, false
 		f, known := base_family(k, c)
-		return known && f == .Scope, true
+		return known && f == .Value, true
 	}
 	if holds, is_call := scopes(k, v); is_call do return holds
 	if c, read := call_read(v); read {
-		if f, known := base_family(k, c, read_of(v)); known && f == .Scope do return true
+		if f, known := base_family(k, c, read_of(v)); known && f == .Value do return true
 	}
 	set, ok := values(k, v)
 	if !ok do return false
