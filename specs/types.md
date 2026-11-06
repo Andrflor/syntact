@@ -577,9 +577,11 @@ round_f(round_g(t))    = round_g(t)                       f holds every value of
 round(εₖ(x, t))        = εₖ(x, round(t))
 round(t ? {c -> p …})  = t ? {c -> round(p) …}
 round of a set         = the values of the format between its rounded least and
-                         greatest; ~none when the set has no bound, or one beyond
-                         the greatest value: ±∞ is not a real, so nothing is proven
-                         of it
+                         greatest; ~none when the set has no bound, or one that
+                         rounds beyond the greatest value: ±∞ is not a real, so
+                         nothing is proven of it. A value of a format lies within
+                         its greatest value and its opposite: f32 + f32 does not
+                         round into f32
 ```
 
 ```text

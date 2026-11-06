@@ -498,6 +498,10 @@ FORMAT_CASES := []Spec_Case {
 	{"a -> ??::f32\nx -> -a", "-?0", {}}, // a value of the format: nothing to round
 	{"a -> ??::(f32 & 0.0..1.0)\nf32:x -> a * 0.5", "round32(0.5 * ?0)", {}}, // a subnormal halved is no f32
 	{"a -> ??::f32\nf32:x -> a * a", "", {.Constraint_Mismatch}}, // it may go beyond the greatest f32
+	// a value of a format lies within its extremes: what rounds within them is in it
+	{"a -> ??::f32\nf32:x -> a + a", "", {.Constraint_Mismatch}},
+	{`f16:x -> 65519.0`, "65504.0", {}},
+	{`f16:x -> 65520.0`, "", {.Constraint_Mismatch}}, // a tie: the even one is beyond
 	{"a -> ??::f32\nf64:x -> a", "?0", {}},
 	{"a -> ??::f32\nf16:x -> a", "", {.Constraint_Mismatch}},
 }

@@ -311,7 +311,7 @@ real_count :: proc(b: Real_Bounds) -> Count {
 	if x, has := b.hi.?; has {
 		down, ok := round_real(x, b.format, .Down)
 		if ok do hi = min(hi, format_ordinal(down, b.format) - (b.hi_open && down == x ? 1 : 0))
-		else if real_less(x, Real{0, 1}) do return Type(Int(0)) // below the least value
+		else if real_less(x, real_int(0)) do return Type(Int(0)) // below the least value
 	}
 	if hi < lo do return Type(Int(0))
 	return Type(Int(hi - lo + 1))
@@ -329,7 +329,7 @@ greatest_ordinal :: proc(f: Real_Format) -> i128 {
 // format_ordinal: the place of r, a value of the format f, among its values in
 // order, 0 at 0: consecutive values have consecutive places, as their encodings do.
 format_ordinal :: proc(r: Real, f: Real_Format) -> i128 {
-	if r.num < 0 do return -format_ordinal(Real{-r.num, r.den}, f)
+	if r.num < 0 do return -format_ordinal(Real{-r.num, r.den, r.exp}, f)
 	m, e, _ := dyadic(r)
 	if m == 0 do return 0
 	format := FORMATS[f]

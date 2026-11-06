@@ -773,7 +773,9 @@ discrete_minus_all :: proc(k: ^Kernel, x: Type, ys: []Type) -> []Type {
 
 // Real_Bounds: the bounds of a real cell, read on its term: nil is infinite; an
 // open bound is the `& ~p` of `>p` (§4.3). Its format: the reals between the bounds
-// it holds, every one or those of a floating-point format (real.odin).
+// it holds, every one or those of a floating-point format (real.odin). A format holds
+// no real beyond its greatest finite value: a cell of a format is bounded by its
+// extremes, written as no bound.
 Real_Bounds :: struct {
 	lo, hi:           Maybe(Real),
 	lo_open, hi_open: bool,
@@ -789,6 +791,11 @@ real_bounds :: proc(t: Type) -> Real_Bounds {
 		if x, ok := v.lo.(Real); ok do b.lo = x
 		if x, ok := v.hi.(Real); ok do b.hi = x
 		b.format = real_format(v.family)
+		if b.format != .Exact {
+			greatest, _ := greatest_finite(b.format)
+			if b.lo == nil do b.lo, _ = real_neg(greatest)
+			if b.hi == nil do b.hi = greatest
+		}
 	case ^And:
 		for x in v.terms do if _, ok := x.(^Range); ok do b = real_bounds(x)
 		for x in v.terms {
@@ -827,7 +834,7 @@ real_empty :: proc(b: Real_Bounds) -> bool {
 	} else {
 		greatest, computed := greatest_finite(b.format)
 		if !computed do return false
-		least = Real{-greatest.num, greatest.den}
+		least, _ = real_neg(greatest)
 	}
 	if !has_hi do return false
 	c := real_compare(least, hi)
@@ -841,12 +848,10 @@ beyond_format :: proc(r: Real, f: Real_Format) -> bool {
 }
 
 // greatest_finite: the greatest finite value of the format f: 2^precision - 1 at
-// the greatest exponent; false beyond the integers written here.
+// the greatest exponent.
 greatest_finite :: proc(f: Real_Format) -> (Real, bool) {
 	format := FORMATS[f]
-	if format.precision >= 127 do return {}, false
-	mantissa := Real{(i128(1) << uint(format.precision)) - 1, 1}
-	return scale_pow2(mantissa, format.max_exponent - format.precision + 1)
+	return real_scaled((i128(1) << uint(format.precision)) - 1, 1, format.max_exponent - format.precision + 1)
 }
 
 real_cell :: proc(b: Real_Bounds) -> Type {
@@ -854,6 +859,13 @@ real_cell :: proc(b: Real_Bounds) -> Type {
 	lo, has_lo := b.lo.?
 	hi, has_hi := b.hi.?
 	if has_lo && has_hi && lo == hi do return lo
+	if b.format != .Exact {
+		// the extremes of a format are written as no bound
+		greatest, _ := greatest_finite(b.format)
+		least, _ := real_neg(greatest)
+		if has_lo && !b.lo_open && lo == least do has_lo = false
+		if has_hi && !b.hi_open && hi == greatest do has_hi = false
+	}
 	r := new_range(has_lo ? Type(lo) : nil, has_hi ? Type(hi) : nil, format_family(b.format))
 	terms := make([dynamic]Type)
 	append(&terms, r)
