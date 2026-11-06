@@ -1596,7 +1596,7 @@ item_image :: proc(k: ^Kernel, layout: Type) -> (c: Type, ok: bool) {
 			}
 			append(&items, hole_items(k, p) or_return)
 		}
-		if len(items) == 0 do return
+		// a shape that places nothing, {}: its items are none
 		return or_law(k, items[:]), true
 	}
 	return
@@ -1608,8 +1608,6 @@ hole_items :: proc(k: ^Kernel, p: ^Binding) -> (c: Type, ok: bool) {
 	if p.color == nil do return
 	color := binding_color(k, p)
 	if !is_run(p) do return color, true
-	// a run of the empty shape places nothing
-	if empty, is_scope := color.(^Scope); is_scope && is_shape(k, empty) && len(placed(k, empty, .Shape)) == 0 do return None{}, true
 	return item_image(k, color)
 }
 
@@ -1650,7 +1648,6 @@ produced_items :: proc(k: ^Kernel, s: ^Scope) -> (c: Type, ok: bool) {
 			append(&items, item_image(k, values(k, given(k, v)) or_return) or_return)
 		}
 	}
-	if len(items) == 0 do return
 	return or_law(k, items[:]), true
 }
 

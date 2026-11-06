@@ -70,15 +70,6 @@ layout_of_set :: proc(l: ^Lowering, written: kernel.Type, of: kernel.Type = nil)
 	if s, is_scope := set.(^kernel.Scope); is_scope && kernel.recursive(s) {
 		if tree, laid := tree_layout(l, s); laid do return tree, true
 	}
-	// the run of no binding is a value of every run, held as any: a union with it
-	// is held as the run its other terms are
-	if any, either := set.(^kernel.Or); either {
-		rest := make([dynamic]kernel.Type)
-		for t in any.terms do if !empty_run(l, t) do append(&rest, t)
-		if len(rest) > 0 && len(rest) < len(any.terms) {
-			if run, laid := layout_of_set(l, kernel.or_law(l.k, rest[:]), of); laid && run.kind == .Run do return run, true
-		}
-	}
 	if item, has := kernel.item_image(l.k, set); has {
 		// a run of a length known is held as its bindings, in values: the length
 		// its set admits, or that of the term — a call's, by the recursion of its
@@ -91,12 +82,6 @@ layout_of_set :: proc(l: ^Lowering, written: kernel.Type, of: kernel.Type = nil)
 		return new_clone(Layout{kind = .Run, item = inner, size = PAIR_BYTES, align = 8}), true
 	}
 	return
-}
-
-// empty_run: t is {}, the run of no binding.
-empty_run :: proc(l: ^Lowering, t: kernel.Type) -> bool {
-	s, is_scope := t.(^kernel.Scope)
-	return is_scope && kernel.is_shape(l.k, s) && len(kernel.placed(l.k, s, .Shape)) == 0
 }
 
 // tree_layout: a recursive scope whose productions are shapes of fields, as a
