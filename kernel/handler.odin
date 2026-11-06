@@ -188,11 +188,7 @@ written_in :: proc(x, s: ^Scope) -> bool {
 answer :: proc(k: ^Kernel, e: ^Effect, h: ^Binding, then: Type, s: ^Scope, bound: ^[]Type) -> Type {
 	if slice.contains(k.answering[:], h) do return problem(.Infinite_Recursion, h.span, "this handler answers itself again")
 	append(&k.answering, h)
-	given_toggled(k, .Answering, h)
-	defer {
-		pop(&k.answering)
-		given_toggled(k, .Answering, h)
-	}
+	defer pop(&k.answering)
 	scope, is_scope := binding_type(k, h).(^Scope)
 	if !is_scope do return binding_type(k, h)
 	// the first binding of a handler is what is sent (build_handler)

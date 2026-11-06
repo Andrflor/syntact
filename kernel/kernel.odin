@@ -45,7 +45,7 @@ Kernel :: struct {
 	images:     [dynamic]Image, // the bounds of the calls of an equation, given once (recursion.odin)
 	induced:    [dynamic]Induced, // whether the calls of an equation are in a set, proven once (in.odin)
 	fields:     [dynamic]Field, // the colors of the fields of the scope of an equation, read once (rewrite.odin)
-	plain:      map[rawptr]Plain, // what is known of a term over plain unknowns, once (rewrite.odin)
+	plain:      map[^Operation]Plain, // what is known of an operation over plain unknowns, once (rewrite.odin)
 	read:       map[Read_Key]bool, // whether a node reads an unknown, once asked (rewrite.odin)
 	valued:     map[rawptr]Type, // what a shared node may hold, once read (size.odin)
 	generics:   [dynamic]Generic, // the solutions of equations where what is given is unknown, once (recursion.odin)
@@ -55,60 +55,6 @@ Kernel :: struct {
 	root:       ^Scope, // the file
 	scratch:    [dynamic]Type, // what the laws gather, in an arena of its own (scratch.odin)
 	interned:   ^Interned, // its shared terms (intern.odin)
-	// what is being given — the bindings asked, the equations read, the bounds and
-	// proofs under way: the hypotheses (§5.6) —, each one's mark toggled in and out
-	// of it (given_toggled)
-	state:      u64,
-	// the same, by what each mark is about: an equation, by its scope; a binding; what
-	// concerns no term it is apart
-	marks:      map[rawptr]u64,
-	apart:      u64,
-	anchors:    map[rawptr][]rawptr, // what the image of a term holding calls depends on, once (rewrite.odin)
-	images_in:  map[Image_Key]Image_Known, // the image of a term holding calls, in a state (rewrite.odin)
-	readings:   map[Reading_Key]^Unknown, // the unknown that reads a quotient, a remainder, x [&] m, one for each node (rewrite.odin)
-	rewrites:   map[Rewrite_Key]Type, // the operations rewritten within the rewrite under way (rewrite.odin)
-	rewriting:  int, // the rewrites of operations under way
-}
-
-Given_Kind :: enum u64 {
-	Binding, // a binding being given
-	Read, // an equation read
-	Deriving, // an equation being derived
-	Bounds, // the bounds of a call being given
-	Proof, // an induction under way
-	Answering, // a handler answering
-	Summed, // an equation of sums being made
-	Tupled, // an equation of tuples being made
-}
-
-// given_toggled: what is being given gains, or loses, item: what the laws answer
-// may differ (§5.6: a call whose equation is read is the hypothesis). The state is
-// the sum, without carry, of the marks of what is given: the same hypotheses, the
-// same state.
-given_toggled :: proc(k: ^Kernel, kind: Given_Kind, item: rawptr, at := 0) {
-	// what the mark is about: the scope of an equation, a binding, or no term
-	about: rawptr
-	#partial switch kind {
-	case .Binding:
-		about = item
-	case .Read, .Deriving, .Bounds, .Proof:
-		about = origin((^Call_Equation)(item).root)
-	}
-	x := u64(uintptr(item)) ~ (u64(kind) << 58) ~ (u64(at) * 0x9e3779b97f4a7c15)
-	// splitmix64
-	x = (x ~ (x >> 30)) * 0xbf58476d1ce4e5b9
-	x = (x ~ (x >> 27)) * 0x94d049bb133111eb
-	x ~= x >> 31
-	k.state ~= x
-	if about == nil do k.apart ~= x
-	else do k.marks[about] ~= x
-}
-
-// read_equation: eq read, or no longer, at the values of a call (§5.6).
-read_equation :: proc(k: ^Kernel, eq: ^Call_Equation, read: bool) {
-	if eq.read == read do return
-	eq.read = read
-	given_toggled(k, .Read, eq)
 }
 
 // report: an error, once. What it concerns becomes Invalid, which stays silent.

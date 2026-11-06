@@ -2,7 +2,7 @@ package kernel
 
 import "core:slice"
 
-// THE RING OF INTEGERS AND THE FIELD OF REALS (specs/types.md §4.5)
+// THE RING OF INTEGERS (specs/types.md §4.5)
 //
 // On integers over unknowns, + and * are associative and commutative, * distributes
 // over +, 0 and 1 are neutral, -a is the opposite of a, (k * a) / k = a. Oriented,
@@ -12,26 +12,18 @@ import "core:slice"
 //
 //   ?1 - ?1 = 0      ?1 + ?1 = 2 * ?1      ?0 * (?0 + 1) / 2 = (?0 + ?0 * ?0) / 2
 //
-// The reals are a field: the same laws, and (a / b) * b = a. A real coefficient is
-// a quotient of integers (real.odin), so a real term is read as the same sum of
-// monomials over a divisor, and written back with each coefficient divided by it,
-// a real; a division by a real constant is the product by its inverse:
-//
-//   ?1 + 0.0 = ?1      ?1 * 2.0 - ?1 = ?1      ?1 / 4.0 = 0.25 * ?1
-//
-// `field` says which: the constants of an integer term are integers, those of a
-// real term reals. A coefficient beyond the integers written here is not
-// computed: the law does not apply, and the term stays.
+// A coefficient beyond the integers written here is not computed: the law does not
+// apply, and the term stays.
 
 // atom_ring: the ring law over atoms: a term the ring does not read — a fold, a
 // μ, a series, a power, a pattern — is a variable of the polynomial, named while
 // the law applies, then put back as it is.
-atom_ring :: proc(k: ^Kernel, op: Operator, args: []Type, field := false) -> (out: Type, ok: bool) {
+atom_ring :: proc(k: ^Kernel, op: Operator, args: []Type) -> (out: Type, ok: bool) {
 	back: Rewrite
 	named := make([]Type, len(args))
-	for a, i in args do named[i] = atomized(k, a, &back, field)
+	for a, i in args do named[i] = atomized(k, a, &back)
 	if len(back) == 0 do return
-	r := ring_law(op, named, field) or_return
+	r := ring_law(op, named) or_return
 	return unatomized(r, back), true
 }
 
@@ -52,20 +44,11 @@ unatomized :: proc(t: Type, back: Rewrite) -> Type {
 }
 
 // monomials: an integer term as the monomials of its sum, over a divisor ≥ 1;
-// false when it is not a sum of products of integers and unknowns. In the field,
-// a real term likewise, its real constants read as integers over their
-// denominators.
-monomials :: proc(t: Type, field := false) -> (terms: []Type, divisor: i128, ok: bool) {
+// false when it is not a sum of products of integers and unknowns.
+monomials :: proc(t: Type) -> (terms: []Type, divisor: i128, ok: bool) {
 	#partial switch v in t {
-	case ^Unknown:
+	case Int, ^Unknown:
 		return slice.clone([]Type{t}), 1, true
-	case Int:
-		if !field do return slice.clone([]Type{t}), 1, true
-	case Real:
-		if field {
-			num, den := real_quotient(v) or_return
-			return slice.clone([]Type{Int(num)}), den, true
-		}
 	case ^Operation:
 		#partial switch v.op {
 		case .Add, .Sub:
@@ -73,7 +56,7 @@ monomials :: proc(t: Type, field := false) -> (terms: []Type, divisor: i128, ok:
 			out := make([dynamic]Type)
 			d: i128 = 1
 			for a, i in v.args {
-				ms, e := monomials(a, field) or_return
+				ms, e := monomials(a) or_return
 				if v.op == .Sub && i > 0 do ms = scale(ms, -1) or_return
 				l := mul_checked(d / gcd(d, e), e) or_return
 				left := scale(out[:], l / d) or_return
@@ -86,31 +69,22 @@ monomials :: proc(t: Type, field := false) -> (terms: []Type, divisor: i128, ok:
 			collected := collect(out[:]) or_return
 			return collected, d, true
 		case .Neg:
-			ms, d := monomials(v.args[0], field) or_return
+			ms, d := monomials(v.args[0]) or_return
 			neg := scale(ms, -1) or_return
 			return neg, d, true
 		case .Mul:
 			out := slice.clone([]Type{Int(1)})
 			d: i128 = 1
 			for a in v.args {
-				ms, e := monomials(a, field) or_return
+				ms, e := monomials(a) or_return
 				out = times(out, ms) or_return
 				d = mul_checked(d, e) or_return
 			}
 			return out, d, true
 		case .Div:
-			ms, d := monomials(v.args[0], field) or_return
-			if field {
-				// a / (n / m) = (a * m) / n
-				c, constant := v.args[1].(Real)
-				if !constant || c.num == 0 do return
-				num, den := real_quotient(c) or_return
-				over := scale(ms, num < 0 ? -den : den) or_return
-				e := mul_checked(d, abs(num)) or_return
-				return over, e, true
-			}
 			// (k * a) / k = a: a division the ring reads is exact — the polynomial over
 			// the divisor takes integer values; otherwise / rounds, and stays an atom
+			ms, d := monomials(v.args[0]) or_return
 			c, constant := v.args[1].(Int)
 			if !constant || c <= 0 do return
 			e := mul_checked(d, i128(c)) or_return
@@ -269,30 +243,22 @@ gcd :: proc(a, b: i128) -> i128 {
 }
 
 // ring_term: the normal form of monomials over a divisor: the divisor and the
-// coefficients divided by their gcd; each monomial added, or subtracted. In the
-// field, each coefficient is the real it makes over the divisor.
-ring_term :: proc(ms: []Type, divisor: i128, field := false) -> (t: Type, ok: bool) {
+// coefficients divided by their gcd; each monomial added, or subtracted.
+ring_term :: proc(ms: []Type, divisor: i128) -> (t: Type, ok: bool) {
 	g := divisor
 	for m in ms do g = gcd(g, coefficient(m))
 	reduced := make([]Type, len(ms))
 	for m, i in ms do reduced[i] = monomial(coefficient(m) / g, factors(m))
 	terms := collect(reduced) or_return
 	d := divisor / g
-	if len(terms) == 0 do return field ? Type(real_int(0)) : Type(Int(0)), true
-	// c * u * v …, in the field c over the divisor
-	written :: proc(c, d: i128, us: []^Unknown, field: bool) -> (out: Type, ok: bool) {
-		if !field do return monomial(c, us), true
-		r := real_of(c, d) or_return
-		return real_monomial(r, us), true
-	}
+	if len(terms) == 0 do return Int(0), true
 	for m, i in terms {
 		c := coefficient(m)
 		if c == min(i128) do return nil, false
-		magnitude := written(abs(c), d, factors(m), field) or_return
+		magnitude := monomial(abs(c), factors(m))
 		switch {
 		case i == 0:
-			signed := written(c, d, factors(m), field) or_return
-			t = c < 0 && len(factors(m)) > 0 ? new_operation(.Neg, magnitude) : signed
+			t = c < 0 && len(factors(m)) > 0 ? new_operation(.Neg, magnitude) : m
 		case c < 0:
 			t = new_operation(.Sub, t, magnitude)
 		case:
@@ -301,30 +267,22 @@ ring_term :: proc(ms: []Type, divisor: i128, field := false) -> (t: Type, ok: bo
 	}
 	// over a divisor, the ring divides exactly: what it reads divides so, and its
 	// laws keep it so
-	if d != 1 && !field {
+	if d != 1 {
 		t = new_operation(.Div, t, Int(d))
 		t.(^Operation).exact = true
 	}
 	return t, true
 }
 
-// real_monomial: c * u * v … with a real coefficient; 1.0 * u is u.
-real_monomial :: proc(c: Real, us: []^Unknown) -> Type {
-	parts := make([dynamic]Type)
-	if c != real_int(1) || len(us) == 0 do append(&parts, c)
-	for u in us do append(&parts, u)
-	return len(parts) == 1 ? parts[0] : new_operation(.Mul, ..parts[:])
-}
-
 // ring_law: + - * neg [~], and a division by a constant that divides exactly;
 // false when an operand is not a sum of products, or a coefficient is beyond the
-// integers written here. In the field, + - * neg and a division by a real constant.
-ring_law :: proc(op: Operator, args: []Type, field := false) -> (t: Type, ok: bool) {
-	a, d := monomials(args[0], field) or_return
+// integers written here.
+ring_law :: proc(op: Operator, args: []Type) -> (t: Type, ok: bool) {
+	a, d := monomials(args[0]) or_return
 	#partial switch op {
 	case .Neg:
 		neg := scale(a, -1) or_return
-		return ring_term(neg, d, field)
+		return ring_term(neg, d)
 	case .Bit_Not:
 		// [~]a = -a - 1
 		neg := scale(a, -1) or_return
@@ -332,7 +290,7 @@ ring_law :: proc(op: Operator, args: []Type, field := false) -> (t: Type, ok: bo
 		all := collect(append_all(neg, minus_one)) or_return
 		return ring_term(all, d)
 	}
-	b, e := monomials(args[1], field) or_return
+	b, e := monomials(args[1]) or_return
 	#partial switch op {
 	case .Add, .Sub:
 		if op == .Sub do b = scale(b, -1) or_return
@@ -340,19 +298,12 @@ ring_law :: proc(op: Operator, args: []Type, field := false) -> (t: Type, ok: bo
 		left := scale(a, l / d) or_return
 		right := scale(b, l / e) or_return
 		all := collect(append_all(left, ..right)) or_return
-		return ring_term(all, l, field)
+		return ring_term(all, l)
 	case .Mul:
 		product := times(a, b) or_return
 		de := mul_checked(d, e) or_return
-		return ring_term(product, de, field)
+		return ring_term(product, de)
 	case .Div:
-		if field {
-			// a / (n / m) = a * (m / n)
-			c, constant := args[1].(Real)
-			if !constant || c.num == 0 do return
-			inverse := real_div(real_int(1), c) or_return
-			return ring_law(.Mul, {args[0], inverse}, true)
-		}
 		// (k * a) / k = a: every coefficient divisible by the constant
 		c, constant := args[1].(Int)
 		if !constant || c == 0 || d != 1 || e != 1 do return

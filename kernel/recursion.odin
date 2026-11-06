@@ -21,7 +21,7 @@ import "core:strings"
 // directly or in a carve (§5.6); a carve of it is recursive with it.
 recursive :: proc(s: ^Scope) -> bool {
 	root := origin(s)
-	seen: map[^Scope]bool // allocated when a production is read
+	seen := make(map[^Scope]bool)
 	for b in root.bindings do if b.kind == .Product && (names_scope(b.color, root, &seen) || names_scope(b.value, root, &seen)) do return true
 	return false
 }
@@ -29,65 +29,52 @@ recursive :: proc(s: ^Scope) -> bool {
 // names_scope: the term, as written, names the binding whose value is s. A scope
 // is read once: `.x` names the scope it is written in.
 names_scope :: proc(t: Type, s: ^Scope, seen: ^map[^Scope]bool) -> bool {
-	names :: proc(t: Type, data: rawptr) -> bool {
-		#partial switch v in t {
-		case ^Name:
-			value, ok := v.binding.value.(^Scope)
-			return ok && value == (^Scope)(data)
-		case ^Carve:
-			target, is_scope := v.target.(^Scope)
-			return is_scope && target == (^Scope)(data) // a carve of s itself
-		}
-		return false
-	}
-	return written_any(t, names, s, seen)
-}
-
-// written_any: test holds on a node of the term as written. A scope is read once.
-written_any :: proc(t: Type, test: proc(t: Type, data: rawptr) -> bool, data: rawptr, seen: ^map[^Scope]bool) -> bool {
 	if t == nil do return false
-	if test(t, data) do return true
 	switch v in t {
+	case ^Name:
+		value, ok := v.binding.value.(^Scope)
+		return ok && value == s
 	case ^Scope:
 		if v in seen do return false
 		seen[v] = true
-		for b in v.bindings do if written_any(b.color, test, data, seen) || written_any(b.value, test, data, seen) do return true
+		for b in v.bindings do if names_scope(b.color, s, seen) || names_scope(b.value, s, seen) do return true
 	case ^Operation:
-		for a in v.args do if written_any(a, test, data, seen) do return true
+		for a in v.args do if names_scope(a, s, seen) do return true
 	case ^Or:
-		for a in v.terms do if written_any(a, test, data, seen) do return true
+		for a in v.terms do if names_scope(a, s, seen) do return true
 	case ^And:
-		for a in v.terms do if written_any(a, test, data, seen) do return true
+		for a in v.terms do if names_scope(a, s, seen) do return true
 	case ^Effect:
-		return v.choice != nil && written_any(v.choice, test, data, seen) || written_any(v.then, test, data, seen)
+		return v.choice != nil && names_scope(v.choice, s, seen) || names_scope(v.then, s, seen)
 	case ^Not:
-		return written_any(v.term, test, data, seen)
+		return names_scope(v.term, s, seen)
 	case ^Is:
-		return written_any(v.term, test, data, seen)
+		return names_scope(v.term, s, seen)
 	case ^Range:
-		return written_any(v.lo, test, data, seen) || written_any(v.hi, test, data, seen)
+		return names_scope(v.lo, s, seen) || names_scope(v.hi, s, seen)
 	case ^Access:
-		return written_any(v.target, test, data, seen)
+		return names_scope(v.target, s, seen)
 	case ^Collapse:
-		return written_any(v.target, test, data, seen)
+		return names_scope(v.target, s, seen)
 	case ^Carve:
-		if written_any(v.target, test, data, seen) do return true
-		for a in v.args do if written_any(a.value, test, data, seen) || written_any(a.otherwise, test, data, seen) do return true
+		if target, is_scope := v.target.(^Scope); is_scope && target == s do return true // a carve of s itself
+		if names_scope(v.target, s, seen) do return true
+		for a in v.args do if names_scope(a.value, s, seen) || names_scope(a.otherwise, s, seen) do return true
 	case ^Default:
-		return written_any(v.color, test, data, seen)
+		return names_scope(v.color, s, seen)
 	case ^Pattern:
-		if written_any(v.target, test, data, seen) do return true
-		for b in v.branches do if written_any(b.cover, test, data, seen) || written_any(b.product, test, data, seen) do return true
+		if names_scope(v.target, s, seen) do return true
+		for b in v.branches do if names_scope(b.cover, s, seen) || names_scope(b.product, s, seen) do return true
 	case ^Fold:
-		for t in fold_parts(v) do if written_any(t, test, data, seen) do return true
+		for t in fold_parts(v) do if names_scope(t, s, seen) do return true
 	case ^Least:
-		return written_any(v.holds, test, data, seen)
+		return names_scope(v.holds, s, seen)
 	case ^Series:
-		return written_any(v.lo, test, data, seen) || written_any(v.hi, test, data, seen) || written_any(v.term, test, data, seen)
+		return names_scope(v.lo, s, seen) || names_scope(v.hi, s, seen) || names_scope(v.term, s, seen)
 	case ^Recurrent:
-		for t in v.initial do if written_any(t, test, data, seen) do return true
-		return written_any(v.at, test, data, seen)
-	case ^Name, Char, Int, Real, Bool, None, Invalid, ^Unknown:
+		for t in v.initial do if names_scope(t, s, seen) do return true
+		return names_scope(v.at, s, seen)
+	case Char, Int, Real, Bool, None, Invalid, ^Unknown:
 	}
 	return false
 }
@@ -128,7 +115,7 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	for _, v in s.changes do decides ||= is_constant(v)
 	if decides && s != root {
 		if v, eq, read := production_at(k, out); read {
-			read_equation(k, eq, false)
+			eq.read = false
 			if solved(v, root) do return v
 		}
 	}
@@ -195,9 +182,7 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 call_family :: proc(k: ^Kernel, c: ^Collapse, fields := Read{}) -> (Family, bool) {
 	s, ok := c.target.(^Scope)
 	if !ok || !c.recursive || reading(k, origin(s)) do return {}, false
-	// its equation read once, each family asked of it
-	eq, derived := equation_of(k, c)
-	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) do if equation_in(k, c, eq, derived, family_term(f), fields) do return f, true
+	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) do if call_in(k, c, family_term(f), fields) do return f, true
 	return {}, false
 }
 
@@ -323,33 +308,9 @@ solved_once :: proc(k: ^Kernel, eq: ^Call_Equation) -> (solution: Type, ok: bool
 }
 
 // substituted: a solution at the values r gives (§5.6), its bound unknowns its own —
-// renamed once their layouts have followed the values: those whose layouts read
-// what is given, and those a value holds. The others are the same in every copy and
-// none can be captured: the solution at the same values is the same term, read once.
+// renamed once their layouts have followed the values.
 substituted :: proc(k: ^Kernel, solution: Type, r: Rewrite) -> Type {
-	out := rewrite(k, solution, r)
-	bound := make([dynamic]^Unknown)
-	bound_unknowns(solution, &bound)
-	if len(bound) == 0 do return out
-	held := make([dynamic]^Unknown)
-	for x in r {
-		if x.term == nil do continue
-		read_unknowns(x.term, &held)
-		bound_unknowns(x.term, &held)
-	}
-	clashing := make([dynamic]^Unknown)
-	next: for u in bound {
-		if u.layout != nil && !is_constant(u.layout) {
-			append(&clashing, u)
-			continue
-		}
-		for h in held do if u.id == h.id {
-			append(&clashing, u)
-			continue next
-		}
-	}
-	if len(clashing) == 0 do return out
-	return renamed(k, out, clashing[:])
+	return renamed(k, rewrite(k, solution, r))
 }
 
 // at_values: each unknown of the equation at the value given to its binding, or at
@@ -376,10 +337,10 @@ production_at :: proc(k: ^Kernel, c: ^Collapse) -> (v: Type, eq: ^Call_Equation,
 	s, is_scope := c.target.(^Scope)
 	if !is_scope || !c.recursive || reading(k, origin(s)) do return
 	eq = equation_of(k, c) or_return
-	read_equation(k, eq, true)
+	eq.read = true
 	v = rewrite(k, eq.equation, at_values(k, eq, s.changes))
 	if holds_invalid(v) || has_effect(v) {
-		read_equation(k, eq, false)
+		eq.read = false
 		return nil, nil, false
 	}
 	return v, eq, true
@@ -397,18 +358,10 @@ Call_Equation :: struct {
 	params:   map[^Binding]Type,
 	derived:  bool, // read where what is carved is unknown; generic nil when it cannot be
 	read:     bool, // read at the values of a call (production_at, call_in)
-	// the unknowns of the fields its calls carve to another value (moved_fields)
-	moved:      []^Unknown,
-	all_moved:  bool,
-	moved_read: bool,
 }
 
 // call_equation: the equation of root a call carving the bindings given reads,
-// given sorted by address; through, those it gives a call of another equation;
-// values, what the call gives them — a binding given without one is an unknown of
-// its color. Each field is an unknown of its color narrowed to the bounds its calls
-// keep it in (field_bounds): the equation is one per root, bindings carved and
-// those bounds, read once, by every reader.
+// given sorted by address; through, those it gives a call of another equation.
 call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Through = nil) -> (eq: ^Call_Equation, ok: bool) {
 	for x in k.equations do if x.root == root && slice.equal(x.given, given) && slice.equal(x.through, through) do return x, x.generic != nil
 	// while it is read, its calls are the hypothesis: their equation is not read yet,
@@ -416,11 +369,7 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Th
 	eq = new(Call_Equation)
 	eq.root, eq.given, eq.through = root, slice.clone(given), slice.clone(through)
 	append(&k.equations, eq)
-	given_toggled(k, .Deriving, eq)
-	defer {
-		eq.derived = true
-		given_toggled(k, .Deriving, eq)
-	}
+	defer eq.derived = true
 	params := make(map[^Binding]Type)
 	for b in given do params[b] = nil
 	for {
@@ -433,11 +382,12 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Th
 			params[b] = nil
 			more = true
 		}
-		if more do continue
-		// read through another equation, a term of no type: not read so
-		if len(through) > 0 && holds_invalid(equation) do return
-		eq.generic, eq.equation, eq.params = generic, equation, params
-		return eq, true
+		if !more {
+			// read through another equation, a term of no type: not read so
+			if len(through) > 0 && holds_invalid(equation) do return
+			eq.generic, eq.equation, eq.params = generic, equation, params
+			return eq, true
+		}
 	}
 	return
 }
@@ -556,7 +506,7 @@ solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
 // (A, B) ∘ (α, β) = (A·α, B + A·β): the fold goes down, A·c + B where it stops.
 // What is left would keep the orbit, or what pre gives back: it stays.
 iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bool) {
-	p := joined_covers(k, value.(^Pattern) or_return)
+	p := value.(^Pattern) or_return
 	if len(p.branches) != 2 || p.branches[0].cover == nil || p.branches[1].cover != nil do return
 	u := p.target.(^Unknown) or_return
 	root := origin(s)
@@ -573,28 +523,15 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	family := family_of(k, given(k, c)) or_return
 	pre, calls, answer, after := at_calls(k, s, r) or_return
 	if answer == nil && skips(r, root) do return
-	step: Type
-	ahead: []int
-	carried: map[^Unknown]Type
-	ys: []^Unknown
-	if _, branched := r.(^Pattern); branched && answer == nil && len(calls) > 1 {
-		// a step that is a pattern takes one of its branches, each making one call:
-		// one call a step, carrying what its branch carves (§6)
-		y := new_unknown(k, nil)
-		y.layout = family_term(family)
-		step, carried, after = branch_calls(k, s, r, u, y) or_return
-		calls, ahead, ys = calls[:1], slice.clone([]int{1}), slice.clone([]^Unknown{y})
-	} else {
-		step, ahead, carried = orbit_step(k, s, calls, u) or_return
-		// what each call gives back
-		ys = make([]^Unknown, len(calls))
-		if answer != nil do ys[0] = answer
-		else {
-			for call, j in calls {
-				ys[j] = new_unknown(k, nil)
-				ys[j].layout = family_term(family)
-				after = rewrite(k, after, rewriting_call(nil, call, ys[j]))
-			}
+	step, ahead, carried := orbit_step(k, s, calls, u) or_return
+	// what each call gives back
+	ys := make([]^Unknown, len(calls))
+	if answer != nil do ys[0] = answer
+	else {
+		for call, j in calls {
+			ys[j] = new_unknown(k, nil)
+			ys[j].layout = family_term(family)
+			after = rewrite(k, after, rewriting_call(nil, call, ys[j]))
 		}
 	}
 	if !solved(after, root) do return
@@ -621,10 +558,6 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		ki, i = rewrite(k, ki, rewriting(nil, i, along)), along
 	}
 	at := proc(k: ^Kernel, ki: Type, i: ^Unknown, t: Type) -> Type {return rewrite(k, ki, rewriting(nil, i, t))}
-	// the points before n are out of B, kₙ in it: n the least i where kᵢ is in B.
-	// Solved, n says it through the range of i; a μ that stays, through the points
-	going, ending := ki, at(k, ki, i, n)
-	if _, unsolved := n.(^Least); unsolved do going, ending = and_law(k, {ki, not_law(k, stop)}), and_law(k, {ending, stop})
 	feeds := false
 	for e in pre do feeds ||= e.answer != nil && reads(k, after, e.answer)
 	// states carried by the call: the fold goes down
@@ -636,14 +569,13 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		f := new(Fold)
 		f.index, f.span = i, p.span
 		f.start, f.next, f.stop = op(k, .Sub, n, Int(1)), op(k, .Sub, i, Int(1)), new_range(nil, Int(-1), .Int)
-		inside := rewriting(nil, u, going)
+		inside := rewriting(nil, u, ki)
 		states := make([]^Unknown, d)
 		inits := make([]Type, d)
 		for &z, j in states {
 			z = new_unknown(k, nil)
 			z.layout = family_term(family)
-			// the base at kₙ, the point in B where the orbit stops
-			inits[j] = rewrite(k, c, rewriting(nil, u, j == 0 ? ending : at(k, ki, i, op(k, .Add, n, Int(j)))))
+			inits[j] = rewrite(k, c, rewriting(nil, u, at(k, ki, i, op(k, .Add, n, Int(j)))))
 		}
 		for y, j in ys do inside = rewriting(inside, y, states[ahead[j] - 1])
 		updates := make([]Type, d)
@@ -658,7 +590,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		down.index, down.span = new_unknown(k, nil), p.span
 		down.index.layout = i.layout
 		down.start, down.next, down.stop = Int(0), op(k, .Add, down.index, Int(1)), new_range(n, nil, .Int)
-		down.effects, down.value = rewrite(k, wrap_effects(pre, None{}), rewriting(nil, u, at(k, going, i, down.index))), None{}
+		down.effects, down.value = rewrite(k, wrap_effects(pre, None{}), rewriting(nil, u, at(k, ki, i, down.index))), None{}
 		return wrapped(folded(k, down).(^Effect), nil, up), true
 	}
 	// v = (α·y + β) % m, m > 0, all ≥ 0: affine modulo m, the maps compose modulo m
@@ -672,12 +604,10 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	if modulus != nil && affine && !(proven_in(k, alpha, COUNTS) && proven_in(k, beta, COUNTS)) do return
 	// v = {...P  ...y  ...Q}: affine in the runs, which compose likewise:
 	// (A, B) ∘ (P, Q) = ({...A ...P}, {...Q ...B})
+	prefix, suffix, joins := run_affine(k, v, ys[0])
+	if joins && modulus != nil do return
 	// v = y: A = 1 and B = 0 at every step, so the value is c
 	tail := affine && is_int(alpha, 1) && is_int(beta, 0)
-	prefix, suffix: []^Binding
-	joins := false
-	if !tail do prefix, suffix, joins = run_affine(k, v, ys[0])
-	if joins && modulus != nil do return
 	if len(calls) != 1 || len(post) > 0 || !affine && !joins || family != .Int && !tail && !joins do return
 	modded :: proc(k: ^Kernel, t, m: Type) -> Type {return m == nil ? t : op(k, .Mod, t, m)}
 	// going down: the states the call carries, and the composed map (A, B)
@@ -695,7 +625,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	along, at_end: Rewrite
 	if closed {
 		f.index, f.start, f.next, f.stop = i, Int(0), op(k, .Add, i, Int(1)), new_range(n, nil, .Int)
-		along, at_end = rewriting(carry, u, going), rewriting(carry, u, ending)
+		along, at_end = rewriting(carry, u, ki), rewriting(carry, u, at(k, ki, i, n))
 	} else {
 		f.index, f.start, f.next, f.stop = x, u, rewrite(k, step, rewriting(nil, u, x)), stop
 		along, at_end = rewriting(carry, u, x), rewriting(carry, u, narrowing(x, and_law(k, {layout_of(k, u), stop})))
@@ -734,123 +664,9 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	return folded(k, f), true
 }
 
-// joined_covers: a pattern whose branches but the last have covers, the last
-// none: those covered joined into one, the union of their covers, its product the
-// pattern of their products — the last of them taking what the others leave —, so
-// that t ? {c₀ -> p₀ … cₙ -> pₙ  -> b} = t ? {c₀ | … | cₙ -> t ? {c₀ -> p₀ … -> pₙ}  -> b}
-// (§6).
-joined_covers :: proc(k: ^Kernel, p: ^Pattern) -> ^Pattern {
-	n := len(p.branches)
-	if n < 3 || p.branches[n - 1].cover != nil do return p
-	covers := make([]Type, n - 1)
-	for b, i in p.branches[:n - 1] {
-		if b.cover == nil do return p
-		covers[i] = b.cover
-	}
-	inner := make([]Branch, n - 1)
-	copy(inner, p.branches[:n - 1])
-	inner[n - 2].cover = nil
-	branches := make([]Branch, 2)
-	branches[0] = with_product(p.branches[0], branching(p, inner))
-	branches[0].cover = or_law(k, covers)
-	branches[1] = p.branches[n - 1]
-	return branching(p, branches)
-}
-
-// leaves: the products of t, a pattern without effects one of its products, each
-// read in its branch, where its reach holds (§6), in the order of its branches; a
-// branch no value reaches is a product as it is written.
-leaves :: proc(k: ^Kernel, t: Type, out: ^[dynamic]Type) {
-	if p, is_pattern := t.(^Pattern); is_pattern && !has_effect(p) {
-		read, _ := in_branches(k, p)
-		for x, i in read {
-			if x == nil do append(out, p.branches[i].product)
-			else do leaves(k, x, out)
-		}
-		return
-	}
-	append(out, t)
-}
-
-// with_leaves: t, its products — as leaves reads them — taken in turn from news.
-with_leaves :: proc(k: ^Kernel, t: Type, news: []Type, at: ^int) -> Type {
-	if p, is_pattern := t.(^Pattern); is_pattern && !has_effect(p) {
-		branches := make([]Branch, len(p.branches))
-		read, _ := in_branches(k, p)
-		for x, i in read {
-			if x == nil {
-				branches[i] = with_product(p.branches[i], news[at^])
-				at^ += 1
-			} else do branches[i] = with_product(p.branches[i], with_leaves(k, x, news, at))
-		}
-		return branching(p, branches)
-	}
-	at^ += 1
-	return news[at^ - 1]
-}
-
-// in_branches: the product of each branch of p read in it, where its reach holds;
-// nil for a branch no value reaches. False when a cover has no type.
-in_branches :: proc(k: ^Kernel, p: ^Pattern) -> (out: []Type, ok: bool) {
-	out = make([]Type, len(p.branches))
-	reached, _, invalid := reaches(k, p.target, p.branches)
-	if invalid != nil do return out, false
-	for r in reached do out[r.branch] = branch_product(k, p.branches[r.branch], r.rewrite, p.target)
-	return out, true
-}
-
-// branch_calls: a step r that is a pattern, each of its products making one call of
-// s: one call a step. Each call moves the counter u the same; the states it carries
-// are carved, in each branch, by the call of that branch — a state its call does not
-// carve keeps its value. after: the step, each call what it gives back, y.
-branch_calls :: proc(k: ^Kernel, s: ^Scope, r: Type, u: ^Unknown, y: ^Unknown) -> (step: Type, carried: map[^Unknown]Type, after: Type, ok: bool) {
-	products := make([dynamic]Type)
-	leaves(k, r, &products)
-	root := origin(s)
-	steps := make([]map[^Unknown]Type, len(products))
-	stepped := make([]Type, len(products))
-	keys := make(map[^Unknown]bool)
-	for t, i in products {
-		calls := calls_in(k, t, root)
-		if len(calls) != 1 do return
-		next: Type
-		next, steps[i] = counter_next(k, s, calls[0], u) or_return
-		if step == nil do step = next
-		else if !same(k, step, next) do return
-		for x in steps[i] do keys[x] = true
-		stepped[i] = rewrite(k, t, rewriting_call(nil, calls[0], y))
-	}
-	at := 0
-	after = with_leaves(k, r, stepped, &at)
-	carried = make(map[^Unknown]Type)
-	for x in keys {
-		carves := make([]Type, len(products))
-		for m, i in steps do carves[i] = m[x] or_else Type(x)
-		at = 0
-		carried[x] = with_leaves(k, r, carves, &at)
-	}
-	return step, carried, after, true
-}
-
 // run_affine: v = {...P  ...y  ...Q}, a run that places y once, as a run, and
-// whose other bindings do not read y: the bindings P before it and Q after it. y
-// alone is {...y}; a pattern without effects, each of its products so, places the
-// pattern of their P before y and that of their Q after it (§6).
+// whose other bindings do not read y: the bindings P before it and Q after it.
 run_affine :: proc(k: ^Kernel, v: Type, y: ^Unknown) -> (prefix, suffix: []^Binding, ok: bool) {
-	if x, is_y := v.(^Unknown); is_y && same_unknown(x, y) {
-		family, known := family_of(k, y)
-		return nil, nil, known && family == .Scope
-	}
-	if p, is_pattern := v.(^Pattern); is_pattern && !has_effect(p) && !reads(k, p.target, y) {
-		// each product read once, in its branch; a branch no value reaches, as written
-		read, _ := in_branches(k, p)
-		ps, qs := make([]Branch, len(p.branches)), make([]Branch, len(p.branches))
-		for b, i in p.branches {
-			before, after := run_affine(k, read[i] == nil ? b.product : read[i], y) or_return
-			ps[i], qs[i] = with_product(b, run_scope(k, before)), with_product(b, run_scope(k, after))
-		}
-		return as_expansion(k, branching(p, ps)), as_expansion(k, branching(p, qs)), true
-	}
 	s := v.(^Scope) or_return
 	xs := run_data(k, s)
 	at := -1
@@ -866,79 +682,6 @@ run_affine :: proc(k: ^Kernel, v: Type, y: ^Unknown) -> (prefix, suffix: []^Bind
 	}
 	if at < 0 do return
 	return xs[:at], xs[at + 1:], true
-}
-
-// composed_call: f{out -> o}! = {...o  ...f{out -> {}}!} — runs compose (§5.6): a
-// field that every product of the equation places once at its head, as a run, and
-// carves in every call to a run that places it once at its head, nothing else
-// reading it, is the run A of the maps A ↦ {...A ...P(k)}, which compose. o is the
-// value the call gives that field, rest the call where it gives {}.
-composed_call :: proc(k: ^Kernel, c: ^Collapse, span: syn.Span) -> (o, rest: Type, ok: bool) {
-	s := c.target.(^Scope) or_return
-	root := origin(s)
-	for b, v in s.changes {
-		if empty, is_scope := given(k, v).(^Scope); is_scope && len(run_data(k, empty)) == 0 do continue
-		if !gives_scope(k, v) do continue
-		eq := equation_of(k, c) or_continue
-		u := eq.params[b].(^Unknown) or_continue
-		was := eq.read
-		read_equation(k, eq, true)
-		heads := run_heads(k, eq.equation, root, b, u)
-		read_equation(k, eq, was)
-		if !heads do continue
-		changes := make(map[^Binding]Type)
-		for x, w in s.changes do changes[x] = w
-		changes[b] = run_scope(k, {})
-		carved := derive(k, root, changes, span)
-		target := carved.(^Scope) or_continue
-		return v, recursive_call(k, target, span), true
-	}
-	return
-}
-
-// run_heads: every product of t places u once at its head, as a run, the rest not
-// reading it — u itself, or {...u ...Q} —; a call of root keeps that form in the
-// field b, and its other fields, and what the patterns read, do not read u.
-run_heads :: proc(k: ^Kernel, t: Type, root: ^Scope, b: ^Binding, u: ^Unknown) -> bool {
-	headed :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
-		if x, is_unknown := t.(^Unknown); is_unknown do return same_unknown(x, u)
-		s := t.(^Scope) or_return
-		xs := run_data(k, s)
-		if len(xs) == 0 || xs[0].kind != .Expand do return false
-		head := binding_value(k, xs[0]).(^Unknown) or_return
-		if !same_unknown(head, u) do return false
-		for x in xs[1:] do if reads(k, binding_value(k, x), u) do return false
-		return true
-	}
-	if p, is_pattern := t.(^Pattern); is_pattern {
-		if has_effect(p) || reads(k, p.target, u) do return false
-		for x in p.branches {
-			if x.cover != nil && reads(k, x.cover, u) do return false
-			if !run_heads(k, x.product, root, b, u) do return false
-		}
-		return true
-	}
-	if is_call_of(t, root) {
-		c, _ := as_call(t)
-		for x, v in c.target.(^Scope).changes {
-			if x == b {
-				if !headed(k, v, u) do return false
-			} else if reads(k, v, u) do return false
-		}
-		return true
-	}
-	return headed(k, t, u)
-}
-
-// as_expansion: the bindings a run places: a scope its own, any other run t as
-// `...t`.
-as_expansion :: proc(k: ^Kernel, t: Type) -> []^Binding {
-	x := normal(k, t)
-	if known, is_scope := x.(^Scope); is_scope do return run_data(k, known)
-	holder := run_scope(k, nil)
-	b := new_binding(holder, .Expand, {})
-	b.value = x
-	return holder.bindings[:]
 }
 
 // joined: the run of the runs first, the bindings of the run between, rewritten by
@@ -1101,14 +844,12 @@ op :: proc(k: ^Kernel, o: Operator, args: ..Type) -> Type {
 }
 
 // affine_in: t = α·y + β, α and β not reading y: t of degree 1 in y, by the ring
-// law (ring.odin), over the integers or, t a real, in the field.
+// law (ring.odin).
 affine_in :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: bool) {
-	family, _ := family_of(k, t)
-	field := domain(family) == .Real
 	// what the ring does not read is an atom: a call, a fold, a pattern
 	back: Rewrite
-	ms, divisor := monomials(atomized(k, t, &back, field), field) or_return
-	if divisor != 1 && !field do return
+	ms, divisor := monomials(atomized(k, t, &back)) or_return
+	if divisor != 1 do return
 	as, bs := make([dynamic]Type), make([dynamic]Type)
 	for m in ms {
 		rest := make([dynamic]^Unknown)
@@ -1126,35 +867,11 @@ affine_in :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: b
 			return
 		}
 	}
-	alpha = unatomized(ring_term(as[:], divisor, field) or_return, back)
-	beta = unatomized(ring_term(bs[:], divisor, field) or_return, back)
-	// an atom that holds y: a pattern gives one of its products, an operation on it
-	// the operation on each (§6): t of degree 1 in y in each, with one α, is α·y +
-	// the pattern of the β. Otherwise t is not of degree 1 in y
-	if !reads(k, alpha, y) && !reads(k, beta, y) do return alpha, beta, true
-	p := pattern_reading(k, t, y) or_return
-	branches := make([]Branch, len(p.branches))
-	alpha = nil
-	for b, i in p.branches {
-		a, beta_i := affine_in(k, rewrite(k, t, append_read(nil, p, b.product)), y) or_return
-		if alpha != nil && !same(k, alpha, a) do return nil, nil, false
-		alpha, branches[i] = a, with_product(b, beta_i)
-	}
-	return alpha, pattern_law(k, branching(p, branches)), true
-}
-
-// pattern_reading: a pattern without effects among the operands of t, whose products
-// read y and whose target and covers do not.
-pattern_reading :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (^Pattern, bool) {
-	#partial switch v in t {
-	case ^Pattern:
-		if has_effect(v) || reads(k, v.target, y) do return nil, false
-		for b in v.branches do if b.cover != nil && reads(k, b.cover, y) do return nil, false
-		return v, reads(k, v, y)
-	case ^Operation:
-		for a in v.args do if p, read := pattern_reading(k, a, y); read do return p, true
-	}
-	return nil, false
+	alpha = unatomized(ring_term(as[:], 1) or_return, back)
+	beta = unatomized(ring_term(bs[:], 1) or_return, back)
+	// an atom that holds y: t is not of degree 1 in y
+	if reads(k, alpha, y) || reads(k, beta, y) do return nil, nil, false
+	return alpha, beta, true
 }
 
 // at_calls: a step of the equation, cut at its calls of f: the effects before
@@ -1227,8 +944,6 @@ counter_next :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse, u: ^Unknown) -> (next:
 		if same_unknown(x, u) do next = v
 		else do carried[x] = v
 	}
-	// the orbit of k by s(k): a step reading a state the call changes is no orbit
-	for x, v in carried do if !same(k, v, x) && reads(k, next, x) do return
 	return next, carried, next != nil
 }
 
@@ -1693,32 +1408,28 @@ ring_at :: proc(t: Type, u: ^Unknown, v: Type) -> (out: Type, ok: bool) {
 
 // atomized: t as a polynomial (ring.odin) over atoms: each term the ring does not
 // read — a μ, a pattern — is named by an unknown of its own, which back rewrites to
-// it. In the field (ring.odin), over the reals.
-atomized :: proc(k: ^Kernel, t: Type, back: ^Rewrite, field := false) -> Type {
+// it.
+atomized :: proc(k: ^Kernel, t: Type, back: ^Rewrite) -> Type {
 	#partial switch v in t {
-	case ^Unknown:
+	case Int, ^Unknown:
 		return t
-	case Int:
-		if !field do return t
-	case Real:
-		if field do return t
 	case ^Operation:
 		#partial switch v.op {
 		case .Add, .Sub, .Mul:
-			out := atomized(k, v.args[0], back, field)
+			out := atomized(k, v.args[0], back)
 			for a in v.args[1:] {
-				next, ok := ring_law(v.op, {out, atomized(k, a, back, field)}, field)
+				next, ok := ring_law(v.op, {out, atomized(k, a, back)})
 				if !ok do break
 				out = next
 			}
-			if _, _, ring := monomials(out, field); ring do return out
+			if _, _, ring := monomials(out); ring do return out
 		case .Neg:
-			if out, ok := ring_law(.Neg, {atomized(k, v.args[0], back, field)}, field); ok do return out
+			if out, ok := ring_law(.Neg, {atomized(k, v.args[0], back)}); ok do return out
 		}
 	}
 	for x in back do if x.unknown != nil && same(k, x.term, t) do return x.unknown
 	u := new_unknown(k, nil)
-	u.layout = family_term(field ? .Real : .Int)
+	u.layout = family_term(.Int)
 	back^ = rewriting(back^, u, t)
 	return u
 }
@@ -1763,8 +1474,6 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 		// a Σ that reads, along its index, a run a fold builds is the fold that
 		// carries it: the run is never built
 		if f, carried := carried_sum(k, s); carried do return f
-		// a Σ over the bindings of a run a fold builds passes through the fold
-		if x, m, over := summed_run(k, s); over do if f, built := x.(^Fold); built do if out, summed := fold_sum(k, f, m); summed do return out
 		return s
 	}
 	if !reads(k, s.term, s.index) do return op(k, .Pow, s.term, n)
@@ -2146,18 +1855,15 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure{}) -> (image:
 	for x in k.images do if x.equation == eq && same_measure(k, x.measure, measure) && !x.given do return
 	at := len(k.images)
 	append(&k.images, Image{equation = eq, measure = measure})
-	given_toggled(k, .Bounds, eq, at)
-	values, narrowed, kept := kept_fields(k, call, eq)
+	e, values, kept := kept_fields(k, call, eq)
 	next: for &x in k.images[:at] {
 		if x.equation != eq || !same_measure(k, x.measure, measure) || len(x.kept) != len(kept) do continue
 		for t, i in kept do if !same(k, t, x.kept[i]) do continue next
 		ordered_remove(&k.images, at)
-		given_toggled(k, .Bounds, eq, at)
 		if !x.ok do return
 		return images_at(k, &x, values)
 	}
 	// an equation holding a term of no type bounds nothing
-	e := rewrite(k, eq.equation, narrowed)
 	bounds: Bounds
 	if !holds_invalid(e) {
 		if measure.kind != .Sum {
@@ -2167,22 +1873,16 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure{}) -> (image:
 		}
 		// as functions of what the call carves: a side left open taken from them, both
 		// bounds holding
-		// — proposed by the solving, proven by the induction
 		if !ok || bounds.count == nil && (bounds.lo == nil || bounds.hi == nil) {
-			if rec, read := call_recursion(k, eq, e, measure); read {
-				if linear, solved := linear_bounds(k, rec, measure.kind == .Length); solved {
-					merged := ok ? bounds : linear
-					if merged.lo == nil do merged.lo = linear.lo
-					if merged.hi == nil do merged.hi = linear.hi
-					if bounds_hold(k, rec, merged) {
-						bounds, ok = merged, true
-					}
-				}
+			if linear, read := linear_bounds(k, eq, e, measure); read {
+				if !ok do bounds = linear
+				if bounds.lo == nil do bounds.lo = linear.lo
+				if bounds.hi == nil do bounds.hi = linear.hi
+				ok = true
 			}
 		}
 	}
 	k.images[at] = Image{eq, measure, kept, bounds, ok, true, nil}
-	given_toggled(k, .Bounds, eq, at)
 	if !ok do return
 	return images_at(k, &k.images[at], values)
 }
@@ -2214,13 +1914,24 @@ images_at :: proc(k: ^Kernel, x: ^Image, values: Rewrite) -> (image: Type, ok: b
 	return
 }
 
-// kept_fields: the fields that every call of the equation keeps — carves to itself,
-// or not at all — read at what the call gives them (§5.3: a carve is the equation at
-// the values it gives): each an unknown of that image. values: each field at what the
-// call gives it; narrowed: the kept fields at their images; key: those images.
-kept_fields :: proc(k: ^Kernel, call: ^Collapse, eq: ^Call_Equation) -> (values: Rewrite, narrowed: Rewrite, key: []Type) {
+// kept_fields: the equation the call reads, where each field that every call of it
+// keeps — carves to itself, or not at all — holds what the call gives it (§5.3: a
+// carve is the equation at the values it gives): an unknown of that image. values:
+// each field at what the call gives it; key: the images of those kept.
+kept_fields :: proc(k: ^Kernel, call: ^Collapse, eq: ^Call_Equation) -> (e: Type, values: Rewrite, key: []Type) {
 	values = at_values(k, eq, call.target.(^Scope).changes)
-	moved, all_moved := moved_fields(k, eq)
+	moved := make([dynamic]^Unknown)
+	all_moved := false
+	for x in calls_in(k, eq.equation, eq.root) {
+		target := x.target.(^Scope)
+		carved := make(map[^Unknown]Type)
+		for b, v in target.changes do all_moved ||= !matched(k, binding_type(k, holding(eq.generic, b)), v, &carved)
+		for u, v in carved {
+			w, is_unknown := v.(^Unknown)
+			if !is_unknown || !same_unknown(u, w) do append(&moved, u)
+		}
+	}
+	r: Rewrite
 	out := make([dynamic]Type)
 	for x in values {
 		if x.unknown == nil do continue
@@ -2229,28 +1940,10 @@ kept_fields :: proc(k: ^Kernel, call: ^Collapse, eq: ^Call_Equation) -> (values:
 		if !kept do continue
 		image, known := layout_image(k, x.term)
 		if !known || !is_constant(image) do continue
-		narrowed = rewriting(narrowed, x.unknown, narrowing(x.unknown, image))
+		r = rewriting(r, x.unknown, narrowing(x.unknown, image))
 		append(&out, image)
 	}
-	return values, narrowed, out[:]
-}
-
-// moved_fields: the unknowns of the fields some call of the equation carves to
-// another value; all, when a carve is not read as a value of its field. Read once.
-moved_fields :: proc(k: ^Kernel, eq: ^Call_Equation) -> (moved: []^Unknown, all: bool) {
-	if eq.moved_read do return eq.moved, eq.all_moved
-	out := make([dynamic]^Unknown)
-	for x in calls_in(k, eq.equation, eq.root) {
-		target := x.target.(^Scope)
-		carved := make(map[^Unknown]Type)
-		for b, v in target.changes do all ||= !matched(k, binding_type(k, holding(eq.generic, b)), v, &carved)
-		for u, v in carved {
-			w, is_unknown := v.(^Unknown)
-			if !is_unknown || !same_unknown(u, w) do append(&out, u)
-		}
-	}
-	eq.moved, eq.all_moved, eq.moved_read = out[:], all, true
-	return eq.moved, all
+	return rewrite(k, eq.equation, r), values, out[:]
 }
 
 // orbit_length: the length n of the orbit of u by step until stop, in closed form:
@@ -2263,17 +1956,6 @@ orbit_length :: proc(k: ^Kernel, u: ^Unknown, step, stop: Type, span: syn.Span) 
 	j := new_unknown(k, nil)
 	j.layout = COUNTS
 	return least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), stop), span), true
-}
-
-// fold_steps: the count of steps of a fold, in closed form: the length of the orbit
-// of its start (§5.6), its points from what the start may be — any integer, when
-// it is one: a single value is that value, and the orbit would not move.
-fold_steps :: proc(k: ^Kernel, f: ^Fold) -> (n: Type, ok: bool) {
-	start := new_unknown(k, nil)
-	start.layout = layout_image(k, f.start) or_return
-	if is_value(k, start.layout) do start.layout = family_term(family_of(k, start.layout) or_return)
-	steps := orbit_length(k, start, rewrite(k, f.next, rewriting(nil, f.index, start)), f.stop, f.span) or_return
-	return rewrite(k, steps, rewriting(nil, start, f.start)), true
 }
 
 // Bound_Product: a product of the equation, its calls taken at one bound y: g,
@@ -2398,7 +2080,7 @@ linear_at :: proc(k: ^Kernel, b: Bounds, values: Rewrite) -> (image: Type, ok: b
 // the call gives, its length, or its sum Σ(x: 0..|X| - 1, g(X.#x)) — split over the
 // bindings of a scope, an expansion by the sum of what it expands, a pattern by its
 // products (§5.3, §6).
-measure_of :: proc(k: ^Kernel, t: Type, root: ^Scope, m: Measure, calls: ^[dynamic]^Collapse, ys: ^[dynamic]^Unknown, within: Rewrite = nil) -> (out: Type, ok: bool) {
+measure_of :: proc(k: ^Kernel, t: Type, root: ^Scope, m: Measure, calls: ^[dynamic]^Collapse, ys: ^[dynamic]^Unknown) -> (out: Type, ok: bool) {
 	taken :: proc(k: ^Kernel, x: ^Collapse, calls: ^[dynamic]^Collapse, ys: ^[dynamic]^Unknown) -> ^Unknown {
 		for c, i in calls do if c == x do return ys[i]
 		y := new_unknown(k, nil)
@@ -2411,7 +2093,7 @@ measure_of :: proc(k: ^Kernel, t: Type, root: ^Scope, m: Measure, calls: ^[dynam
 	case .Value, .Length:
 		v := m.kind == .Length ? run_law(k, .Length, {t}, root.span) : t
 		r: Rewrite
-		for x in calls_in(k, v, root) {
+		for x in calls_in(k, t, root) {
 			y := taken(k, x, calls, ys)
 			if m.kind == .Value do r = rewriting_call(r, x, y)
 			else do r = append_read(r, new_operation(.Length, x), y)
@@ -2422,25 +2104,15 @@ measure_of :: proc(k: ^Kernel, t: Type, root: ^Scope, m: Measure, calls: ^[dynam
 		if c, is_call := as_call(t); is_call && is_call_of(c, root) do return taken(k, c, calls, ys), true
 		#partial switch v in t {
 		case ^Pattern:
-			// one of its products, each read in its branch, where its reach holds (§6)
 			if has_effect(v) do return
-			reached, _, invalid := reaches(k, v.target, v.branches)
-			if invalid != nil do return
-			// a branch no value reaches gives nothing
 			branches := make([]Branch, len(v.branches))
-			for b, i in v.branches do branches[i] = with_product(b, None{})
-			for x in reached {
-				b := v.branches[x.branch]
-				if is_none(b.product) do continue
-				product := branch_product(k, b, x.rewrite, v.target)
-				branches[x.branch] = with_product(b, measure_of(k, product, root, m, calls, ys, nested_rewrite(within, x.rewrite)) or_return)
-			}
+			for b, i in v.branches do branches[i] = with_product(b, is_none(b.product) ? b.product : measure_of(k, b.product, root, m, calls, ys) or_return)
 			return pattern_law(k, branching(v, branches)), true
 		case ^Scope:
 			out = Int(0)
 			for b in run_data(k, v) {
 				x := binding_value(k, b)
-				part := b.kind == .Expand ? measure_of(k, x, root, m, calls, ys, within) or_return : rewrite(k, m.g, rewriting(nil, m.at, rewrite(k, x, within)))
+				part := b.kind == .Expand ? measure_of(k, x, root, m, calls, ys) or_return : rewrite(k, m.g, rewriting(nil, m.at, x))
 				out = op(k, .Add, out, part)
 			}
 			return out, solved(out, root)
@@ -2455,211 +2127,32 @@ Linear :: struct {
 	constant: i128,
 }
 
-// Recursion: an equation read for its bounds (§5.6): its fields, in the order they
-// are written; its production measured, each call in it an unknown y; and those
-// calls, each with what it carves each field to.
-Recursion :: struct {
-	fields:   []Bound_Field,
-	measured: Type,
-	calls:    []Bound_Call,
-	span:     syn.Span,
-}
-
-// Bound_Field: a field of a recursion, its unknown and its measure: an integer
-// itself, a run its length; z stands for the measure.
-Bound_Field :: struct {
-	unknown: ^Unknown,
-	measure: Type,
-	z:       ^Unknown,
-}
-
-// Bound_Call: a call of a recursion: y stands for its measure; args, what it carves
-// each field to — the field's unknown when it keeps it.
-Bound_Call :: struct {
-	y:    ^Unknown,
-	args: []Type,
-}
-
-// bound_field: x as a field of a recursion, when it is measured: an integer, or a run.
-bound_field :: proc(k: ^Kernel, x: ^Unknown, span: syn.Span) -> (f: Bound_Field, ok: bool) {
-	measure: Type
-	if proven_in(k, x, family_term(.Int)) do measure = x
-	else if gives_scope(k, x) do measure = run_law(k, .Length, {x}, span)
-	else do return
-	z := new_unknown(k, nil)
-	z.layout = family_term(.Int)
-	return {x, measure, z}, true
-}
-
-// call_recursion: the equation of a call that stays, read for its bounds: its fields
-// those its calls carve.
-call_recursion :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, m: Measure) -> (rec: Recursion, ok: bool) {
-	fields := make([dynamic]Bound_Field)
-	bindings := make([dynamic]^Binding)
-	for b in eq.root.bindings {
-		u, carved := eq.params[b]
-		if !carved do continue
+// linear_bounds: the bounds of a call that stays as functions of what it carves
+// (§5.6): hi = c + Σ aⱼ·mⱼ, mⱼ the measure of a field the call carves — an integer,
+// or the length of a run —, aⱼ ≥ 0; lo likewise from below. Each product of the
+// equation, its calls taken at the bound of what they carve and every other term at
+// its own image, lies within the bound at the product's fields, for every value its
+// branch lets them take: linear constraints on c and the aⱼ — the induction, each
+// product within the bound, its calls within it. Their least solution, the aⱼ first
+// then c, solved in closed form by elimination.
+linear_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, m: Measure) -> (bounds: Bounds, ok: bool) {
+	Field :: struct {
+		binding: ^Binding,
+		unknown: ^Unknown,
+		measure: Type,
+		z:       ^Unknown,
+	}
+	fields := make([dynamic]Field)
+	for b, u in eq.params {
 		x := u.(^Unknown) or_continue
-		f := bound_field(k, x, eq.root.span) or_continue
-		append(&fields, f)
-		append(&bindings, b)
+		measure: Type
+		if proven_in(k, x, family_term(.Int)) do measure = x
+		else if gives_scope(k, x) do measure = run_law(k, .Length, {x}, eq.root.span)
+		else do continue
+		z := new_unknown(k, nil)
+		z.layout = family_term(.Int)
+		append(&fields, Field{b, x, measure, z})
 	}
-	collapses, ys := make([dynamic]^Collapse), make([dynamic]^Unknown)
-	rec.measured = measure_of(k, given(k, e), eq.root, m, &collapses, &ys) or_return
-	calls := make([]Bound_Call, len(collapses))
-	for c, i in collapses {
-		changes := c.target.(^Scope).changes
-		args := make([]Type, len(fields))
-		for f, j in fields do args[j] = changes[bindings[j]] or_else Type(f.unknown)
-		calls[i] = {ys[i], args}
-	}
-	rec.fields, rec.calls, rec.span = fields[:], calls, eq.root.span
-	return rec, true
-}
-
-// accumulated: a state z of a fold that gathers what its steps add, read by nothing
-// else: a run z: c ↦ {...P ...z ...Q} its value places, {...P' ...z ...Q'}, m the
-// measure of what they place (§5.3); or, for the value of the fold, an integer
-// z: c ↦ z + g, its value z + e. step: what a step adds, base: what the value adds
-// where it stops, built: what z holds where it starts, measured.
-accumulated :: proc(k: ^Kernel, f: ^Fold, m: Measure) -> (at: int, step, base, built: Type, ok: bool) {
-	next: for z, i in f.states {
-		if reads(k, f.effects, z) do continue
-		for t, j in f.updates do if j != i && reads(k, t, z) do continue next
-		if m.kind == .Value {
-			one, g := affine_in(k, f.updates[i], z) or_continue
-			if !is_int(one, 1) || reads(k, g, z) do continue
-			a, e := affine_in(k, f.value, z) or_continue
-			if !is_int(a, 1) || reads(k, e, z) do continue
-			return i, g, e, f.inits[i], true
-		}
-		prefix, suffix := run_affine(k, f.updates[i], z) or_continue
-		before, after := run_affine(k, f.value, z) or_continue
-		calls, ys := make([dynamic]^Collapse), make([dynamic]^Unknown)
-		placed := make([dynamic]^Binding)
-		append(&placed, ..prefix)
-		append(&placed, ..suffix)
-		ends := make([dynamic]^Binding)
-		append(&ends, ..before)
-		append(&ends, ..after)
-		step = measure_of(k, run_scope(k, placed[:]), nil, m, &calls, &ys) or_continue
-		base = measure_of(k, run_scope(k, ends[:]), nil, m, &calls, &ys) or_continue
-		built = measure_of(k, f.inits[i], nil, m, &calls, &ys) or_continue
-		if len(calls) > 0 do continue
-		return i, step, base, built, true
-	}
-	return
-}
-
-// fold_sum: Σ(x: 0..|X| - 1, g(X.#x)), X the run a fold builds in a state z
-// (accumulated): the sum passes through the fold as through an operator (§5.3,
-// §5.6), σ: Σ(c) ↦ σ + Σ(P) + Σ(Q), the value σ + Σ(P') + Σ(Q'): the run is never
-// built.
-fold_sum :: proc(k: ^Kernel, f: ^Fold, m: Measure) -> (out: Type, ok: bool) {
-	at, step, base, built := accumulated(k, f, m) or_return
-	sigma := new_unknown(k, nil)
-	sigma.layout = family_term(.Int)
-	g := new(Fold)
-	g^ = f^
-	g.states, g.inits, g.updates = slice.clone(f.states), slice.clone(f.inits), slice.clone(f.updates)
-	g.states[at], g.inits[at], g.updates[at] = sigma, built, op(k, .Add, sigma, step)
-	g.value = op(k, .Add, sigma, base)
-	return fold_law(k, g), true
-}
-
-// fold_recursion: a fold read as the recursion it solves (§5.6), for a measure of
-// what it gathers in a state z (accumulated). From a state, what the fold adds to z
-// is G = base where it stops, step + G' otherwise, G' from the next state. A fold
-// along the positions of a run X — k from a by 1 until |X|.. — is the recursion on
-// the rest X from k, its head X.#k (a run is the orbit of its positions): its fields
-// are that rest, measured by its length, and the other states; its call carves the
-// rest to the rest from 1, each state to its update. values: the fields where the
-// fold starts; built: what z holds there, measured.
-fold_recursion :: proc(k: ^Kernel, f: ^Fold, m: Measure) -> (rec: Recursion, values: Rewrite, built: Type, ok: bool) {
-	if !is_none(f.effects) do return
-	step, base: Type
-	at: int
-	at, step, base, built = accumulated(k, f, m) or_return
-	// the positions of X: k by 1 until |X|
-	one, by := affine_in(k, f.next, f.index) or_return
-	if !is_int(one, 1) || !is_int(by, 1) do return
-	stop := f.stop.(^Range) or_return
-	if stop.lo == nil || stop.hi != nil do return
-	x := position_read(k, f, stop.lo) or_return
-	rest := new_unknown(k, nil)
-	rest.layout = layout_image(k, x) or_return
-	// the rest where the fold goes on, a run of one binding at least, and where it stops
-	empty := run_scope(k, nil)
-	going := narrowing(rest, and_law(k, {rest.layout, not_law(k, empty)}))
-	along := append_read(append_read(nil, new_operation(.From, x, f.index), going), new_operation(.Item, x, f.index), run_law(k, .Item, {going, Int(0)}, f.span))
-	at_end := append_read(nil, new_operation(.From, x, f.index), narrowing(rest, empty))
-	fields := make([dynamic]Bound_Field)
-	append(&fields, bound_field(k, rest, f.span) or_return)
-	states := make([dynamic]int)
-	values = rewriting(nil, rest, run_law(k, .From, {x, f.start}, f.span))
-	for z, s in f.states {
-		if s == at do continue
-		field := bound_field(k, z, f.span) or_continue
-		append(&fields, field)
-		append(&states, s)
-		values = rewriting(values, z, f.inits[s])
-	}
-	// a step: what it adds, and y, the measure of what follows
-	y := new_unknown(k, nil)
-	y.layout = family_term(.Int)
-	args := make([]Type, len(fields))
-	args[0] = run_law(k, .From, {going, Int(1)}, f.span)
-	for s, j in states do args[j + 1] = rewrite(k, f.updates[s], along)
-	p := new(Pattern)
-	p.target, p.span = rest, f.span
-	p.branches = make([]Branch, 2)
-	p.branches[0] = Branch{cover = empty, product = rewrite(k, base, at_end)}
-	p.branches[1] = Branch{product = rewrite(k, op(k, .Add, step, y), along)}
-	// the rest is all the fold reads of its positions
-	for t in args do if reads(k, t, f.index) do return
-	for b in p.branches do if reads(k, b.product, f.index) do return
-	calls := make([]Bound_Call, 1)
-	calls[0] = {y, args}
-	rec = Recursion{fields[:], pattern_law(k, p), calls, f.span}
-	return rec, values, built, true
-}
-
-// position_read: the run X the fold reads at its index k, X from k or X.#k, whose
-// length is n.
-position_read :: proc(k: ^Kernel, f: ^Fold, n: Type) -> (x: Type, ok: bool) {
-	find :: proc(k: ^Kernel, t: Type, i: ^Unknown, n: Type) -> (x: Type, ok: bool) {
-		if t == nil do return
-		if o, is_op := t.(^Operation); is_op && (o.op == .From || o.op == .Item) {
-			if u, at := o.args[1].(^Unknown); at && same_unknown(u, i) && same(k, run_law(k, .Length, o.args[:1], o.span), n) do return o.args[0], true
-		}
-		for p in parts(t) do if x, found := find(k, p, i, n); found do return x, true
-		return
-	}
-	for t in fold_parts(f) do if x, found := find(k, t, f.index, n); found do return x, true
-	return
-}
-
-// fold_image: a measure of what a fold gathers, bounded as the recursion it solves
-// (fold_recursion): what z holds where it starts, and what the fold adds to it.
-fold_image :: proc(k: ^Kernel, f: ^Fold, m: Measure) -> (image: Type, ok: bool) {
-	rec, values, built := fold_recursion(k, f, m) or_return
-	bounds := linear_bounds(k, rec, m.kind == .Length) or_return
-	if !bounds_hold(k, rec, bounds) do return
-	added := linear_at(k, bounds, values) or_return
-	start := layout_image(k, built) or_return
-	return exact_law(k, .Add, {start, added}, f.span), true
-}
-
-// linear_bounds: the bounds of a recursion as functions of its fields (§5.6): hi =
-// c + Σ aⱼ·mⱼ, mⱼ the measure of a field — an integer, or the length of a run —,
-// aⱼ ≥ 0; lo likewise from below. Each product of the equation, its calls taken at
-// the bound of what they carve and every other term at its own image, lies within
-// the bound at the product's fields, for every value its branch lets them take:
-// linear constraints on c and the aⱼ — the induction, each product within the
-// bound, its calls within it. Their least solution, the aⱼ first then c, solved in
-// closed form by elimination. A length is at least 0.
-linear_bounds :: proc(k: ^Kernel, rec: Recursion, length: bool) -> (bounds: Bounds, ok: bool) {
-	fields := rec.fields
 	n := len(fields)
 	// the measures of the fields read as the unknowns z
 	as_z: Rewrite
@@ -2667,172 +2160,111 @@ linear_bounds :: proc(k: ^Kernel, rec: Recursion, length: bool) -> (bounds: Boun
 		if f.measure == Type(f.unknown) do as_z = rewriting(as_z, f.unknown, f.z)
 		else do as_z = append_read(as_z, f.measure, f.z)
 	}
+	// t, over the z, as Σ coefs·z + rest
+	split_z :: proc(k: ^Kernel, t: Type, zs: []^Unknown) -> (coefs: []i128, rest: Type, ok: bool) {
+		coefs = make([]i128, len(zs))
+		rest = t
+		for z, j in zs {
+			alpha, beta := affine_in(k, rest, z) or_return
+			a := alpha.(Int) or_return
+			coefs[j], rest = i128(a), beta
+		}
+		for z in zs do if reads(k, rest, z) do return
+		return coefs, rest, true
+	}
 	zs := make([]^Unknown, n)
 	for f, j in fields do zs[j] = f.z
 	leaves := make([dynamic]Product)
-	products(k, rec.measured, &leaves)
-	term :: proc(k: ^Kernel, u: []i128, fields: []Bound_Field) -> Type {
+	products(k, given(k, e), &leaves)
+	side :: proc(k: ^Kernel, leaves: []Product, eq: ^Call_Equation, m: Measure, fields: []Field, zs: []^Unknown, as_z: Rewrite, upper: bool) -> (solution: []i128, ok: bool) {
+		n := len(fields)
+		rows := make([dynamic]Linear)
+		// aⱼ ≥ 0
+		for j in 0 ..< n {
+			row := Linear{make([]i128, n + 1), 0}
+			row.coefs[j] = 1
+			append(&rows, row)
+		}
+		for leaf in leaves {
+			if is_none(leaf.term) do continue
+			calls, ys := make([dynamic]^Collapse), make([dynamic]^Unknown)
+			measured := measure_of(k, leaf.term, eq.root, m, &calls, &ys) or_return
+			t := rewrite(k, measured, as_z)
+			// K = bound(z) - measure(z) on the upper side, measure - bound below: K_j the
+			// coefficient of zⱼ, K0 the constant, linear in (a, c)
+			ks := make([]Linear, n + 1)
+			for &x in ks do x = Linear{make([]i128, n + 1), 0}
+			sign: i128 = upper ? 1 : -1
+			for j in 0 ..< n do ks[j + 1].coefs[j] += sign
+			ks[0].coefs[n] += sign
+			for x, i in calls {
+				alpha, beta := affine_in(k, t, ys[i]) or_return
+				a := i128(alpha.(Int) or_return)
+				if a < 0 do return
+				t = beta
+				// the call at the bound of what it carves
+				changes := x.target.(^Scope).changes
+				for f, j in fields {
+					arg := changes[f.binding] or_else Type(f.unknown)
+					at := f.measure == Type(f.unknown) ? arg : run_law(k, .Length, {arg}, eq.root.span)
+					q, p := split_z(k, rewrite(k, at, as_z), zs) or_return
+					constant := p.(Int) or_return
+					for qi, i in q do ks[i + 1].coefs[j] -= sign * a * qi
+					ks[0].coefs[j] -= sign * a * i128(constant)
+				}
+				ks[0].coefs[n] -= sign * a
+			}
+			es, rest := split_z(k, t, zs) or_return
+			for ys_i in ys do if reads(k, rest, ys_i) do return
+			for x, j in es do ks[j + 1].constant -= sign * x
+			// every other term at its own image
+			lo, hi := int_bounds(k, layout_image(k, read_in(k, leaf, rest)) or_return) or_return
+			d := upper ? hi : lo
+			ks[0].constant -= sign * (d.? or_return)
+			// the region of the fields in the branch
+			constants := make([dynamic]Linear)
+			append(&constants, ks[0])
+			for f, j in fields {
+				l, h := int_bounds(k, layout_image(k, read_in(k, leaf, f.measure)) or_return) or_return
+				kj := ks[j + 1]
+				added := make([dynamic]Linear)
+				for c in constants {
+					switch {
+					case l != nil && h != nil && l.? == h.?:
+						append(&added, linear_add(c, kj, l.?) or_return)
+					case h == nil && l != nil:
+						append(&added, linear_add(c, kj, l.?) or_return)
+					case l == nil && h != nil:
+						append(&added, linear_add(c, kj, h.?) or_return)
+					case l != nil && h != nil:
+						append(&added, linear_add(c, kj, l.?) or_return)
+						append(&added, linear_add(c, kj, h.?) or_return)
+					}
+				}
+				switch {
+				case h == nil && l == nil:
+					append(&rows, kj, linear_scaled(kj, -1))
+				case h == nil:
+					append(&rows, kj)
+				case l == nil:
+					append(&rows, linear_scaled(kj, -1))
+				}
+				if len(added) > 16 do return
+				constants = added
+			}
+			append(&rows, ..constants[:])
+		}
+		return least_solution(rows[:], n + 1, upper)
+	}
+	term :: proc(k: ^Kernel, u: []i128, fields: []Field) -> Type {
 		out: Type = Int(u[len(fields)])
 		for f, j in fields do if u[j] != 0 do out = op(k, .Add, out, op(k, .Mul, Int(u[j]), f.measure))
 		return out
 	}
-	if u, solved := bound_side(k, leaves[:], rec, zs, as_z, true); solved do bounds.hi = term(k, u, fields)
-	if u, solved := bound_side(k, leaves[:], rec, zs, as_z, false); solved do bounds.lo = term(k, u, fields)
-	if length && bounds.lo == nil do bounds.lo = Int(0)
+	if u, solved := side(k, leaves[:], eq, m, fields[:], zs, as_z, true); solved do bounds.hi = term(k, u, fields[:])
+	if u, solved := side(k, leaves[:], eq, m, fields[:], zs, as_z, false); solved do bounds.lo = term(k, u, fields[:])
+	if m.kind == .Length && bounds.lo == nil do bounds.lo = Int(0)
 	return bounds, bounds.hi != nil || bounds.lo != nil
-}
-
-// split_z: t, over the z, as Σ coefs·z + rest.
-split_z :: proc(k: ^Kernel, t: Type, zs: []^Unknown) -> (coefs: []i128, rest: Type, ok: bool) {
-	coefs = make([]i128, len(zs))
-	rest = t
-	for z, j in zs {
-		alpha, beta := affine_in(k, rest, z) or_return
-		a := alpha.(Int) or_return
-		coefs[j], rest = i128(a), beta
-	}
-	for z in zs do if reads(k, rest, z) do return
-	return coefs, rest, true
-}
-
-
-// bound_side: the least solution of one side of the bounds of a recursion
-// (linear_bounds): the upper, or the lower.
-bound_side :: proc(k: ^Kernel, leaves: []Product, rec: Recursion, zs: []^Unknown, as_z: Rewrite, upper: bool) -> (solution: []i128, ok: bool) {
-	fields := rec.fields
-	n := len(fields)
-	rows := make([dynamic]Linear)
-	// aⱼ ≥ 0
-	for j in 0 ..< n {
-		row := Linear{make([]i128, n + 1), 0}
-		row.coefs[j] = 1
-		append(&rows, row)
-	}
-	for leaf in leaves {
-		if is_none(leaf.term) do continue
-		t := over_measures(k, leaf, leaf.term, fields, as_z)
-		// K = bound(z) - measure(z) on the upper side, measure - bound below: K_j the
-		// coefficient of zⱼ, K0 the constant, linear in (a, c)
-		ks := make([]Linear, n + 1)
-		for &x in ks do x = Linear{make([]i128, n + 1), 0}
-		sign: i128 = upper ? 1 : -1
-		for j in 0 ..< n do ks[j + 1].coefs[j] += sign
-		ks[0].coefs[n] += sign
-		for c in rec.calls {
-			if !reads(k, t, c.y) do continue
-			alpha, beta := affine_in(k, t, c.y) or_return
-			a := i128(alpha.(Int) or_return)
-			if a < 0 do return
-			t = beta
-			// the call at the bound of what it carves
-			for f, j in fields {
-				arg := c.args[j]
-				at := f.measure == Type(f.unknown) ? arg : run_law(k, .Length, {arg}, rec.span)
-				q, p := split_z(k, rewrite(k, read_in(k, leaf, at), as_z), zs) or_return
-				// what the carve adds to the measures, at its own image: aⱼ ≥ 0, so the
-				// bound holds for every value when it holds at the greatest above, at
-				// the least below
-				least, top := int_bounds(k, layout_image(k, read_in(k, leaf, p)) or_return) or_return
-				constant := (upper ? top : least).? or_return
-				for qi, i in q do ks[i + 1].coefs[j] -= sign * a * qi
-				ks[0].coefs[j] -= sign * a * i128(constant)
-			}
-			ks[0].coefs[n] -= sign * a
-		}
-		es, rest := split_z(k, t, zs) or_return
-		for c in rec.calls do if reads(k, rest, c.y) do return
-		for x, j in es do ks[j + 1].constant -= sign * x
-		// every other term at its own image
-		lo, hi := int_bounds(k, layout_image(k, read_in(k, leaf, rest)) or_return) or_return
-		d := upper ? hi : lo
-		ks[0].constant -= sign * (d.? or_return)
-		// the region of the fields in the branch
-		constants := make([dynamic]Linear)
-		append(&constants, ks[0])
-		for f, j in fields {
-			l, h := int_bounds(k, layout_image(k, read_in(k, leaf, f.measure)) or_return) or_return
-			kj := ks[j + 1]
-			added := make([dynamic]Linear)
-			for c in constants {
-				switch {
-				case l != nil && h != nil && l.? == h.?:
-					append(&added, linear_add(c, kj, l.?) or_return)
-				case h == nil && l != nil:
-					append(&added, linear_add(c, kj, l.?) or_return)
-				case l == nil && h != nil:
-					append(&added, linear_add(c, kj, h.?) or_return)
-				case l != nil && h != nil:
-					append(&added, linear_add(c, kj, l.?) or_return)
-					append(&added, linear_add(c, kj, h.?) or_return)
-				case:
-					// unbounded both ways: Kⱼ = 0, the rest as it is
-					append(&added, c)
-				}
-			}
-			switch {
-			case h == nil && l == nil:
-				append(&rows, kj, linear_scaled(kj, -1))
-			case h == nil:
-				append(&rows, kj)
-			case l == nil:
-				append(&rows, linear_scaled(kj, -1))
-			}
-			if len(added) > 16 do return
-			constants = added
-		}
-		append(&rows, ..constants[:])
-	}
-	return least_solution(rows[:], n + 1, upper)
-}
-
-// over_measures: t, read in the product leaf, as a polynomial over the measures of
-// the fields — each the unknown z standing for it — and over the calls; a term the
-// ring does not read (ring.odin) that is not a measure is what it may be there.
-over_measures :: proc(k: ^Kernel, leaf: Product, t: Type, fields: []Bound_Field, as_z: Rewrite) -> Type {
-	back: Rewrite
-	poly := atomized(k, t, &back)
-	named: Rewrite
-	atoms: for x in back {
-		for f in fields do if same(k, x.term, f.measure) {
-			named = rewriting(named, x.unknown, x.term)
-			continue atoms
-		}
-		u := new_unknown(k, nil)
-		image, read := layout_image(k, read_in(k, leaf, x.term))
-		if !read {
-			named = rewriting(named, x.unknown, x.term)
-			continue
-		}
-		u.layout = image
-		named = rewriting(named, x.unknown, u)
-	}
-	return rewrite(k, rewrite(k, poly, named), as_z)
-}
-
-// bounds_hold: the bounds of a recursion, functions of its fields, proven by
-// induction (§5.6): each product of its measure, each call in it taken within the
-// bounds at what it carves — read in that product's branch —, lies within the
-// bounds there.
-bounds_hold :: proc(k: ^Kernel, rec: Recursion, b: Bounds) -> bool {
-	leaves := make([dynamic]Product)
-	products(k, rec.measured, &leaves)
-	for leaf in leaves {
-		if is_none(leaf.term) do continue
-		assumed: Rewrite
-		for c in rec.calls {
-			// the fields at what the call carves them to
-			at: Rewrite
-			for f, j in rec.fields do at = rewriting(at, f.unknown, c.args[j])
-			lo, hi: Type
-			if b.lo != nil do lo = read_in(k, leaf, rewrite(k, b.lo, at))
-			if b.hi != nil do hi = read_in(k, leaf, rewrite(k, b.hi, at))
-			taken := new_unknown(k, nil)
-			taken.layout = range_law(k, lo, hi, .Int, {})
-			assumed = rewriting(assumed, c.y, taken)
-		}
-		if !holds_in(k, rewrite(k, leaf.term, assumed), read_in(k, leaf, range_law(k, b.lo, b.hi, .Int, {})), {}) do return false
-	}
-	return true
 }
 
 linear_add :: proc(a, b: Linear, by: i128) -> (out: Linear, ok: bool) {
@@ -2933,7 +2365,7 @@ counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure
 			continue
 		}
 		v, read := production_at(k, x) or_return
-		read_equation(k, read, false)
+		read.read = false
 		if !solved(v, root) do return
 		asked = rewriting_call(asked, x, v)
 	}
@@ -3017,10 +2449,8 @@ counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure
 
 // products: the products t may give: a pattern without effects, those of its
 // branches, each read in its branch, where its reach holds — t & S there (§6) —;
-// an operation on such a pattern, the operation on each of them, its other operands
-// read in that branch; otherwise t. Each comes with the rewrite its reach makes: what
-// is read inside it — the bindings of a scope it gives — is read under that rewrite
-// too.
+// otherwise t. Each comes with the rewrite its reach makes: what is read inside it
+// — the bindings of a scope it gives — is read under that rewrite too.
 Product :: struct {
 	term:    Type,
 	rewrite: Rewrite,
@@ -3033,38 +2463,15 @@ products :: proc(k: ^Kernel, t: Type, out: ^[dynamic]Product, r: Rewrite = nil) 
 			append(out, Product{invalid, r})
 			return
 		}
-		for x in reached do products(k, branch_product(k, p.branches[x.branch], x.rewrite, p.target), out, nested_rewrite(r, x.rewrite))
+		for x in reached {
+			inner := make([dynamic]Rewriting)
+			append(&inner, ..r)
+			append(&inner, ..x.rewrite)
+			products(k, branch_product(k, p.branches[x.branch], x.rewrite, p.target), out, inner[:])
+		}
 		return
 	}
-	if o, is_op := t.(^Operation); is_op {
-		for a, i in o.args {
-			p, is_pattern := a.(^Pattern)
-			if !is_pattern || has_effect(p) do continue
-			reached, _, invalid := reaches(k, p.target, p.branches)
-			if invalid != nil {
-				append(out, Product{invalid, r})
-				return
-			}
-			for x in reached {
-				args := make([]Type, len(o.args))
-				for b, j in o.args do args[j] = j == i ? branch_product(k, p.branches[x.branch], x.rewrite, p.target) : rewrite(k, b, x.rewrite)
-				products(k, operation_law(k, o.op, args, o.span), out, nested_rewrite(r, x.rewrite))
-			}
-			return
-		}
-	}
 	append(out, Product{t, r})
-}
-
-// nested_rewrite: the rewrite of a branch inside another, r: what it narrows, as it narrows
-// it there.
-nested_rewrite :: proc(r, inner: Rewrite) -> Rewrite {
-	out := r
-	for x in inner {
-		if x.unknown != nil do out = rewriting(out, x.unknown, x.term)
-		else do out = append_read(out, x.read, x.term)
-	}
-	return out
 }
 
 // read_in: what a product holds, read under the rewrite of its branch.
@@ -3104,7 +2511,6 @@ summed_call :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
 summed_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: Type) -> (^Scope, bool) {
 	for x in k.summed do if x.root == root && x.field == field && same(k, x.lo, lo) && same(k, x.hi, hi) do return x.sum, x.sum != nil
 	append(&k.summed, Summed{root, field, lo, hi, nil})
-	given_toggled(k, .Summed, nil, len(k.summed))
 	f := copy_scope(k, root, nil)
 	f.source, f.name = nil, strings.concatenate({"Σ", root.name})
 	p: ^Binding
@@ -3117,7 +2523,6 @@ summed_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: Type)
 		break
 	}
 	k.summed[len(k.summed) - 1].sum = f
-	given_toggled(k, .Summed, nil, len(k.summed))
 	return f, true
 }
 
@@ -3339,7 +2744,6 @@ tupled_call :: proc(k: ^Kernel, m: ^Copier, c: ^Collapse, scope: ^Scope) -> (Typ
 tupled_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: i128) -> (^Scope, bool) {
 	for x in k.tupled do if x.root == root && x.field == field && x.lo == lo && x.hi == hi do return x.tuple, x.tuple != nil
 	append(&k.tupled, Tupled{root, field, lo, hi, nil})
-	given_toggled(k, .Tupled, nil, len(k.tupled))
 	t := copy_scope(k, root, nil)
 	t.source, t.name = nil, strings.concatenate({"⊗", root.name})
 	p: ^Binding
@@ -3352,7 +2756,6 @@ tupled_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: i128)
 		break
 	}
 	k.tupled[len(k.tupled) - 1].tuple = t
-	given_toggled(k, .Tupled, nil, len(k.tupled))
 	return t, true
 }
 
@@ -3461,9 +2864,9 @@ over_fold :: proc(k: ^Kernel, s: ^Scope, field: ^Binding, f: ^Fold, span: syn.Sp
 	first := call(k, s, root, field, f.inits[at], span) or_return
 	next := call(k, s, root, field, rewrite(k, step, rewriting(nil, y, z)), span) or_return
 	init, init_read := production_at(k, first) or_return
-	read_equation(k, init_read, false)
+	init_read.read = false
 	value, value_read := production_at(k, next) or_return
-	read_equation(k, value_read, false)
+	value_read.read = false
 	// f{t -> y}!, the other fields as in s: w
 	w := new_unknown(k, nil)
 	family := family_of(k, init) or_return

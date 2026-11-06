@@ -1,5 +1,12 @@
 # Night log
 
+## Reverted (06:40 UTC)
+The night's kernel, backend, test and spec changes are reverted to 3ba0b05: they
+built a second reader of recursions beside the normal form, duplicated the length
+and bound mechanisms, keyed caches by where a question is asked, and unfolded
+steps — not the algebra. The faithful benchmark ports in bench/goose are kept.
+What follows is the history of that night, kept for reference only.
+
 The values a field takes across a recursion — an integer, a scope field by field,
 a run carved to suffixes of itself (Suff(T)) — are what the call gives it closed
 under what each call carves it to: §5.6's law, already in the spec, not a new one.

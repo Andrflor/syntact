@@ -333,49 +333,19 @@ join_shapes :: proc(k: ^Kernel, cells: []Type) -> []Type {
 		for s, i in g {
 			places := placed(k, s, .Shape)
 			rows[i] = make([]Type, len(places))
-			for p, j in places do rows[i][j], _ = place_set(k, p)
+			for p, j in places do rows[i][j] = binding_color(k, p)
 		}
 		template := placed(k, g[0], .Shape)
 		for row in product_rows(k, rows) do append(&out, product_shape(template, row))
 	}
-	// runs of one piece: P * M | P * N = P * (M | N)
-	if len(out) < 2 do return out[:]
-	Runs :: struct {
-		item, lengths, like: Type,
-		at:                  int,
-	}
-	runs := make([dynamic]Runs)
-	joined := make([dynamic]Type)
-	next_run: for c in out {
-		if p, m, one := one_piece(k, c); one {
-			for &r in runs do if same(k, r.item, p) {
-				r.lengths = or_law(k, {r.lengths, m})
-				joined[r.at] = nil
-				continue next_run
-			}
-			append(&runs, Runs{p, m, c, len(joined)})
-		}
-		append(&joined, c)
-	}
-	if len(joined) == len(out) do return out[:]
-	for r in runs do if joined[r.at] == nil do joined[r.at] = run_of_piece(k, r.like, r.item, r.lengths)
-	return joined[:]
+	return out[:]
 }
 
-// joinable: a shape each of whose places admits a set of its own (place_set).
+// joinable: a shape whose places are all colored and hold no value.
 joinable :: proc(k: ^Kernel, s: ^Scope) -> bool {
 	if !is_shape(k, s) do return false
-	for p in placed(k, s, .Shape) do if _, admits := place_set(k, p); !admits do return false
+	for p in placed(k, s, .Shape) do if p.color == nil || p.value != nil do return false
 	return true
-}
-
-// place_set: what a place of a shape admits: its color, holding no value; a value
-// written there without color, that value — a value is a set (§5.1).
-place_set :: proc(k: ^Kernel, p: ^Binding) -> (set: Type, ok: bool) {
-	if p.color != nil do return binding_color(k, p), p.value == nil
-	if p.value == nil || p.kind == .Expand do return
-	set = values(k, binding_value(k, p)) or_return
-	return set, is_constant(set)
 }
 
 // same_structure: the same names, kinds and order.
@@ -520,7 +490,7 @@ product_pair :: proc(k: ^Kernel, x, y: Type) -> (a, b: ^Scope, ok: bool) {
 shape_row :: proc(k: ^Kernel, s: ^Scope) -> []Type {
 	places := placed(k, s, .Shape)
 	row := make([]Type, len(places))
-	for p, i in places do row[i], _ = place_set(k, p)
+	for p, i in places do row[i] = binding_color(k, p)
 	return row
 }
 
@@ -550,115 +520,6 @@ product_minus :: proc(k: ^Kernel, x: Type, ys: []Type) -> (rows: [][]Type, ok: b
 		current = next
 	}
 	return current[:], true
-}
-
-// --- runs of one piece ---
-//
-// A shape of unnamed places and runs whose bindings all take one color P admits
-// the runs of P of the lengths N it admits: it is {...({P:} * N):}, as Arden reads
-// it (§5.6), and its expansions are their bindings placed (§5.3). Runs of one piece
-// meet and part by their lengths, as strings do by their counts (§4.6,
-// t * (m | n) = (t * m) | (t * n)); two runs of no common binding share only {}:
-//
-//   P * M & Q * N    = (P & Q) * (M & N)
-//   P * M & ~(Q * N) = P * (M & ~N)          P within Q
-//   P * M | P * N    = P * (M | N)
-
-// one_piece: the runs of one color, read as that color and the lengths they take, a
-// constant set (run_piece).
-one_piece :: proc(k: ^Kernel, t: Type) -> (item, lengths: Type, ok: bool) {
-	item, lengths = run_piece(k, t) or_return
-	return item, lengths, decided(lengths)
-}
-
-// run_piece: the runs of one color, read as that color and the lengths they take, a
-// set or a term: a shape whose bindings all take it, or a repetition {P:} * N of a
-// piece of one binding (§4.6).
-run_piece :: proc(k: ^Kernel, t: Type) -> (item, lengths: Type, ok: bool) {
-	#partial switch v in t {
-	case ^Operation:
-		if v.op != .Mul do return
-		piece := v.args[0].(^Scope) or_return
-		inner := placed(k, piece, .Shape)
-		if len(inner) != 1 || is_run(inner[0]) || inner[0].color == nil || inner[0].name != "" do return
-		return binding_color(k, inner[0]), v.args[1], true
-	case ^Scope:
-		// a shape with a named binding is a record, not a run
-		products := false
-		for b in v.bindings do products ||= b.kind == .Product
-		if !products do for b in v.bindings do if b.name != "" do return
-		fixed, colors, counts := run_form(k, v) or_return
-		// {}: the run of no piece, of any color
-		if len(colors) == 0 && fixed == 0 && counts != nil && is_int(counts, 0) do return None{}, Int(0), true
-		if len(colors) == 0 do return
-		for c in colors[1:] do if !same(k, c, colors[0]) do return
-		n := Int(i128(fixed))
-		lengths = counts == nil ? range_law(k, n, nil, .Int, v.span) : exact_law(k, .Add, {counts, n}, v.span)
-		return colors[0], lengths, true
-	}
-	return
-}
-
-// run_of_piece: the runs of item of the lengths given, of the kind of like — a
-// shape, or a repetition: none when there are none; the shape {} when only the
-// empty one.
-run_of_piece :: proc(k: ^Kernel, like: Type, item, counts: Type) -> Type {
-	lengths := counts
-	if is_none(lengths) do return None{}
-	_, shape := like.(^Scope)
-	if is_none(item) {
-		if !included(k, Int(0), lengths) do return None{}
-		lengths = Int(0)
-	}
-	if shape && is_int(lengths, 0) do return run_scope(k, nil)
-	piece := new_scope(nil, {})
-	piece.source, piece.complete, piece.reached = piece, true, true
-	place := new_binding(piece, .Push, {})
-	place.color, place.typed_color = item, item
-	if !shape do return new_operation(.Mul, piece, lengths)
-	return repeated(k, piece, lengths, {})
-}
-
-// pieces_meet: x & y, both runs of one piece: (P & Q) * (M & N), whatever their
-// lengths.
-pieces_meet :: proc(k: ^Kernel, x, y: Type) -> (out: Type, ok: bool) {
-	p, m := run_piece(k, x) or_return
-	q, n := run_piece(k, y) or_return
-	item, lengths := and_law(k, {p, q}), and_law(k, {m, n})
-	return run_of_piece(k, x, item, lengths), true
-}
-
-// pieces_minus: the runs of one piece x without the runs ys, each of one piece
-// within or apart from x's: false otherwise.
-pieces_minus :: proc(k: ^Kernel, x: Type, ys: []Type) -> (out: Type, ok: bool) {
-	p, m := one_piece(k, x) or_return
-	lengths := m
-	for y in ys {
-		q, n := one_piece(k, y) or_return
-		switch {
-		case included(k, p, q):
-			lengths = and_law(k, {lengths, not_law(k, n)})
-		case apart(k, p, q):
-			lengths = and_law(k, {lengths, not_law(k, and_law(k, {n, Int(0)}))})
-		case:
-			return
-		}
-	}
-	return run_of_piece(k, x, p, lengths), true
-}
-
-// computed_whole: a constant whose & and ~ with any other such one the laws compute
-// whole — decided, or runs of one piece beside decided cells.
-computed_whole :: proc(k: ^Kernel, t: Type) -> bool {
-	if decided(t) do return true
-	if !is_constant(t) do return false
-	one: [1]Type
-	cells, _ := cells_in(t, &one)
-	for c in cells {
-		if f := cell_family(c); f != .Value && f != .Other do continue
-		if _, _, runs := one_piece(k, c); !runs do return false
-	}
-	return true
 }
 
 // --- & of cells ---
@@ -699,11 +560,9 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 			}
 			return cell(k, product_shape(placed(k, a, .Shape), row))
 		}
-		if met, runs := pieces_meet(k, x, y); runs do return cell(k, met)
-		return cell(k, kept_meet(k, x, y))
+		return cell(k, new_and(x, y))
 	case fx == .Other:
 		if same(k, x, y) do return cell(k, x)
-		if met, runs := pieces_meet(k, x, y); runs do return cell(k, met)
 		if fy == .Text || fy == .Char || fy == .Bool || fy == .Value do return nil // a number is none of them
 		if fy == .Int {
 			// the least and greatest elements of x: nothing between them in y, nothing in common
@@ -712,22 +571,9 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 				if is_none(discrete_cell(.Int, max_bound(lo, lo_y), min_bound(hi, hi_y))) do return nil
 			}
 		}
-		return cell(k, kept_meet(k, x, y))
+		return cell(k, new_and(x, y))
 	}
 	return nil
-}
-
-// kept_meet: x & y kept written, flattened, each term once: (a & b) & a = a & b
-// (§4.1).
-kept_meet :: proc(k: ^Kernel, x, y: Type) -> Type {
-	terms := make([dynamic]Type)
-	for t in ([]Type{x, y}) {
-		parts := []Type{t}
-		if both, met := t.(^And); met do parts = both.terms
-		for p in parts do if !contains_same(k, terms[:], p) do append(&terms, p)
-	}
-	if len(terms) == 1 do return terms[0]
-	return new_and(..terms[:])
 }
 
 // --- & ~ of cells ---
@@ -806,10 +652,6 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 			for row in rows do _ = cell(k, product_shape(template, row))
 			return pushed(k, out)
 		}
-		if left, runs := pieces_minus(k, x, ys); runs {
-			release(k, from)
-			return cell(k, left)
-		}
 		left := new_and(x, new_not(cells_term(k, ys)))
 		release(k, from)
 		return cell(k, left)
@@ -817,17 +659,6 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 		for y in u do if g := cell_family(y); g == .Int || g == .Real || g == .Other do push(k, y)
 		ys := pushed(k, from)
 		if len(ys) == 0 do return cell(k, x)
-		// runs of one piece: what is taken away of them is runs of one piece too
-		if _, _, runs := one_piece(k, x); runs {
-			pieces := mark(k)
-			for y in ys do if cell_family(y) == .Other do push(k, y)
-			left, computed := pieces_minus(k, x, pushed(k, pieces))
-			if computed {
-				release(k, from)
-				return cell(k, left)
-			}
-			release(k, pieces)
-		}
 		if lo, hi, bounded := int_bounds(k, x); bounded {
 			hull := discrete_cell(.Int, lo, hi)
 			ints_from := mark(k)
@@ -942,9 +773,7 @@ discrete_minus_all :: proc(k: ^Kernel, x: Type, ys: []Type) -> []Type {
 
 // Real_Bounds: the bounds of a real cell, read on its term: nil is infinite; an
 // open bound is the `& ~p` of `>p` (§4.3). Its format: the reals between the bounds
-// it holds, every one or those of a floating-point format (real.odin). A format holds
-// no real beyond its greatest finite value: a cell of a format is bounded by its
-// extremes, written as no bound.
+// it holds, every one or those of a floating-point format (real.odin).
 Real_Bounds :: struct {
 	lo, hi:           Maybe(Real),
 	lo_open, hi_open: bool,
@@ -960,11 +789,6 @@ real_bounds :: proc(t: Type) -> Real_Bounds {
 		if x, ok := v.lo.(Real); ok do b.lo = x
 		if x, ok := v.hi.(Real); ok do b.hi = x
 		b.format = real_format(v.family)
-		if b.format != .Exact {
-			greatest, _ := greatest_finite(b.format)
-			if b.lo == nil do b.lo, _ = real_neg(greatest)
-			if b.hi == nil do b.hi = greatest
-		}
 	case ^And:
 		for x in v.terms do if _, ok := x.(^Range); ok do b = real_bounds(x)
 		for x in v.terms {
@@ -1003,7 +827,7 @@ real_empty :: proc(b: Real_Bounds) -> bool {
 	} else {
 		greatest, computed := greatest_finite(b.format)
 		if !computed do return false
-		least, _ = real_neg(greatest)
+		least = Real{-greatest.num, greatest.den}
 	}
 	if !has_hi do return false
 	c := real_compare(least, hi)
@@ -1017,10 +841,12 @@ beyond_format :: proc(r: Real, f: Real_Format) -> bool {
 }
 
 // greatest_finite: the greatest finite value of the format f: 2^precision - 1 at
-// the greatest exponent.
+// the greatest exponent; false beyond the integers written here.
 greatest_finite :: proc(f: Real_Format) -> (Real, bool) {
 	format := FORMATS[f]
-	return real_scaled((i128(1) << uint(format.precision)) - 1, 1, format.max_exponent - format.precision + 1)
+	if format.precision >= 127 do return {}, false
+	mantissa := Real{(i128(1) << uint(format.precision)) - 1, 1}
+	return scale_pow2(mantissa, format.max_exponent - format.precision + 1)
 }
 
 real_cell :: proc(b: Real_Bounds) -> Type {
@@ -1028,13 +854,6 @@ real_cell :: proc(b: Real_Bounds) -> Type {
 	lo, has_lo := b.lo.?
 	hi, has_hi := b.hi.?
 	if has_lo && has_hi && lo == hi do return lo
-	if b.format != .Exact {
-		// the extremes of a format are written as no bound
-		greatest, _ := greatest_finite(b.format)
-		least, _ := real_neg(greatest)
-		if has_lo && !b.lo_open && lo == least do has_lo = false
-		if has_hi && !b.hi_open && hi == greatest do has_hi = false
-	}
 	r := new_range(has_lo ? Type(lo) : nil, has_hi ? Type(hi) : nil, format_family(b.format))
 	terms := make([dynamic]Type)
 	append(&terms, r)
@@ -1447,11 +1266,6 @@ div_extended :: proc(x, y: Extended) -> (Extended, bool) {
 
 // included: a & ~b = none: every element of a is in b.
 included :: proc(k: ^Kernel, a, b: Type) -> bool {
-	// within a meet when within each of its terms (§4.1)
-	if both, met := b.(^And); met {
-		for t in both.terms do if !included(k, a, t) do return false
-		return true
-	}
 	return is_none(and_law(k, {a, not_law(k, b)}))
 }
 

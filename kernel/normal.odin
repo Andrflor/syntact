@@ -203,15 +203,6 @@ or_law :: proc(k: ^Kernel, terms: []Type) -> Type {
 }
 
 and_law :: proc(k: ^Kernel, terms: []Type) -> Type {
-	// runs of one piece, whatever their lengths: P * M & Q * N = (P & Q) * (M & N) (§4.6)
-	for t, i in terms do for u, j in terms[i + 1:] {
-		if _, written := t.(^Operation); !written do continue
-		met := pieces_meet(k, t, u) or_continue
-		others := make([dynamic]Type)
-		append(&others, met)
-		for x, l in terms do if l != i && l != i + 1 + j do append(&others, x)
-		return len(others) == 1 ? met : and_law(k, others[:])
-	}
 	// a set the laws keep written, u8 * u8, lies in the range that bounds it: within
 	// what that range is within, out of what it is out of
 	for t, i in terms {
@@ -255,12 +246,8 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 	defer release(k, from)
 	if invalid := flattened(k, terms, is_or); invalid != nil do return invalid
 	flat := pushed(k, from)
-	// a bound closed by what it excludes, which may make it constant: read with the
-	// constants
-	if !is_or do closed_bounds(k, flat)
 	constants := mark(k)
 	for t in flat {
-		if t == nil do continue
 		switch {
 		case is_none(t):
 			if !is_or do return None{}
@@ -271,6 +258,7 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 		}
 	}
 	others := mark(k)
+	if !is_or do closed_bounds(k, flat)
 	for t in flat do if t != nil && !is_constant(t) && !contains_same(k, pushed(k, others), t) do push(k, t)
 	// a & ~a = none, a | ~a = ~none (§2)
 	for t in pushed(k, others) {
@@ -492,7 +480,6 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	case .Not_Asked:
 	}
 	b.state = .In_Progress
-	given_toggled(k, .Binding, b)
 	color := binding_color(k, b)
 	value: Type
 	if b.value == nil {
@@ -525,7 +512,6 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 		if s, is_scope := value.(^Scope); is_scope && shape != nil && is_shape(k, shape) do value = colored(k, s, shape)
 	}
 	b.typed_value, b.state = value, .Done
-	given_toggled(k, .Binding, b)
 	return value
 }
 
@@ -562,14 +548,6 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 		return v
 	case ^Is:
 		return v.term
-	case ^And:
-		// a meet the laws keep written: the default of one of its terms that it holds
-		for t in v.terms {
-			if is_negated(t) do continue
-			d := default_of(k, t, span)
-			if !is_invalid(d) && is_bool(in_law(k, d, c), true) do return d
-		}
-		return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
 	case ^Operation:
 		// a run of n pieces: none of them, {}, when n may be 0; otherwise n times the
 		// default of a piece of one binding: the run a fold builds (§5.5)
@@ -627,9 +605,7 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 			return cell
 		case .Value:
 			if i, ok := cell.(^Is); ok do return i.term
-			if _, scope := cell.(^Scope); scope do return default_of(k, cell, span)
-			// a meet the laws leave: no first element is written
-			return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
+			return default_of(k, cell, span)
 		case .Other:
 			return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
 		}

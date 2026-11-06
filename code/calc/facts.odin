@@ -176,10 +176,9 @@ binary_bounds :: proc(op: code.Op, a, b: code.Bounds) -> code.Bounds {
 		}
 	case .Mul_High:
 		// a not negative times an integer of 64 bits as unsigned, its high half
-		if a.lo >= 0 && b.lo >= 0 && b.lo == b.hi {
-			// the product of two words, exact in 128 bits unsigned
-			high :: proc(x, m: i128) -> i128 {return i128((u128(x) * u128(m)) >> 64)}
-			return {high(a.lo, b.lo), high(a.hi, b.lo)}
+		if a.lo >= 0 && b.lo == b.hi {
+			m := b.lo
+			return {(a.lo * m) >> 64, (a.hi * m) >> 64}
 		}
 	case .Pow:
 		if a.lo >= 0 && b.lo >= 0 && b.hi < 64 {
@@ -238,8 +237,6 @@ exact :: proc(op: code.Op, x, y: i128) -> (r: i128, ok: bool) {
 		}
 	case .Neg:
 		r = -x
-	case .Round32:
-		return // an operation on floats
 	case .And:
 		r = x & y
 	case .Or:

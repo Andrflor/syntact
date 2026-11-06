@@ -17,9 +17,8 @@ import "core:fmt"
 //   round(t ? {c -> p …})  = t ? {c -> round(p) …}
 //   round of a set         = the values of the format between its rounded least and
 //                            greatest — rounding keeps the order —; ~none when the
-//                            set has no bound, or one that rounds beyond the greatest
-//                            value: ±∞ is not a real. A value of a format lies within
-//                            its extremes (Real_Bounds)
+//                            set has no bound, or one beyond the greatest value: ±∞
+//                            is not a real
 //   a op b                 = round_f(a op b), f the widest format of a and b: the
 //                            exact result; a known operand is first rounded to f
 

@@ -173,7 +173,7 @@ hash_term :: proc(t: Type) -> u64 {
 	case Int:
 		return mix(mix(2, u64(i128(v))), u64(i128(v) >> 64))
 	case Real:
-		return mix(mix(mix(3, u64(v.num) ~ u64(v.num >> 64)), u64(v.den) ~ u64(v.den >> 64)), u64(v.exp))
+		return mix(mix(3, u64(v.num) ~ u64(v.num >> 64)), u64(v.den) ~ u64(v.den >> 64))
 	case Bool:
 		return mix(4, u64(v))
 	case None:

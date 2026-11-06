@@ -93,14 +93,10 @@ source :: proc(p: ^code.Program) -> (string, string) {
 		strings.write_string(&w.b, "static char *arena_end;\n")
 		strings.write_string(&w.b, "static inline int64_t arena_reserve(int64_t n) { char *p = arena_end; arena_end += (n + 7) & ~(int64_t)7; return (int64_t)(intptr_t)p; }\n\n")
 	}
-	// a symbol is called as the System V machine calls it, the x86-64 backend's
-	// way: its arguments in their registers, and the count of the vector registers
-	// they fill in al — what C does for the arguments of a variadic prototype
 	for imp, i in p.imports {
 		args := make([dynamic]string)
 		for a in imp.args do append(&args, C_TYPES[a])
 		if len(args) == 0 do append(&args, "void")
-		else do append(&args, "...")
 		fmt.sbprintfln(&w.b, "extern %s %s(%s) __asm__(\"%s\");", answer_type(imp), w.symbols[i], strings.join(args[:], ", "), imp.symbol)
 	}
 	if len(p.imports) > 0 do strings.write_string(&w.b, "\n")
@@ -554,9 +550,6 @@ unary :: proc(w: ^Writer, u: code.Unary) -> string {
 		return fmt.tprintf("wrap_neg(%s)", a)
 	case .Not:
 		return fmt.tprintf("~%s", a)
-	case .Round32:
-		// a float holds every float of 32 bits: the nearest one, as a double
-		return fmt.tprintf("(double)(float)%s", a)
 	}
 	return a
 }
@@ -583,11 +576,7 @@ binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
 	case .Add, .Sub, .Mul:
 		if proven(w, x.dst) do return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
 		return fmt.tprintf("%s(%s, %s)", WRAPS[x.op], a, b), ""
-	case .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
-		// one word read as unsigned: both are, as x64 compares them
-		if code.unsigned(w.f.kinds[x.a]) || code.unsigned(w.f.kinds[x.b]) do return fmt.tprintf("(uint64_t)%s %s (uint64_t)%s", a, C_OPS[x.op], b), ""
-		return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
-	case .Div, .Mod, .And, .Or, .Xor:
+	case .Div, .Mod, .And, .Or, .Xor, .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
 		return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
 	case .Shl:
 		return fmt.tprintf("wrap_shl(%s, %s)", a, b), ""
@@ -596,7 +585,7 @@ binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
 		shift := w.f.kinds[x.b].bounds
 		if shift.lo >= 0 && shift.hi <= 63 do return fmt.tprintf("%s >> %s", a, b), ""
 		return fmt.tprintf("%s >> (%s & 63)", a, b), ""
-	case .Neg, .Round32, .Not, .Pow, .Mul_High:
+	case .Neg, .Not, .Pow, .Mul_High:
 	}
 	return "", "a binary operation C does not compute"
 }
@@ -653,7 +642,6 @@ C_OPS := [code.Op]string {
 	.Pow = "**",
 	.Mul_High = "",
 	.Neg = "-",
-	.Round32 = "",
 	.And = "&",
 	.Or  = "|",
 	.Xor = "^",

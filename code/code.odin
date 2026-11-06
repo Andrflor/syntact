@@ -97,7 +97,6 @@ Op :: enum u8 {
 	Pow, // an integer or a float to an integer ≥ 0
 	Mul_High, // the high 64 bits of the product of two integers of 64 bits as unsigned
 	Neg,
-	Round32, // a float to the nearest float of 32 bits, the even one on a tie, as a float: round32 (specs/types.md §4.10)
 	And, // bitwise; on booleans, and
 	Or,
 	Xor,

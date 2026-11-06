@@ -1,7 +1,0 @@
-{
-  "name": "tc_orbit_points_out_of_base_sum",
-  "description": "The points of an orbit before its μ are out of its base: d + 2i & ~(max + 1..), read where max and d are unknowns, then at 8 and 4, gives 4 + 6 + 8 — whether d is given or left at its default, and whatever the color of d.",
-  "source": "depths -> {\n  (0..30):max -> 15\n  (4..32):d -> 4\n  -> d ? {\n    >max -> 0\n    -> d + depths{max -> max  d -> d + 2}!\n  }\n}\nf -> {\n  (0..30):max -> 15\n  u8:d -> 4\n  -> d ? {\n    >max -> 0\n    -> d + f{max -> max  d -> d + 2}!\n  }\n}\nx -> depths{max -> 8}!\nz -> f{max -> 8}!\ny -> depths{max -> 8  d -> 4}!\n-> x + z + y",
-  "type": "54",
-  "expect_errors": []
-}

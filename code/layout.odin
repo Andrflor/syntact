@@ -14,10 +14,10 @@ import kernel "../kernel"
 // bindings of a run follow one another at the stride of its item.
 //
 // The layout is read on the set a value may take, as the kernel gives it: a set of
-// one family is a word; a shape of named fields is a scope of fields; a recursive
-// scope whose productions are shapes of named fields is a tree of those shapes
-// (§5.6); a shape whose places are not named, its runs included — a recursive one
-// solved by Arden —, is a run, its item what its places may hold (kernel.item_image).
+// one family is a word; a shape of named fields is a scope of fields; a shape whose
+// places are not named, its runs included — a recursive one solved by Arden —, is
+// a run, its item what its places may hold (kernel.item_image); a recursive scope
+// whose productions are shapes otherwise is a tree of those shapes (§5.6).
 
 Layout_Kind :: enum u8 {
 	Word,
@@ -38,7 +38,6 @@ Layout :: struct {
 	nodes:   []^Layout, // a tree: the fields of each shape
 	size:    int, // the bytes it takes in memory
 	align:   int,
-	after:   []Value, // a run: built where the run these values hold ends, in its memory (§4.13)
 }
 
 Field_Layout :: struct {
@@ -50,9 +49,9 @@ Field_Layout :: struct {
 // PAIR_BYTES: a run or a tree held in memory: two words.
 PAIR_BYTES :: 16
 
-// layout_of_set: the layout of the values of a set — of the term of, when one
-// is given —; false when the code holds none of it.
-layout_of_set :: proc(l: ^Lowering, written: kernel.Type, of: kernel.Type = nil) -> (lay: ^Layout, ok: bool) {
+// layout_of_set: the layout of the values of a set; false when the code holds
+// none of it.
+layout_of_set :: proc(l: ^Lowering, written: kernel.Type) -> (lay: ^Layout, ok: bool) {
 	set := written
 	if set == nil do return nil, false
 	// a set over unknowns: laid out as what it may hold, a set of constants
@@ -67,22 +66,16 @@ layout_of_set :: proc(l: ^Lowering, written: kernel.Type, of: kernel.Type = nil)
 	if s, is_scope := set.(^kernel.Scope); is_scope && !kernel.recursive(s) && kernel.is_shape(l.k, s) {
 		if fields, named := fields_layout(l, s); named do return fields, true
 	}
-	// a recursive scope whose productions are shapes of named fields: a tree
-	if s, is_scope := set.(^kernel.Scope); is_scope && kernel.recursive(s) {
-		if tree, laid := tree_layout(l, s); laid do return tree, true
-	}
 	if item, has := kernel.item_image(l.k, set); has {
-		// a run of a length known is held as its bindings, in values: the length
-		// its set admits, or that of the term — a call's, by the recursion of its
-		// bounds (§5.6)
-		n, read := kernel.length_image(l.k, set)
-		if !read && of != nil do n, read = kernel.layout_image(l.k, kernel.op(l.k, .Length, of))
-		if !read do return
+		// a run of a length known is held as its bindings, in values
+		n := kernel.length_image(l.k, set) or_return
 		if _, known := n.(kernel.Int); known do return
 		inner := layout_of_set(l, item) or_return
 		return new_clone(Layout{kind = .Run, item = inner, size = PAIR_BYTES, align = 8}), true
 	}
-	return
+	s := set.(^kernel.Scope) or_return
+	if !kernel.recursive(s) do return
+	return tree_layout(l, s)
 }
 
 // tree_layout: a recursive scope whose productions are shapes of fields, as a
@@ -96,48 +89,39 @@ tree_layout :: proc(l: ^Lowering, s: ^kernel.Scope) -> (lay: ^Layout, ok: bool) 
 	for p in kernel.placed(l.k, s, .Shape) {
 		if p.kind != .Product do continue
 		shape, is_scope := kernel.binding_type(l.k, p).(^kernel.Scope)
-		if !is_scope || !named_shape(l, shape) do return nil, false
+		if !is_scope || !kernel.is_shape(l.k, shape) do return nil, false
 		append(&shapes, shape)
 	}
 	lay.shapes = shapes[:]
 	append(&l.trees, lay)
-	defer if !ok do pop(&l.trees)
 	for shape in shapes do append(&nodes, fields_layout(l, shape.(^kernel.Scope)) or_return)
 	lay.nodes = nodes[:]
 	return lay, true
 }
 
-// named_shape: a shape whose places are all named bindings.
-named_shape :: proc(l: ^Lowering, s: ^kernel.Scope) -> bool {
-	if !kernel.is_shape(l.k, s) do return false
-	for p in kernel.placed(l.k, s, .Shape) do if p.name == "" || kernel.is_run(p) || p.kind != .Push && p.kind != .Pull do return false
-	return true
-}
-
-// fields_layout: a shape of named fields, each at its natural alignment — a hole is
-// a type and takes no bits (§4.11) —; false when a place is not named, or holds
-// what the code does not lay out.
+// fields_layout: a shape of named fields, each at its natural alignment; false when
+// a place is not named, or holds what the code does not lay out.
 fields_layout :: proc(l: ^Lowering, s: ^kernel.Scope) -> (lay: ^Layout, ok: bool) {
-	if !named_shape(l, s) do return nil, false
-	fields := make([dynamic]Field_Layout)
+	places := kernel.placed(l.k, s, .Shape)
+	fields := make([]Field_Layout, len(places))
 	size, align := 0, 1
-	for p in kernel.placed(l.k, s, .Shape) {
-		if p.kind == .Pull do continue
+	for p, i in places {
+		if p.name == "" || kernel.is_run(p) || p.kind != .Push && p.kind != .Pull do return nil, false
 		set := kernel.binding_color(l.k, p)
 		if set == nil do set = kernel.values(l.k, kernel.binding_value(l.k, p)) or_return
 		inner := layout_of_set(l, set) or_return
 		size = (size + inner.align - 1) / inner.align * inner.align
-		append(&fields, Field_Layout{p.name, inner, size})
+		fields[i] = Field_Layout{p.name, inner, size}
 		size += inner.size
 		align = max(align, inner.align)
 	}
-	return new_clone(Layout{kind = .Fields, fields = fields[:], size = (size + align - 1) / align * align, align = align}), true
+	return new_clone(Layout{kind = .Fields, fields = fields, size = (size + align - 1) / align * align, align = align}), true
 }
 
 // layout_of_term: the layout of the values t may take.
 layout_of_term :: proc(l: ^Lowering, t: kernel.Type) -> (lay: ^Layout, ok: bool) {
-	x := kernel.given(l.k, t)
-	return layout_of_set(l, kernel.values(l.k, x) or_return, x)
+	set := kernel.values(l.k, kernel.given(l.k, t)) or_return
+	return layout_of_set(l, set)
 }
 
 // layout_machines: the machine of each value that holds a value of the layout.
@@ -358,7 +342,6 @@ build :: proc(l: ^Lowering, t: kernel.Type, lay: ^Layout, tail := false) -> []Va
 		if lay.kind == .Run do return fold(l, v, lay)
 	case ^kernel.Scope:
 		if lay.kind == .Tree do return node_of(l, v, lay)
-		if lay.after != nil do return run_after(l, v, lay)
 		return run_of(l, v, lay)
 	case ^kernel.Pattern:
 		return pattern(l, v, tail, lay)
@@ -407,180 +390,64 @@ run_of :: proc(l: ^Lowering, s: ^kernel.Scope, run: ^Layout) -> []Value {
 // the place after the last.
 placed :: proc(l: ^Lowering, a, at: Value, data: []^kernel.Binding, parts: [][]Value, run: ^Layout) -> Value {
 	at := at
-	for b, i in data do at = place_part(l, a, at, b, parts[i], run)
+	for b, i in data {
+		if b.kind == .Expand {
+			copy_items(l, element(l, a, at, run), parts[i][0], parts[i][1], run, run)
+			at = binary(l, .Add, at, parts[i][1], .Int)
+			continue
+		}
+		store(l, element(l, a, at, run), 0, run.item, parts[i])
+		at = binary(l, .Add, at, constant(l, 1), .Int)
+	}
 	return at
 }
 
-// place_part: a binding of a run stored at the place at of the run at a — an
-// expansion, its bindings copied —; the place after it.
-place_part :: proc(l: ^Lowering, a, at: Value, b: ^kernel.Binding, part: []Value, run: ^Layout) -> Value {
-	if b.kind == .Expand {
-		copy_items(l, element(l, a, at, run), part[0], part[1], run, run)
-		return binary(l, .Add, at, part[1], .Int)
-	}
-	store(l, element(l, a, at, run), 0, run.item, part)
-	return binary(l, .Add, at, constant(l, 1), .Int)
-}
-
-// grows: the state i of a fold is a run that grows in a memory of its own (§4.13):
-// each product of its update is a run written as its bindings — the state first,
-// {...x e…}, what follows it placed after it, in its place; or a run of its own,
-// placed where the state ends. Nothing is placed where a value the state took
-// holds its bindings: those stay what they are, wherever they are read. Its memory
-// is reserved whole before the first step (grown), so its size is known.
+// grows: the update of the state i of a fold is {...x e…}, x the state, read
+// nowhere else: x is read for the last time, and what follows it is built in its
+// place (§4.13).
 grows :: proc(l: ^Lowering, f: ^kernel.Fold, i: int) -> bool {
-	_, known := region_length(l, f, i)
-	return known
-}
-
-// region_length: the bindings the memory of a state that grows holds (grows), what
-// the fold's value places after it included when it is {...x Q}: an update that
-// extends it, the final length, when its closed form is a term computed without a
-// fold of its own; otherwise what its steps may place, c bindings at most a step,
-// n steps: |init| + c·n, and what Q may place (§4.13, §5.6).
-region_length :: proc(l: ^Lowering, f: ^kernel.Fold, i: int) -> (n: kernel.Type, ok: bool) {
-	// c: the bindings a product places at most, where the state ends
-	most :: proc(l: ^Lowering, t: kernel.Type, x: ^kernel.Unknown) -> (c: i128, ok: bool) {
-		#partial switch v in t {
-		case ^kernel.Pattern:
-			if kernel.has_effect(v) do return
-			for b in v.branches do c = max(c, most(l, b.product, x) or_return)
-			return c, true
-		case ^kernel.Scope:
-			data := kernel.run_data(l.k, v)
-			if extends(l, t, x) do data = data[1:]
-			for b in data {
-				if b.kind != .Expand {
-					c += 1
-					continue
-				}
-				// a run expanded: its greatest length
-				_, hi := kernel.int_bounds(l.k, kernel.layout_image(l.k, kernel.op(l.k, .Length, kernel.binding_value(l.k, b))) or_return) or_return
-				c += hi.? or_return
-			}
-			return c, true
-		}
-		return
-	}
-	x := f.states[i]
-	placed_after := extends(l, f.value, x)
-	if extends(l, f.updates[i], x) {
-		ending := new_clone(f^)
-		if !placed_after do ending.value = x
-		n = kernel.op(l.k, .Length, ending)
-		if !holds_fold(n) do return n, true
-	}
-	c := most(l, f.updates[i], x) or_return
-	steps := kernel.fold_steps(l.k, f) or_return
-	q: i128
-	if placed_after do q = most(l, f.value, x) or_return
-	return kernel.op(l.k, .Add, kernel.op(l.k, .Length, f.inits[i]), kernel.op(l.k, .Mul, kernel.Int(c), steps), kernel.Int(q)), true
-}
-
-// holds_fold: t is computed by a fold, or holds one — a length left an operation
-// included.
-holds_fold :: proc(t: kernel.Type) -> bool {
-	if _, is_fold := t.(^kernel.Fold); is_fold do return true
-	if o, is_op := t.(^kernel.Operation); is_op && o.op == .Length do return true
-	for p in kernel.parts(t) do if holds_fold(p) do return true
-	return false
-}
-
-// extends: t is {...x e…}, x the state: what it places goes after x, in its place.
-extends :: proc(l: ^Lowering, t: kernel.Type, x: ^kernel.Unknown) -> bool {
-	s, is_scope := t.(^kernel.Scope)
+	s, is_scope := f.updates[i].(^kernel.Scope)
 	if !is_scope do return false
 	data := kernel.run_data(l.k, s)
 	if len(data) == 0 || data[0].kind != .Expand do return false
-	first, is_state := kernel.binding_value(l.k, data[0]).(^kernel.Unknown)
-	return is_state && kernel.same_unknown(first, x)
+	x, is_state := kernel.binding_value(l.k, data[0]).(^kernel.Unknown)
+	if !is_state || !kernel.same_unknown(x, f.states[i]) do return false
+	for b in data[1:] do if kernel.reads(l.k, kernel.binding_value(l.k, b), f.states[i]) do return false
+	for t, j in f.updates do if j != i && kernel.reads(l.k, t, f.states[i]) do return false
+	return true
 }
 
-// grown: a state that grows along the fold, its memory reserved whole before the
-// first step (§4.13), its init stored first.
+// grown: a state that grows along the fold, reserved whole before the first step
+// at its final length, the closed form of |fold| (§4.13, §5.6); its init stored
+// first.
 grown :: proc(l: ^Lowering, f: ^kernel.Fold, i: int, run: ^Layout) -> []Value {
-	out := make([]Value, 2)
-	if run.after != nil {
-		// built where the run it is placed in ends: in the memory of that run
-		inner := new_clone(run^)
-		inner.after = nil
-		init := build(l, f.inits[i], inner)
-		if l.error != "" do return nil
-		out[0], out[1] = element(l, run.after[0], run.after[1], inner), init[1]
-		if bounds_of(l.f, init[1]) != {0, 0} do copy_items(l, out[0], init[0], init[1], inner, inner)
-		hold(l, inner, out)
-		return out
-	}
-	length, known := region_length(l, f, i)
-	if !known do return fail_values(l, "the memory of %s has no closed form", kernel.print_type(f.states[i]))
+	ending := new_clone(f^)
+	ending.value = f.states[i]
+	length := kernel.op(l.k, .Length, ending)
+	if o, stays := length.(^kernel.Operation); stays && o.op == .Length do return fail_values(l, "the length of %s has no closed form", kernel.print_type(ending))
 	init := build(l, f.inits[i], run)
 	n := lower(l, length)
 	if l.error != "" do return nil
+	out := make([]Value, 2)
 	out[0], out[1] = reserve(l, n, run), init[1]
 	if bounds_of(l.f, init[1]) != {0, 0} do copy_items(l, out[0], init[0], init[1], run, run)
 	hold(l, run, out)
 	return out
 }
 
-// after: the layout of a run built where the run x ends, in its memory.
-after :: proc(run: ^Layout, x: []Value) -> ^Layout {
-	out := new_clone(run^)
-	out.after = x
-	return out
-}
-
-// run_after: a run written as its bindings, built where the run x ends (after):
-// {...x e…} places e… there, in the place of x; another run places its bindings
-// there, a run of its own. A run expanded that is built in place (in_place) is built
-// there: a value placed in another is laid out inside it (§4.13).
-run_after :: proc(l: ^Lowering, s: ^kernel.Scope, lay: ^Layout) -> []Value {
-	x := lay.after
-	run := new_clone(lay^)
-	run.after = nil
-	data := kernel.run_data(l.k, s)
-	extended := false
-	if len(data) > 0 && data[0].kind == .Expand {
-		first := lower_values(l, kernel.binding_value(l.k, data[0]))
-		extended = len(first) == 2 && first[0] == x[0] && first[1] == x[1]
-	}
-	if extended do data = data[1:]
-	out := make([]Value, 2)
-	at: Value
-	if extended {
-		out[0], at = x[0], x[1]
-	} else {
-		out[0], at = element(l, x[0], x[1], run), constant(l, 0)
-	}
-	for b in data {
-		v := kernel.binding_value(l.k, b)
-		if b.kind == .Expand && in_place(v) {
-			part := build(l, v, after(run, {out[0], at}))
-			if l.error != "" do return nil
-			at = binary(l, .Add, at, part[1], .Int)
-			continue
-		}
-		part := build(l, v, b.kind == .Expand ? run : run.item)
+// appended: the update {...x e…} of a state that grows: e… stored after the
+// bindings of x, in its place.
+appended :: proc(l: ^Lowering, x: []Value, update: kernel.Type, run: ^Layout) -> []Value {
+	data := kernel.run_data(l.k, update.(^kernel.Scope))[1:]
+	parts := make([][]Value, len(data))
+	for b, i in data {
+		parts[i] = build(l, kernel.binding_value(l.k, b), b.kind == .Expand ? run : run.item)
 		if l.error != "" do return nil
-		at = place_part(l, out[0], at, b, part, run)
 	}
-	out[1] = at
+	out := make([]Value, 2)
+	out[0], out[1] = x[0], placed(l, x[0], x[1], data, parts, run)
 	hold(l, run, out)
 	return out
-}
-
-// in_place: a run built where another ends, in its memory, as it is written (after):
-// written as its bindings, built by a fold, or a pattern of those — a pattern gives
-// one of its products (§6).
-in_place :: proc(t: kernel.Type) -> bool {
-	#partial switch v in t {
-	case ^kernel.Scope, ^kernel.Fold:
-		return true
-	case ^kernel.Pattern:
-		if kernel.has_effect(v) do return false
-		for b in v.branches do if !in_place(b.product) do return false
-		return true
-	}
-	return false
 }
 
 // --- trees (specs/types.md §5.6) ---

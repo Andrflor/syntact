@@ -114,16 +114,10 @@ CASES := []Binary_Case {
 	// a scope of fields is the values of its fields; a function gives back two in
 	// registers, the others in the frame of its caller
 	{"field of a scope", "p -> {a -> ??::u8  b -> 3}\n-> p.a + p.b", {{args = {"4"}, exit = 7}}},
-	// a term a loop's turns do not read, computed before it: a kernel term is total
-	// for the values its unknowns may take — 1000 / d where d is 1..100, the loop in
-	// the branch that narrows d —, so with no turn, or not reached, it does not trap
-	{"loop invariant before zero turns", "f -> {u32:n -> ??  (1..100):d -> ??  u32:i -> 0  acc -> 0\n  -> i ? {>=n -> acc  -> f{n -> n  d -> d  i -> i + 1  acc -> (acc + 1000 / d) % 1000}!}}\n-> {\n  n -> ??::u32\n  d -> ??::(0..100)\n  -> d ? {0 -> 0  -> f{n -> n  d -> d}!}\n}!", {{args = {"0", "5"}, exit = 0}, {args = {"3", "0"}, exit = 0}, {args = {"3", "7"}, exit = 75}}},
 	{"function that gives a scope", PAIR + "-> f{n -> ??::u32}!.a", {{args = {"10"}, exit = 54}, {args = {"100"}, exit = 49}}},
 	{"function that gives a scope, its other field", PAIR + "-> f{n -> ??::u32}!.b", {{args = {"0"}, exit = 1}, {args = {"10"}, exit = 2}}},
 	{"values beyond the registers", FOUR + "-> f{n -> ??::u32}!.d", {{args = {"0"}, exit = 0}, {args = {"5"}, exit = 7}}},
 	{"a float beyond the registers", FOUR + "-> f{n -> ??::u32}!.c", {{args = {"0"}, stdout = "0.500000\n"}, {args = {"5"}, stdout = "1.500000\n"}}},
-	// reals of 32 bits (specs/types.md §4.10): each operation rounded to the nearest
-	{"reals of 32 bits", "io -> <libc.so.6>{\n  printf -> {string:format, f64:x, -> !?::i32}\n}\nstep -> {\n  u32:n -> ??\n  (f32 & 0.0..1.0):x -> 0.0\n  -> n ? {\n    0 -> x\n    -> step{n -> n - 1  x -> x * 0.75 + 0.1}!\n  }\n}\n-> io.printf{format -> \"%.9g\\n\"  x -> step{n -> ??::u32}!}!", {{args = {"3"}, stdout = "0.231250018\n", exit = 12}, {args = {"1000"}, stdout = "0.399999946\n", exit = 12}}},
 	{"binding of a run", RUN + "-> f{n -> ??::u32}!.#2", {{args = {"0"}, exit = 20}, {args = {"5"}, exit = 21}}},
 	{"run read at a counter", TOTAL + "-> total{xs -> {1 2 3}  acc -> ??::u8}!", {{args = {"10"}, exit = 16}, {args = {"254"}, exit = 4}}},
 	// memory (specs/types.md §4.13): runs built by folds, reserved whole and grown

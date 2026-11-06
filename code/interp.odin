@@ -271,8 +271,6 @@ unary :: proc(op: Op, m: Machine, a: Datum) -> Datum {
 		return m == .Real ? Datum{real = -a.real} : Datum{int = -a.int}
 	case .Not:
 		return Datum{int = ~a.int}
-	case .Round32:
-		return Datum{real = f64(f32(a.real))}
 	}
 	return a
 }
@@ -379,7 +377,7 @@ binary_of :: proc(op: Op, m: Machine, a, b: Datum, unsigned := false) -> (Datum,
 		return flag(x > y), true
 	case .Ge:
 		return flag(x >= y), true
-	case .Neg, .Round32, .Not:
+	case .Neg, .Not:
 	}
 	return {}, false
 }

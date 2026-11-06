@@ -314,12 +314,6 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 			enc.neg_r64(x)
 		case i.op == .Not:
 			enc.not_r64(x)
-		case i.op == .Round32:
-			// to the nearest float of 32 bits, and back: exact
-			enc.movq_xmm_r64(.XMM0, x)
-			enc.cvtsd2ss_xmm_xmm(.XMM0, .XMM0)
-			enc.cvtss2sd_xmm_xmm(.XMM0, .XMM0)
-			enc.movq_r64_xmm(x, .XMM0)
 		case:
 			return "a unary operation the machine does not compute"
 		}

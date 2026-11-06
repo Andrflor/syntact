@@ -1,7 +1,0 @@
-{
-  "name": "tc_closed_bound_of_one_value",
-  "description": ">m is m.. & ~m, the range (m + 1)..; when m holds one value it is a constant range, read with the constants of the &, never dropped: 10 is not > m for m in 15.",
-  "source": "m -> ??::(15)\na -> 10 ? {>m -> 0  -> 10}",
-  "type": "10",
-  "expect_errors": []
-}

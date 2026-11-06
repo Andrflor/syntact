@@ -144,71 +144,36 @@ Polynomial :: struct {
 	token:        Class,
 }
 
-// polynomial: c as a polynomial in the counter i of l. The polynomial of a class is
-// one, however it is reached: each class is read once (Known_Polynomial), and a class read
-// again while it is read — a cycle of the classes — is not a polynomial by it.
-polynomial :: proc(g: ^Graph, c: Class, l, i: int) -> (Polynomial, bool) {
-	known := make(map[Class]Known_Polynomial)
-	p, ok, _ := polynomial_of(g, c, l, i, &known)
-	return p, ok
-}
-
-// Known_Polynomial: a class read: being read, or its polynomial, or none.
-Known_Polynomial :: struct {
-	reading: bool,
-	p:       Polynomial,
-	ok:      bool,
-}
-
-// polynomial_of: the polynomial of c; cut when a class being read was read again
-// below it: none then is not known to be none, and is not kept.
-polynomial_of :: proc(g: ^Graph, c: Class, l, i: int, known: ^map[Class]Known_Polynomial) -> (p: Polynomial, ok: bool, cut: bool) {
+// polynomial: c as a polynomial in the counter i of l.
+polynomial :: proc(g: ^Graph, c: Class, l, i: int, depth := 0) -> (p: Polynomial, ok: bool) {
 	c := find(g, c)
-	if g.facts[c].machine != .Int do return
-	if k, read := known[c]; read do return k.p, k.ok, k.reading
-	if invariant(g, c, l) do return Polynomial{one(c), NO_CLASS}, true, false
+	if g.facts[c].machine != .Int || depth > 12 do return
+	if invariant(g, c, l) do return Polynomial{one(c), NO_CLASS}, true
 	if token, is := counter_of(g, c, l, i); is {
 		coefficients := make([]Class, 2)
 		coefficients[0], coefficients[1] = add(g, int_node(0)), add(g, int_node(1))
-		return Polynomial{coefficients, token}, true, false
+		return Polynomial{coefficients, token}, true
 	}
-	known[c] = {reading = true}
-	p, ok, cut = polynomial_by_members(g, c, l, i, known)
-	if ok || !cut {
-		known[c] = {p = p, ok = ok}
-	} else {
-		delete_key(known, c)
-	}
-	return
-}
-
-polynomial_by_members :: proc(g: ^Graph, c: Class, l, i: int, known: ^map[Class]Known_Polynomial) -> (p: Polynomial, ok: bool, cut: bool) {
 	for id in g.members[c] {
 		n := g.nodes[id]
 		if n.kind == .Splat {
 			// in each lane: δ is a homomorphism of rings
-			a, has, below := polynomial_of(g, n.args[0], l, i, known)
-			cut ||= below
-			if !has do continue
+			a := polynomial(g, n.args[0], l, i, depth + 1) or_continue
 			lanes := make([]Class, len(a.coefficients))
 			for x, k in a.coefficients do lanes[k] = splat(g, x, int(n.value), n.index)
-			return Polynomial{lanes, a.token}, true, cut
+			return Polynomial{lanes, a.token}, true
 		}
 		if !ring(n) do continue
-		a, has, below := polynomial_of(g, n.args[0], l, i, known)
-		cut ||= below
-		if !has do continue
+		a := polynomial(g, n.args[0], l, i, depth + 1) or_continue
 		if n.kind == .Unary {
-			return scaled(g, a, -1), true, cut
+			return scaled(g, a, -1), true
 		}
 		if n.op == .Shl {
-			k, constant := g.facts[find(g, n.args[1])].constant.?
-			if !constant || k < 0 || k > 62 do continue
-			return scaled(g, a, i64(1) << uint(k)), true, cut
+			k, known := g.facts[find(g, n.args[1])].constant.?
+			if !known || k < 0 || k > 62 do continue
+			return scaled(g, a, i64(1) << uint(k)), true
 		}
-		b, has_b, below_b := polynomial_of(g, n.args[1], l, i, known)
-		cut ||= below_b
-		if !has_b do continue
+		b := polynomial(g, n.args[1], l, i, depth + 1) or_continue
 		token := a.token
 		if b.token != NO_CLASS {
 			if token != NO_CLASS && token != b.token do continue
@@ -216,11 +181,11 @@ polynomial_by_members :: proc(g: ^Graph, c: Class, l, i: int, known: ^map[Class]
 		}
 		#partial switch n.op {
 		case .Add:
-			return Polynomial{summed(g, a.coefficients, b.coefficients, 1), token}, true, cut
+			return Polynomial{summed(g, a.coefficients, b.coefficients, 1), token}, true
 		case .Sub:
-			return Polynomial{summed(g, a.coefficients, b.coefficients, -1), token}, true, cut
+			return Polynomial{summed(g, a.coefficients, b.coefficients, -1), token}, true
 		case .Mul:
-			return Polynomial{multiplied(g, a.coefficients, b.coefficients), token}, true, cut
+			return Polynomial{multiplied(g, a.coefficients, b.coefficients), token}, true
 		}
 	}
 	return

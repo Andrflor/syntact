@@ -123,7 +123,7 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 			known, _ = plain_of(k, v)
 			known.typed = true
 			if has do known.family = f
-			remember_plain(k, v, known)
+			k.plain[v] = known
 		}
 		return f, has
 	case ^Collapse:
@@ -222,38 +222,6 @@ layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
 		// what each term holds: the family of one that has one
 		for t in v.terms do if f, one := layout_family(k, t); one do return f, true
 	}
-	// a constant set is in a family when each of its cells is (§4.5)
-	if is_constant(layout) {
-		one: [1]Type
-		cells, negated := cells_in(layout, &one)
-		if !negated && len(cells) > 0 {
-			// cells read as they are: values and ranges of numbers
-			plain_cell :: proc(c: Type) -> bool {
-				#partial switch v in c {
-				case Int, Real, Char, Bool:
-					return true
-				case ^Range:
-					return v.family != .Any
-				}
-				return false
-			}
-			first := cell_family(cells[0])
-			same_family := true
-			for c in cells do same_family &&= plain_cell(c) && cell_family(c) == first
-			if same_family {
-				#partial switch first {
-				case .Int:
-					return .Int, true
-				case .Real:
-					return .Real, true
-				case .Char:
-					return .Char, true
-				case .Bool:
-					return .Bool, true
-				}
-			}
-		}
-	}
 	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) {
 		if proven_in(k, layout, family_term(f)) do return f, true
 	}
@@ -323,11 +291,9 @@ exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Typ
 	if op == .Pow do return single(k, power_law(k, sig, args[0], args[1], span))
 	out: Type
 	#partial switch sig.args[0] {
-	case .Int, .Real:
-		if r, ok := distributed(k, op, args, span); ok do return r
-		field := sig.args[0] == .Real
-		if r, ok := ring_law(op, args, field); ok do out = r
-		else if r, ok := atom_ring(k, op, args, field); ok do out = r
+	case .Int:
+		if r, ok := ring_law(op, args); ok do out = r
+		else if r, ok := atom_ring(k, op, args); ok do out = r
 	case .Bool:
 		out = bool_law(k, op, args)
 	case .String:
@@ -335,38 +301,6 @@ exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Typ
 	}
 	if out == nil do out = new_operation(op, ..args)
 	return single(k, out)
-}
-
-// distributed: a pattern gives one of its products (§6), so an operation on
-// patterns of one target and the same covers is the pattern of the operation on
-// their products, branch by branch: (t ? {c -> a …}) ⊕ (t ? {c -> b …}) = t ? {c -> a ⊕ b …}.
-distributed :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> (out: Type, ok: bool) {
-	p: ^Pattern
-	paired := false
-	for a in args {
-		q, is_pattern := a.(^Pattern)
-		if !is_pattern || has_effect(q) do continue
-		if p == nil do p = q
-		else do paired ||= same_covers(k, p, q)
-	}
-	if !paired do return
-	branches := make([]Branch, len(p.branches))
-	for b, i in p.branches {
-		xs := slice.clone(args)
-		for a, j in args do if q, is_pattern := a.(^Pattern); is_pattern && same_covers(k, p, q) do xs[j] = q.branches[i].product
-		branches[i] = with_product(b, operation_law(k, op, xs, span))
-	}
-	return pattern_law(k, branching(p, branches)), true
-}
-
-// same_covers: two patterns of one target, with the same covers in the same order.
-same_covers :: proc(k: ^Kernel, p, q: ^Pattern) -> bool {
-	if len(p.branches) != len(q.branches) || has_effect(q) || !same(k, p.target, q.target) do return false
-	for b, i in p.branches {
-		c := q.branches[i].cover
-		if (b.cover == nil) != (c == nil) || b.cover != nil && !same(k, b.cover, c) do return false
-	}
-	return true
 }
 
 // single: a term over unknowns whose layout is one primitive is that primitive:
@@ -585,8 +519,7 @@ int_opposite :: proc(k: ^Kernel, cells: []Type) -> (opposite: []Type, ok: bool) 
 	return pushed(k, from), true
 }
 
-// real_sum: (a..b) + (c..d) = (a + c)..(b + d), open where either bound is; a bound
-// beyond the integers written here moved outward.
+// real_sum: (a..b) + (c..d) = (a + c)..(b + d), open where either bound is.
 real_sum :: proc(k: ^Kernel, a, b: []Type) -> (sum: Type, ok: bool) {
 	from := mark(k)
 	defer release(k, from)
@@ -595,10 +528,10 @@ real_sum :: proc(k: ^Kernel, a, b: []Type) -> (sum: Type, ok: bool) {
 			p, q := real_bounds(x), real_bounds(y)
 			r: Real_Bounds
 			if u, has_u := p.lo.?; has_u {
-				if v, has_v := q.lo.?; has_v do r.lo, r.lo_open = real_add_toward(u, v, .Down) or_return, p.lo_open || q.lo_open
+				if v, has_v := q.lo.?; has_v do r.lo, r.lo_open = real_add(u, v) or_return, p.lo_open || q.lo_open
 			}
 			if u, has_u := p.hi.?; has_u {
-				if v, has_v := q.hi.?; has_v do r.hi, r.hi_open = real_add_toward(u, v, .Up) or_return, p.hi_open || q.hi_open
+				if v, has_v := q.hi.?; has_v do r.hi, r.hi_open = real_add(u, v) or_return, p.hi_open || q.hi_open
 			}
 			push(k, real_cell(r))
 		}
@@ -890,8 +823,7 @@ flatten_bool :: proc(k: ^Kernel, op: Operator, t: Type) {
 }
 
 // literal: t is `x in S`, or `[~](x in S)` read as x in ~S: x one value — an
-// unknown, or a term over them —, S a constant type the laws compute whole
-// (computed_whole).
+// unknown, or a term over them —, S a constant type the laws compute whole.
 literal :: proc(k: ^Kernel, t: Type) -> (Type, Type, bool) {
 	positive := true
 	atom := t
@@ -901,7 +833,7 @@ literal :: proc(k: ^Kernel, t: Type) -> (Type, Type, bool) {
 	}
 	o, is_op := atom.(^Operation)
 	if !is_op || o.op != .In do return nil, nil, false
-	if !is_value(k, o.args[0]) || !computed_whole(k, o.args[1]) do return nil, nil, false
+	if !is_value(k, o.args[0]) || !decided(o.args[1]) do return nil, nil, false
 	return o.args[0], positive ? o.args[1] : not_law(k, o.args[1]), true
 }
 

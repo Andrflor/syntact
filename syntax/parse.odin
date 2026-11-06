@@ -2530,8 +2530,7 @@ parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 // One pattern branch as a (source, product) pair. A leading `->` branch has no
 // source (default); otherwise `-> product` is optional (a source-only branch is a guard).
 parse_branch :: proc(parser: ^Parser) -> (source_idx: Node_Index, product_idx: Node_Index) {
-	// a `{` glued to the `{` of the branches opens a scope: there is nothing to carve
-	if !IS_EXPRESSION_START[parser.current_token.kind] && parser.current_token.kind != .LeftBraceCarve {
+	if !IS_EXPRESSION_START[parser.current_token.kind] {
 		advance_token(parser)
 		return INVALID_NODE, INVALID_NODE
 	}
