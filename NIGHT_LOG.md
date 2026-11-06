@@ -86,3 +86,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
   |escape{s -> items.#x.sku}| (a field of a run a fold builds). respond 4 s → 17–21 s.
 - Not done: kept fields in the image of the entry value (blur row y, lru keys), Task C
   (ring over rationals), Task D.
+
+## Step: kernel round 3 (2228152, a4cbbaa) — 01:45 UTC
+- Runs compose for call lengths (§5.6). respond still 3 errors; its compile time rose to ~19 s (to fix).
+- 2228152 narrows fields to their orbit by a second reading. The law it implements is already in §5.6 (linear bounds: "a field every call keeps holds what the call gives it"; counters from max(c)) — not a new law. Round 4a rewrites it as one reading of the equation with the proven bounds.
+- Launched 4a (field bounds: blur, lru, calc, graph, scene, zip cases; respond/words compile time) and 4b (reals in the ring: particles; sexp Product form; words gaps). Split-fold agent still running (strlist 400000).
