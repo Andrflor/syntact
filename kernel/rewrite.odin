@@ -905,8 +905,8 @@ built_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 	return repeated(k, piece, COUNTS, f.span), true
 }
 
-// sum_image: the values of a fold whose value is a state x: c ↦ x + g, g not
-// reading x: c, and n terms of g, n its steps.
+// sum_image: the values of a fold whose value is a state x: c ↦ α·x + g, α ≥ 0 a
+// constant, g not reading x: from c, n steps of g, n its steps.
 sum_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 	// the steps: along a counter, from lo to hi; otherwise the length of the orbit of
 	// the index from its start (§5.6), the index where its layout says
@@ -924,32 +924,79 @@ sum_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 	}
 	for z, i in f.states {
 		if !same(k, f.value, z) do continue
-		// x ↦ x + g: the ring reads the update as 1·x + g
-		one, g := affine_in(k, f.updates[i], z) or_return
-		if !is_int(one, 1) do return
-		terms := hull_times(k, steps, rewrite(k, g, along)) or_return
-		start := layout_image(k, f.inits[i]) or_return
-		return exact_law(k, .Add, {start, terms}, f.span), true
+		// x ↦ α·x + g: the ring reads the update
+		alpha, g := affine_in(k, f.updates[i], z) or_return
+		return affine_times(k, steps, alpha, f.inits[i], rewrite(k, g, along))
 	}
 	return
 }
 
-// hull_times: the integers from n·a to n·b, n ≥ 0 the counts of steps, a..b the
-// bounds of the values of g: what n terms of g sum to.
+// hull_times: what n terms of g sum to, n ≥ 0 the counts of steps.
 hull_times :: proc(k: ^Kernel, n, g: Type) -> (image: Type, ok: bool) {
-	steps := layout_image(k, n) or_return
-	terms := layout_image(k, g) or_return
-	slo, shi := int_bounds(k, steps) or_return
-	glo, ghi := int_bounds(k, terms) or_return
+	return affine_times(k, n, Int(1), Int(0), g)
+}
+
+// affine_times: the values of n steps of y ↦ α·y + g from c, α ≥ 0 a constant, n ≥ 0
+// the counts of steps. The step is monotone: the greatest is n steps of
+// y ↦ α·y + max(g) from max(c), the least likewise (§5.6), each solved by its law,
+// c + n·g when α = 1, αⁿ·c + g·(αⁿ - 1) / (α - 1) otherwise, which moves one way
+// along n: it is at its least or its greatest count of steps.
+affine_times :: proc(k: ^Kernel, n, alpha, c, g: Type) -> (image: Type, ok: bool) {
+	if !is_constant(alpha) || !proven_in(k, alpha, range_law(k, zero_of(alpha), nil, .Any, {})) do return
+	slo, shi := int_bounds(k, layout_image(k, n) or_return) or_return
 	nl := max(slo.? or_return, 0)
 	nh := shi.? or_return
-	a := glo.? or_return
-	b := ghi.? or_return
-	la := mul_checked(nl, a) or_return
-	ha := mul_checked(nh, a) or_return
-	lb := mul_checked(nl, b) or_return
-	hb := mul_checked(nh, b) or_return
-	return range_law(k, Int(min(la, ha)), Int(max(lb, hb)), .Int, {}), true
+	clo, chi := ends(k, layout_image(k, c) or_return) or_return
+	glo, ghi := ends(k, layout_image(k, g) or_return) or_return
+	// n steps from y0, each adding b
+	solved :: proc(k: ^Kernel, n: i128, alpha, y0, b: Type) -> (out: Type, ok: bool) {
+		one := one_of(alpha)
+		count: Type = Int(n)
+		if _, real := alpha.(Real); real do count = real_int(n)
+		power := constant_law(k, .Pow, alpha, Int(n)) or_return
+		// 1 + α + … + αⁿ⁻¹
+		geometric := count
+		if alpha != one do geometric = constant_law(k, .Div, constant_law(k, .Sub, power, one) or_return, constant_law(k, .Sub, alpha, one) or_return) or_return
+		return constant_law(k, .Add, constant_law(k, .Mul, power, y0) or_return, constant_law(k, .Mul, geometric, b) or_return)
+	}
+	least_at := [2]Type{solved(k, nl, alpha, clo, glo) or_return, solved(k, nh, alpha, clo, glo) or_return}
+	greatest_at := [2]Type{solved(k, nl, alpha, chi, ghi) or_return, solved(k, nh, alpha, chi, ghi) or_return}
+	least := in_law(k, least_at[0], range_law(k, nil, least_at[1], .Any, {})) == Type(Bool(true)) ? least_at[0] : least_at[1]
+	greatest := in_law(k, greatest_at[0], range_law(k, greatest_at[1], nil, .Any, {})) == Type(Bool(true)) ? greatest_at[0] : greatest_at[1]
+	return range_law(k, least, greatest, .Any, {}), true
+}
+
+// constant_law: the operator on two constant primitives, one primitive.
+constant_law :: proc(k: ^Kernel, o: Operator, a, b: Type) -> (out: Type, ok: bool) {
+	out = exact_law(k, o, {a, b}, {})
+	#partial switch _ in out {
+	case Int, Real:
+		return out, true
+	}
+	return nil, false
+}
+
+// ends: the least and the greatest of a constant set of integers or of reals.
+ends :: proc(k: ^Kernel, s: Type) -> (lo, hi: Type, ok: bool) {
+	if l, h, ints := int_bounds(k, s); ints {
+		return Int(l.? or_return), Int(h.? or_return), true
+	}
+	one: [1]Type
+	cells, negated := cells_in(s, &one)
+	if negated || len(cells) == 0 do return
+	for x in cells do if cell_family(x) != .Real do return
+	return real_bounds(cells[0]).lo.? or_return, real_bounds(cells[len(cells) - 1]).hi.? or_return, true
+}
+
+// zero_of, one_of: 0 and 1 in the family of x.
+zero_of :: proc(x: Type) -> Type {
+	if _, real := x.(Real); real do return real_int(0)
+	return Int(0)
+}
+
+one_of :: proc(x: Type) -> Type {
+	if _, real := x.(Real); real do return real_int(1)
+	return Int(1)
 }
 
 // field_color: the color of the field `name` in the shape a layout holds — in a
@@ -1067,23 +1114,35 @@ summed_image :: proc(k: ^Kernel, v: ^Series) -> (image: Type, ok: bool) {
 }
 
 // least_image: μ(i: m / c ** i in B), B holding 0: the orbit reaches 0, the later the
-// greater |m| — at most the count of the digits of |m| in base c, at its bound.
+// greater |m| — at most the count of the digits of |m| in base c, at its bound. The
+// orbit of k >> a, m >> a·i, m ≥ 0, is m / (2 ** a) ** i (§5.6).
 least_image :: proc(k: ^Kernel, l: ^Least) -> (image: Type, ok: bool) {
 	holds := l.holds.(^Operation) or_return
 	if holds.op != .In || !is_bool(in_law(k, Int(0), holds.args[1]), true) do return
-	div := holds.args[0].(^Operation) or_return
-	if div.op != .Div do return
-	power := div.args[1].(^Operation) or_return
-	if power.op != .Pow do return
-	c := power.args[0].(Int) or_return
-	at, by_index := power.args[1].(^Unknown)
-	if !by_index || !same_unknown(at, l.index) || c < 2 || reads(k, div.args[0], l.index) do return
-	lo, hi := int_bounds(k, layout_image(k, div.args[0]) or_return) or_return
+	point := holds.args[0].(^Operation) or_return
+	base: i128
+	#partial switch point.op {
+	case .Div:
+		power := point.args[1].(^Operation) or_return
+		if power.op != .Pow do return
+		c := power.args[0].(Int) or_return
+		at, by_index := power.args[1].(^Unknown)
+		if !by_index || !same_unknown(at, l.index) || c < 2 do return
+		base = i128(c)
+	case .Shr:
+		at, a, b := linear_in(point.args[1]) or_return
+		if !same_unknown(at, l.index) || a < 1 || a > 64 || b != 0 do return
+		base = 1 << uint(a)
+	case:
+		return
+	}
+	if reads(k, point.args[0], l.index) do return
+	lo, hi := int_bounds(k, layout_image(k, point.args[0]) or_return) or_return
 	// / rounds toward 0 (§4.5): |m / c ** i| = |m| / c ** i
 	least, top := lo.? or_return, hi.? or_return
-	if least == min(i128) do return
+	if least == min(i128) || point.op == .Shr && least < 0 do return
 	top = max(top, -least)
 	digits: i128 = 0
-	for x := top; x > 0; x /= i128(c) do digits += 1
+	for x := top; x > 0; x /= base do digits += 1
 	return range_law(k, Int(0), Int(digits), .Int, l.span), true
 }

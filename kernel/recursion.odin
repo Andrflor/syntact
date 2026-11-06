@@ -1017,12 +1017,14 @@ op :: proc(k: ^Kernel, o: Operator, args: ..Type) -> Type {
 }
 
 // affine_in: t = α·y + β, α and β not reading y: t of degree 1 in y, by the ring
-// law (ring.odin).
+// law (ring.odin), over the integers or, t a real, in the field.
 affine_in :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: bool) {
+	family, _ := family_of(k, t)
+	field := domain(family) == .Real
 	// what the ring does not read is an atom: a call, a fold, a pattern
 	back: Rewrite
-	ms, divisor := monomials(atomized(k, t, &back)) or_return
-	if divisor != 1 do return
+	ms, divisor := monomials(atomized(k, t, &back, field), field) or_return
+	if divisor != 1 && !field do return
 	as, bs := make([dynamic]Type), make([dynamic]Type)
 	for m in ms {
 		rest := make([dynamic]^Unknown)
@@ -1040,8 +1042,8 @@ affine_in :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: b
 			return
 		}
 	}
-	alpha = unatomized(ring_term(as[:], 1) or_return, back)
-	beta = unatomized(ring_term(bs[:], 1) or_return, back)
+	alpha = unatomized(ring_term(as[:], divisor, field) or_return, back)
+	beta = unatomized(ring_term(bs[:], divisor, field) or_return, back)
 	// an atom that holds y: a pattern gives one of its products, an operation on it
 	// the operation on each (§6): t of degree 1 in y in each, with one α, is α·y +
 	// the pattern of the β. Otherwise t is not of degree 1 in y
