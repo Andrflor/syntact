@@ -1,5 +1,32 @@
 # Night log
 
+## Proposed law, waiting for the user (round 5: sexp, the type of a built text)
+Not implemented. sexp's `number` is right to fail on a text of type A: a run of 20
+digits overflows i64. It types only if the kernel reads `parse_all{t -> text}!` at
+the type of `text`, the language `forms` builds. §5.6 reads a call where what it
+carves is an unknown of its *color* (A). Proposed text, after "A call reads its
+equation where what it carves …":
+
+> A field the call gives a value of a type T narrower than its color, that every
+> call of the equation carves to a suffix of itself — the rest a cover cuts,
+> `t from c` — or keeps, is an unknown of the runs that end a run of T, Suff(T):
+> closed under those carves, what the induction proves holds for every value of it.
+>
+> The run a recursion builds is in the language of its productions: each call that
+> places a run, `...f{…}!`, is the variable X of the equation (a field that threads
+> the run, `text -> {...text  P}`, places the run before P). Arden solves X when it
+> is at the edge; otherwise X is within {...(Σ * 0..):}, Σ the union of the pieces
+> the productions write beside the calls.
+
+With both, number's scan reads `t & Suff(L)`, L = ({atom} | {40} | {41 32})*, atoms
+{(97..122) * 3..14} 32 and {(48..57) * 1..5} 32 (format_int's fold of μ(y: v / 10 ** y
+in 0) ≤ 5 steps): its orbit stops at the first place out of 48..57, after 5 steps
+at most, and v ≤ 99999. The scan bound itself (the orbit of a run scan stops at the
+first point no cover of a call takes; μ(i: (m from i) in ~{H ...A:}) lies within the
+longest run of places in H the layout of m opens with) follows from the existing μ
+law; a draft is in scratchpad w/scan_mu.patch, kept out because it touches the orbit
+code the field-bounds agent is fixing (2ab6976).
+
 ## Proposed law, waiting for the user
 §5.6 reads a call's equation where every field its calls carve is an unknown of its
 color. The values a field takes across a recursion are not stated. Proposed text,
@@ -124,3 +151,22 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - `depths{max -> 8  d -> 4}!` (= 18) types as `⟳(…; y: 0 ↦ none)` from 2ab6976 on (18 at 4800611). bintrees still prints right on master, but the law is wrong.
 - If the fix is not in by morning: `git revert 2ab6976` restores soundness (it only costs sexp/words `.#` places).
 - Field-bounds agent (round 4a) is fixing that law, then landing its one-reading commits (blur 4→1, words 50→38, calc 32→29, but lru/graph/scene surface more checks and respond ran out of memory after rebase — must be fixed before push).
+
+## Step: kernel round 5 (d254989, b3e80ed) — 03:20 UTC
+- d254989 §4.10 a value of a format lies within its extremes: a real is num / den ·
+  2^exp (the power of two carried apart, f32/f64 extremes exact); a format cell's
+  absent bounds are ±greatest; a bound of a sum beyond the integers is moved outward
+  (interval arithmetic: the set only grows). f32 - 0.0625 rounds into f32, f32 + f32
+  does not, f16 65520.0 ties beyond. particles 109:33 vel.y - 0.0625 gone.
+- b3e80ed euclid_image reads the first quotient it can, and the image of that
+  reading reads the others (it read every order: k! readings). words 5.6 s / 4.8 GB
+  → 1.0–1.7 s / 0.8–1 GB, same errors; other benches unchanged.
+- particles: 5 errors, next `round32(?.#0.pos.x + ?.#0.vel.x)` in f32 — the bounds
+  of the fields of the particles across the 200 steps (vel.x kept, vel.y moved by
+  -0.0625 or halved, pos += vel), a field bound through a fold over a run: field-bounds
+  topic.
+- words (32 errors): 215:9 `(a * a) / vocab` in 0..vocab - 1 is proven in isolation
+  by two laws (divided_by reads n over b = x + c, x one atom, by x = b - c; a quotient
+  n / b with n growing in an unknown up to h lies in 0..Q + R, n(h) = b·Q + R), but on
+  words the reading explodes in memory (> 10 GB): kept out, w/euclid3_quotient_bound.patch.
+- sexp 18: needs the proposed law above.
