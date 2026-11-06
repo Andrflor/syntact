@@ -62,6 +62,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 			}
 		}
 		if verdict, read := built_in(k, x, s); read do return verdict
+		if carved_in(k, x, s) do return Bool(true)
 		if runs_in(k, x, s) do return Bool(true)
 		return admits(k, x, s)
 	}
@@ -470,6 +471,21 @@ built_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) 
 	length := run_law(k, .Length, {x}, f.span)
 	if counts == nil do return in_law(k, length, range_law(k, Int(i128(fixed)), nil, .Int, f.span)), true
 	return in_law(k, op(k, .Sub, length, Int(i128(fixed))), counts), true
+}
+
+// carved_in: x{#k -> v} in a shape of places then runs of pieces: its length is |x|
+// and its bindings those of x and v (§5.3) — in it when x is and v is in the color of
+// every place.
+carved_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> bool {
+	put, is_put := x.(^Operation)
+	if !is_put || put.op != .Put do return false
+	_, colors, _ := run_form(k, s) or_return
+	holds :: proc(k: ^Kernel, t, c: Type) -> bool {
+		verdict, _ := prove(k, in_law(k, t, c))
+		return verdict == .Proven
+	}
+	for c in colors do if !holds(k, put.args[2], c) do return false
+	return holds(k, put.args[0], s)
 }
 
 // run_form: a shape of unnamed places then runs of pieces, read as a run: how many
