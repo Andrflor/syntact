@@ -198,7 +198,9 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 call_family :: proc(k: ^Kernel, c: ^Collapse, fields := Read{}) -> (Family, bool) {
 	s, ok := c.target.(^Scope)
 	if !ok || !c.recursive || reading(k, origin(s)) do return {}, false
-	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) do if call_in(k, c, family_term(f), fields) do return f, true
+	// its equation read once, each family asked of it
+	eq, derived := equation_of(k, c)
+	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) do if equation_in(k, c, eq, derived, family_term(f), fields) do return f, true
 	return {}, false
 }
 
@@ -495,7 +497,7 @@ field_bounds :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Thr
 		case len(moves.at) == 0:
 			set = kept_image(k, start) or_continue
 		case:
-			set = counter_image(k, steps.at[b], moves.at[:], start) or_continue
+			set = counter_image(k, moves, start) or_continue
 		}
 		// none: the call gives what its color does not hold, an error where it is written
 		narrowed := and_law(k, {color, set})
@@ -528,11 +530,11 @@ suffix_image :: proc(k: ^Kernel, x: ^Unknown, moves: []Type, start: Type, span: 
 // counter_image: lo..hi, the least range holding start that each step α·y + g, α ≥ 0,
 // keeps: hi when α·hi + max(g) ≤ hi, lo when α·lo + min(g) ≥ lo; otherwise that side
 // without bound (§5.6). Each step taken in the range lies in it: the induction.
-counter_image :: proc(k: ^Kernel, y: ^Unknown, moves: []Type, start: Type) -> (set: Type, ok: bool) {
+counter_image :: proc(k: ^Kernel, moves: Field_Steps, start: Type) -> (set: Type, ok: bool) {
+	if !moves.bounded do return
 	image := layout_image(k, start) or_return
 	lo, hi := int_bounds(k, image) or_return
-	for t in moves {
-		p := bound_product(k, t, y) or_return
+	for p in moves.products {
 		if p.modulus > 0 do return
 		if hi != nil && (p.hi == nil || p.a * hi.? + p.hi.? > hi.?) do hi = nil
 		if lo != nil && (p.lo == nil || p.a * lo.? + p.lo.? < lo.?) do lo = nil
@@ -554,8 +556,11 @@ Steps :: struct {
 }
 
 Field_Steps :: struct {
-	at:     [dynamic]Type,
-	unread: bool,
+	at:       [dynamic]Type,
+	unread:   bool,
+	// each step α·y + g, as written: bounded when each is read so
+	products: [dynamic]Bound_Product,
+	bounded:  bool,
 }
 
 // written_steps: the steps of the carves of root written in it, read once per root;
@@ -604,6 +609,19 @@ written_steps :: proc(k: ^Kernel, root: ^Scope) -> (steps: ^Steps, ok: bool) {
 			if u, kept := t.(^Unknown); !kept || !same_unknown(u, steps.at[b]) do append(&moves.at, t)
 		} else do moves.unread = true
 		steps.fields[b] = moves
+	}
+	// the bounds of each step of an integer field, read once
+	for b, &moves in steps.fields {
+		if color := binding_color(k, b); color == nil || !proven_in(k, color, family_term(.Int)) do continue
+		moves.bounded = true
+		for t in moves.at {
+			p, read := bound_product(k, t, steps.at[b])
+			if !read {
+				moves.bounded = false
+				break
+			}
+			append(&moves.products, p)
+		}
 	}
 	k.steps[root] = steps
 	return steps, true

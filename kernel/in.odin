@@ -283,9 +283,14 @@ read_of :: proc(t: Type) -> Read {
 // where what the call carves is unknown (a hole the carve fills), the call is its
 // production at the values its carve gives (§5.3), its calls the hypothesis meanwhile.
 call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool {
+	eq, derived := equation_of(k, call)
+	return equation_in(k, call, eq, derived, c, fields)
+}
+
+// equation_in: call_in, the equation of the call read: eq, derived when it is.
+equation_in :: proc(k: ^Kernel, call: ^Collapse, eq: ^Call_Equation, derived: bool, c: Type, fields := Read{}) -> bool {
 	s := call.target.(^Scope) or_return
 	root := origin(s)
-	eq, derived := equation_of(k, call)
 	if derived do return induction(k, eq, c, fields)
 	if eq == nil || reading(k, root) do return false
 	p := first_production(k, s) or_return
