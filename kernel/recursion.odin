@@ -116,6 +116,7 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	if decides && s != root {
 		if v, eq, read := production_at(k, out); read {
 			eq.read = false
+			given_changed(k)
 			if solved(v, root) do return v
 		}
 	}
@@ -338,9 +339,11 @@ production_at :: proc(k: ^Kernel, c: ^Collapse) -> (v: Type, eq: ^Call_Equation,
 	if !is_scope || !c.recursive || reading(k, origin(s)) do return
 	eq = equation_of(k, c) or_return
 	eq.read = true
+	given_changed(k)
 	v = rewrite(k, eq.equation, at_values(k, eq, s.changes))
 	if holds_invalid(v) || has_effect(v) {
 		eq.read = false
+		given_changed(k)
 		return nil, nil, false
 	}
 	return v, eq, true
@@ -358,6 +361,10 @@ Call_Equation :: struct {
 	params:   map[^Binding]Type,
 	derived:  bool, // read where what is carved is unknown; generic nil when it cannot be
 	read:     bool, // read at the values of a call (production_at, call_in)
+	// the unknowns of the fields its calls carve to another value (moved_fields)
+	moved:      []^Unknown,
+	all_moved:  bool,
+	moved_read: bool,
 }
 
 // call_equation: the equation of root a call carving the bindings given reads,
@@ -369,7 +376,11 @@ call_equation :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: []Th
 	eq = new(Call_Equation)
 	eq.root, eq.given, eq.through = root, slice.clone(given), slice.clone(through)
 	append(&k.equations, eq)
-	defer eq.derived = true
+	given_changed(k)
+	defer {
+		eq.derived = true
+		given_changed(k)
+	}
 	params := make(map[^Binding]Type)
 	for b in given do params[b] = nil
 	for {
@@ -1855,15 +1866,18 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure{}) -> (image:
 	for x in k.images do if x.equation == eq && same_measure(k, x.measure, measure) && !x.given do return
 	at := len(k.images)
 	append(&k.images, Image{equation = eq, measure = measure})
-	e, values, kept := kept_fields(k, call, eq)
+	given_changed(k)
+	values, narrowed, kept := kept_fields(k, call, eq)
 	next: for &x in k.images[:at] {
 		if x.equation != eq || !same_measure(k, x.measure, measure) || len(x.kept) != len(kept) do continue
 		for t, i in kept do if !same(k, t, x.kept[i]) do continue next
 		ordered_remove(&k.images, at)
+		given_changed(k)
 		if !x.ok do return
 		return images_at(k, &x, values)
 	}
 	// an equation holding a term of no type bounds nothing
+	e := rewrite(k, eq.equation, narrowed)
 	bounds: Bounds
 	if !holds_invalid(e) {
 		if measure.kind != .Sum {
@@ -1886,6 +1900,7 @@ call_image :: proc(k: ^Kernel, call: ^Collapse, measure := Measure{}) -> (image:
 		}
 	}
 	k.images[at] = Image{eq, measure, kept, bounds, ok, true, nil}
+	given_changed(k)
 	if !ok do return
 	return images_at(k, &k.images[at], values)
 }
@@ -1917,24 +1932,13 @@ images_at :: proc(k: ^Kernel, x: ^Image, values: Rewrite) -> (image: Type, ok: b
 	return
 }
 
-// kept_fields: the equation the call reads, where each field that every call of it
-// keeps — carves to itself, or not at all — holds what the call gives it (§5.3: a
-// carve is the equation at the values it gives): an unknown of that image. values:
-// each field at what the call gives it; key: the images of those kept.
-kept_fields :: proc(k: ^Kernel, call: ^Collapse, eq: ^Call_Equation) -> (e: Type, values: Rewrite, key: []Type) {
+// kept_fields: the fields that every call of the equation keeps — carves to itself,
+// or not at all — read at what the call gives them (§5.3: a carve is the equation at
+// the values it gives): each an unknown of that image. values: each field at what the
+// call gives it; narrowed: the kept fields at their images; key: those images.
+kept_fields :: proc(k: ^Kernel, call: ^Collapse, eq: ^Call_Equation) -> (values: Rewrite, narrowed: Rewrite, key: []Type) {
 	values = at_values(k, eq, call.target.(^Scope).changes)
-	moved := make([dynamic]^Unknown)
-	all_moved := false
-	for x in calls_in(k, eq.equation, eq.root) {
-		target := x.target.(^Scope)
-		carved := make(map[^Unknown]Type)
-		for b, v in target.changes do all_moved ||= !matched(k, binding_type(k, holding(eq.generic, b)), v, &carved)
-		for u, v in carved {
-			w, is_unknown := v.(^Unknown)
-			if !is_unknown || !same_unknown(u, w) do append(&moved, u)
-		}
-	}
-	r: Rewrite
+	moved, all_moved := moved_fields(k, eq)
 	out := make([dynamic]Type)
 	for x in values {
 		if x.unknown == nil do continue
@@ -1943,10 +1947,28 @@ kept_fields :: proc(k: ^Kernel, call: ^Collapse, eq: ^Call_Equation) -> (e: Type
 		if !kept do continue
 		image, known := layout_image(k, x.term)
 		if !known || !is_constant(image) do continue
-		r = rewriting(r, x.unknown, narrowing(x.unknown, image))
+		narrowed = rewriting(narrowed, x.unknown, narrowing(x.unknown, image))
 		append(&out, image)
 	}
-	return rewrite(k, eq.equation, r), values, out[:]
+	return values, narrowed, out[:]
+}
+
+// moved_fields: the unknowns of the fields some call of the equation carves to
+// another value; all, when a carve is not read as a value of its field. Read once.
+moved_fields :: proc(k: ^Kernel, eq: ^Call_Equation) -> (moved: []^Unknown, all: bool) {
+	if eq.moved_read do return eq.moved, eq.all_moved
+	out := make([dynamic]^Unknown)
+	for x in calls_in(k, eq.equation, eq.root) {
+		target := x.target.(^Scope)
+		carved := make(map[^Unknown]Type)
+		for b, v in target.changes do all ||= !matched(k, binding_type(k, holding(eq.generic, b)), v, &carved)
+		for u, v in carved {
+			w, is_unknown := v.(^Unknown)
+			if !is_unknown || !same_unknown(u, w) do append(&out, u)
+		}
+	}
+	eq.moved, eq.all_moved, eq.moved_read = out[:], all, true
+	return eq.moved, all
 }
 
 // orbit_length: the length n of the orbit of u by step until stop, in closed form:
@@ -2393,6 +2415,7 @@ counter_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, measure: Measure
 		}
 		v, read := production_at(k, x) or_return
 		read.read = false
+		given_changed(k)
 		if !solved(v, root) do return
 		asked = rewriting_call(asked, x, v)
 	}
@@ -2538,6 +2561,7 @@ summed_call :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
 summed_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: Type) -> (^Scope, bool) {
 	for x in k.summed do if x.root == root && x.field == field && same(k, x.lo, lo) && same(k, x.hi, hi) do return x.sum, x.sum != nil
 	append(&k.summed, Summed{root, field, lo, hi, nil})
+	given_changed(k)
 	f := copy_scope(k, root, nil)
 	f.source, f.name = nil, strings.concatenate({"Σ", root.name})
 	p: ^Binding
@@ -2550,6 +2574,7 @@ summed_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: Type)
 		break
 	}
 	k.summed[len(k.summed) - 1].sum = f
+	given_changed(k)
 	return f, true
 }
 
@@ -2771,6 +2796,7 @@ tupled_call :: proc(k: ^Kernel, m: ^Copier, c: ^Collapse, scope: ^Scope) -> (Typ
 tupled_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: i128) -> (^Scope, bool) {
 	for x in k.tupled do if x.root == root && x.field == field && x.lo == lo && x.hi == hi do return x.tuple, x.tuple != nil
 	append(&k.tupled, Tupled{root, field, lo, hi, nil})
+	given_changed(k)
 	t := copy_scope(k, root, nil)
 	t.source, t.name = nil, strings.concatenate({"⊗", root.name})
 	p: ^Binding
@@ -2783,6 +2809,7 @@ tupled_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: i128)
 		break
 	}
 	k.tupled[len(k.tupled) - 1].tuple = t
+	given_changed(k)
 	return t, true
 }
 
@@ -2892,8 +2919,10 @@ over_fold :: proc(k: ^Kernel, s: ^Scope, field: ^Binding, f: ^Fold, span: syn.Sp
 	next := call(k, s, root, field, rewrite(k, step, rewriting(nil, y, z)), span) or_return
 	init, init_read := production_at(k, first) or_return
 	init_read.read = false
+	given_changed(k)
 	value, value_read := production_at(k, next) or_return
 	value_read.read = false
+	given_changed(k)
 	// f{t -> y}!, the other fields as in s: w
 	w := new_unknown(k, nil)
 	family := family_of(k, init) or_return

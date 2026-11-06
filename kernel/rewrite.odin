@@ -411,7 +411,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if plain {
 			known, _ = plain_of(k, v)
 			known.imaged, known.image = true, image
-			k.plain[v] = known
+			remember_plain(k, v, known)
 		}
 		return image, image != nil
 	case ^Or:
@@ -451,6 +451,43 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		f := family_of(k, v) or_return
 		if f == .Scope do if eq, read := equation_of(k, v); read do return eq.generic, true
 		return family_term(f), true
+	case ^Fold, ^Least, ^Series:
+		// computed once when the term alone gives it; holding calls, once for what is
+		// being given (given_changed): their images read it
+		known, plain := plain_of(k, t)
+		if plain && known.imaged do return known.image, known.image != nil
+		node, _ := plain_node(t)
+		key := Image_Key{node, k.state}
+		if !plain do if x, found := k.images_in[key]; found do return x.image, x.ok
+		image, imaged := ordered_image(k, t)
+		if plain {
+			known.imaged = true
+			if imaged do known.image = image
+			remember_plain(k, t, known)
+		} else if key.state == k.state {
+			k.images_in[key] = {image, imaged}
+		}
+		return image, imaged
+	case ^Recurrent:
+		if f, known := family_of(k, t); known do return family_term(f), true
+	case ^Access:
+		// x.a, x of a shape: the color of a in it
+		set := values(k, v.target) or_return
+		return field_color(k, set, v.name)
+	case ^Pattern:
+		// a pattern gives one of its products (§6)
+		images := make([]Type, len(v.branches))
+		for b, i in v.branches do images[i] = layout_image(k, b.product) or_return
+		return or_law(k, images), true
+	case ^Effect, ^Scope, ^Name, ^Carve, ^Default:
+	}
+	return nil, false
+}
+
+// ordered_image: the image of a fold, a μ or a series, by the order of the integers
+// along it.
+ordered_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
+	#partial switch v in t {
 	case ^Fold:
 		// a sum along the fold: its init, and as many terms as steps
 		if image, known := sum_image(k, v); known do return image, true
@@ -484,50 +521,81 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 			if image, known := hull_times(k, op(k, .Add, op(k, .Sub, v.hi, v.lo), Int(1)), term); known do return image, true
 		}
 		if f, known := family_of(k, t); known do return family_term(f), true
-	case ^Recurrent:
-		if f, known := family_of(k, t); known do return family_term(f), true
-	case ^Access:
-		// x.a, x of a shape: the color of a in it
-		set := values(k, v.target) or_return
-		return field_color(k, set, v.name)
-	case ^Pattern:
-		// a pattern gives one of its products (§6)
-		images := make([]Type, len(v.branches))
-		for b, i in v.branches do images[i] = layout_image(k, b.product) or_return
-		return or_law(k, images), true
-	case ^Effect, ^Scope, ^Name, ^Carve, ^Default:
 	}
 	return nil, false
 }
 
-// Plain: what is known of an operation over plain terms — constants, unknowns that
-// no call gives, operations over them —, which depends on nothing but the term:
-// its image and its family, each computed once.
+// Image_Key: a term holding calls, in a state of what is being given.
+Image_Key :: struct {
+	node:  rawptr,
+	state: int,
+}
+
+Image_Known :: struct {
+	image: Type,
+	ok:    bool,
+}
+
+// Plain: what is known of a term over plain terms — constants, unknowns that no call
+// gives, operations, folds, μ and series over them —, which depends on nothing but
+// the term: its image and its family, each computed once.
 Plain :: struct {
 	plain, imaged, typed: bool,
 	image:                Type,
 	family:               Maybe(Family),
 }
 
-// plain_of: what is known of o, and whether o is plain — found once.
-plain_of :: proc(k: ^Kernel, o: ^Operation) -> (Plain, bool) {
-	if entry, found := k.plain[o]; found do return entry, entry.plain
+// plain_node: the node of a term whose image is known by the term alone.
+plain_node :: proc(t: Type) -> (node: rawptr, ok: bool) {
+	#partial switch v in t {
+	case ^Operation:
+		return v, true
+	case ^Fold:
+		return v, true
+	case ^Least:
+		return v, true
+	case ^Series:
+		return v, true
+	}
+	return nil, false
+}
+
+// plain_of: what is known of t, and whether t is plain — found once.
+plain_of :: proc(k: ^Kernel, t: Type) -> (Plain, bool) {
+	node, has := plain_node(t)
+	if !has do return {}, false
+	if entry, found := k.plain[node]; found do return entry, entry.plain
 	is_plain :: proc(k: ^Kernel, t: Type) -> bool {
 		#partial switch v in t {
 		case Int, Real, Char, Bool, None:
 			return true
 		case ^Unknown:
 			return v.call == nil
-		case ^Operation:
-			_, plain := plain_of(k, v)
+		case ^Operation, ^Fold, ^Least, ^Series:
+			_, plain := plain_of(k, t)
 			return plain
 		}
-		return false
+		return t == nil
 	}
 	entry := Plain{plain = true}
-	for a in o.args do entry.plain &&= is_plain(k, a)
-	k.plain[o] = entry
+	#partial switch v in t {
+	case ^Operation:
+		for a in v.args do entry.plain &&= is_plain(k, a)
+	case ^Fold:
+		for a in fold_parts(v) do entry.plain &&= is_plain(k, a)
+	case ^Least:
+		entry.plain = is_plain(k, v.holds)
+	case ^Series:
+		entry.plain = is_plain(k, v.lo) && is_plain(k, v.hi) && is_plain(k, v.term)
+	}
+	k.plain[node] = entry
 	return entry, entry.plain
+}
+
+// remember_plain: what is known of a plain term, from now on.
+remember_plain :: proc(k: ^Kernel, t: Type, entry: Plain) {
+	node, _ := plain_node(t)
+	k.plain[node] = entry
 }
 
 // int_hull: the integers from the least to the greatest of a constant set of
@@ -734,9 +802,12 @@ field_color :: proc(k: ^Kernel, layout: Type, name: string) -> (color: Type, ok:
 			for f in k.fields do if f.scope == s && f.name == name do return f.color, f.color != nil
 			if reading(k, x.root) do return nil, false
 			x.read = true
+			given_changed(k)
 			color, ok = produced_field(k, s, name)
 			x.read = false
+			given_changed(k)
 			append(&k.fields, Field{s, name, ok ? color : nil})
+			given_changed(k)
 			return
 		}
 		return produced_field(k, s, name)

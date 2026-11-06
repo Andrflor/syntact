@@ -290,7 +290,11 @@ call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool 
 	p := first_production(k, s) or_return
 	if p.state == .In_Progress do return false
 	eq.read = true
-	defer eq.read = false
+	given_changed(k)
+	defer {
+		eq.read = false
+		given_changed(k)
+	}
 	return holds_in(k, binding_type(k, p), c, fields, root)
 }
 
@@ -310,14 +314,18 @@ induction :: proc(k: ^Kernel, eq: ^Call_Equation, c: Type, fields: Read) -> bool
 	if reading(k, eq.root) do return false
 	at := len(k.induced)
 	append(&k.induced, Induced{eq.generic, c, fields, false})
+	given_changed(k)
 	// the proof reads the equation: meanwhile its calls are the hypothesis
 	eq.read = true
+	given_changed(k)
 	proven := induced(k, eq.root, eq.equation, c, fields)
 	eq.read = false
+	given_changed(k)
 	// a field whose induction reads other fields: every field taken in c, the stronger
 	// hypothesis (§5.6)
 	if !proven && fields.name != "" do proven = induction(k, eq, c, {true, ""})
 	k.induced[at].proven = proven
+	given_changed(k)
 	return proven
 }
 

@@ -480,6 +480,7 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	case .Not_Asked:
 	}
 	b.state = .In_Progress
+	given_changed(k)
 	color := binding_color(k, b)
 	value: Type
 	if b.value == nil {
@@ -512,6 +513,7 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 		if s, is_scope := value.(^Scope); is_scope && shape != nil && is_shape(k, shape) do value = colored(k, s, shape)
 	}
 	b.typed_value, b.state = value, .Done
+	given_changed(k)
 	return value
 }
 

@@ -1618,7 +1618,11 @@ produced_items :: proc(k: ^Kernel, s: ^Scope) -> (c: Type, ok: bool) {
 	root := origin(s)
 	if reading(k, root) do return
 	for x in k.equations do if x.generic == s do x.read = true
-	defer for x in k.equations do if x.generic == s do x.read = false
+	given_changed(k)
+	defer {
+		for x in k.equations do if x.generic == s do x.read = false
+		given_changed(k)
+	}
 	leaves := make([dynamic]Product)
 	for p in placed(k, s, .Shape) do if p.kind == .Product && p.value != nil do products(k, binding_type(k, p), &leaves)
 	own :: proc(t: Type, root: ^Scope) -> bool {

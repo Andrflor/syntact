@@ -37,7 +37,10 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 	// carve gives (§6), the calls of the equation the hypothesis meanwhile (§5.6)
 	if c, is_call := target.(^Collapse); is_call {
 		if v, eq, read := production_at(k, c); read {
-			defer eq.read = false
+			defer {
+				eq.read = false
+				given_changed(k)
+			}
 			return pattern_through(k, v, p, outer)
 		}
 	}

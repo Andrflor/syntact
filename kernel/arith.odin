@@ -123,7 +123,7 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 			known, _ = plain_of(k, v)
 			known.typed = true
 			if has do known.family = f
-			k.plain[v] = known
+			remember_plain(k, v, known)
 		}
 		return f, has
 	case ^Collapse:
@@ -221,6 +221,38 @@ layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
 	case ^And:
 		// what each term holds: the family of one that has one
 		for t in v.terms do if f, one := layout_family(k, t); one do return f, true
+	}
+	// a constant set is in a family when each of its cells is (§4.5)
+	if is_constant(layout) {
+		one: [1]Type
+		cells, negated := cells_in(layout, &one)
+		if !negated && len(cells) > 0 {
+			// cells read as they are: values and ranges of numbers
+			plain_cell :: proc(c: Type) -> bool {
+				#partial switch v in c {
+				case Int, Real, Char, Bool:
+					return true
+				case ^Range:
+					return v.family != .Any
+				}
+				return false
+			}
+			first := cell_family(cells[0])
+			same_family := true
+			for c in cells do same_family &&= plain_cell(c) && cell_family(c) == first
+			if same_family {
+				#partial switch first {
+				case .Int:
+					return .Int, true
+				case .Real:
+					return .Real, true
+				case .Char:
+					return .Char, true
+				case .Bool:
+					return .Bool, true
+				}
+			}
+		}
 	}
 	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) {
 		if proven_in(k, layout, family_term(f)) do return f, true

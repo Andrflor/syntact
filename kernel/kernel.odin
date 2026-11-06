@@ -45,7 +45,7 @@ Kernel :: struct {
 	images:     [dynamic]Image, // the bounds of the calls of an equation, given once (recursion.odin)
 	induced:    [dynamic]Induced, // whether the calls of an equation are in a set, proven once (in.odin)
 	fields:     [dynamic]Field, // the colors of the fields of the scope of an equation, read once (rewrite.odin)
-	plain:      map[^Operation]Plain, // what is known of an operation over plain unknowns, once (rewrite.odin)
+	plain:      map[rawptr]Plain, // what is known of a term over plain unknowns, once (rewrite.odin)
 	read:       map[Read_Key]bool, // whether a node reads an unknown, once asked (rewrite.odin)
 	valued:     map[rawptr]Type, // what a shared node may hold, once read (size.odin)
 	generics:   [dynamic]Generic, // the solutions of equations where what is given is unknown, once (recursion.odin)
@@ -55,6 +55,17 @@ Kernel :: struct {
 	root:       ^Scope, // the file
 	scratch:    [dynamic]Type, // what the laws gather, in an arena of its own (scratch.odin)
 	interned:   ^Interned, // its shared terms (intern.odin)
+	// what is being given — the bindings asked, the equations read, the bounds and
+	// proofs under way: the hypotheses (§5.6) — counted at each change (given)
+	state:      int,
+	images_in:  map[Image_Key]Image_Known, // the image of a term holding calls, in a state (rewrite.odin)
+}
+
+// given_changed: what is being given changed: what the laws answer from now on may
+// differ from what they answered (§5.6: a call whose equation is read is the
+// hypothesis).
+given_changed :: proc(k: ^Kernel) {
+	k.state += 1
 }
 
 // report: an error, once. What it concerns becomes Invalid, which stays silent.
