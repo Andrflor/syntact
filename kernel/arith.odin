@@ -324,6 +324,7 @@ exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Typ
 	out: Type
 	#partial switch sig.args[0] {
 	case .Int, .Real:
+		if r, ok := distributed(k, op, args, span); ok do return r
 		field := sig.args[0] == .Real
 		if r, ok := ring_law(op, args, field); ok do out = r
 		else if r, ok := atom_ring(k, op, args, field); ok do out = r
@@ -334,6 +335,38 @@ exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Typ
 	}
 	if out == nil do out = new_operation(op, ..args)
 	return single(k, out)
+}
+
+// distributed: a pattern gives one of its products (§6), so an operation on
+// patterns of one target and the same covers is the pattern of the operation on
+// their products, branch by branch: (t ? {c -> a …}) ⊕ (t ? {c -> b …}) = t ? {c -> a ⊕ b …}.
+distributed :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> (out: Type, ok: bool) {
+	p: ^Pattern
+	paired := false
+	for a in args {
+		q, is_pattern := a.(^Pattern)
+		if !is_pattern || has_effect(q) do continue
+		if p == nil do p = q
+		else do paired ||= same_covers(k, p, q)
+	}
+	if !paired do return
+	branches := make([]Branch, len(p.branches))
+	for b, i in p.branches {
+		xs := slice.clone(args)
+		for a, j in args do if q, is_pattern := a.(^Pattern); is_pattern && same_covers(k, p, q) do xs[j] = q.branches[i].product
+		branches[i] = with_product(b, operation_law(k, op, xs, span))
+	}
+	return pattern_law(k, branching(p, branches)), true
+}
+
+// same_covers: two patterns of one target, with the same covers in the same order.
+same_covers :: proc(k: ^Kernel, p, q: ^Pattern) -> bool {
+	if len(p.branches) != len(q.branches) || has_effect(q) || !same(k, p.target, q.target) do return false
+	for b, i in p.branches {
+		c := q.branches[i].cover
+		if (b.cover == nil) != (c == nil) || b.cover != nil && !same(k, b.cover, c) do return false
+	}
+	return true
 }
 
 // single: a term over unknowns whose layout is one primitive is that primitive:

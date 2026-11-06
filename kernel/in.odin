@@ -549,25 +549,33 @@ runs_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> (verdict: Type, read: bool) {
 	return in_law(k, n, counts == nil ? COUNTS : counts), true
 }
 
-// fold_induction: a fold is in c when the states its value reads start in c, stay
-// in c at each step, and its value is in c, each of those states taken in c; the
-// other states are what their layouts say.
+// fold_induction: a fold is in c when its value is in c, the states it reads taken
+// in c — those that start in c and stay in c at each step, the others what their
+// layouts say. A state that does not stay in c with them is what its layout says,
+// and those left are asked again: the greatest such set.
 fold_induction :: proc(k: ^Kernel, f: ^Fold, c: Type) -> bool {
-	assumed: Rewrite
-	taken := make([]bool, len(f.states))
-	for z, i in f.states {
-		if !reads(k, f.value, z) do continue
-		u := new_unknown(k, nil)
-		u.layout = c
-		assumed = rewriting(assumed, z, u)
-		taken[i] = true
-	}
 	holds :: proc(k: ^Kernel, t, c: Type) -> bool {
 		verdict, _ := prove(k, in_law(k, t, c))
 		return verdict == .Proven
 	}
-	for t, i in f.inits do if taken[i] && !holds(k, t, c) do return false
-	for t, i in f.updates do if taken[i] && !holds(k, rewrite(k, t, assumed), c) do return false
+	taken := make([]bool, len(f.states))
+	for z, i in f.states do taken[i] = reads(k, f.value, z) && holds(k, f.inits[i], c)
+	assumed: Rewrite
+	for {
+		assumed = nil
+		for z, i in f.states {
+			if !taken[i] do continue
+			u := new_unknown(k, nil)
+			u.layout = c
+			assumed = rewriting(assumed, z, u)
+		}
+		stays := true
+		for t, i in f.updates do if taken[i] && !holds(k, rewrite(k, t, assumed), c) {
+			taken[i], stays = false, false
+			break
+		}
+		if stays do break
+	}
 	return holds(k, rewrite(k, f.value, assumed), c)
 }
 

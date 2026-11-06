@@ -1346,27 +1346,29 @@ by_place :: proc(k: ^Kernel, o: Operator, x: Type, xs: []^Binding, i: Type, span
 	return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %s", print_type(x), print_type(i)))
 }
 
-// fold_length: |⟳(…; z: s ↦ u(z); z)| = ⟳(…; ℓ: |s| ↦ ℓ + g; ℓ) when |u(z)| = |z| + g:
-// each step places z once and g bindings around it, |{...P ...x ...Q}| = |x| + |P| +
-// |Q| (§5.3) through its carves and expansions, and nothing else reads it — the
-// length passes through the fold as through an operator.
+// fold_length: |⟳(…; v)| = ⟳(…; |v|), the length of what the fold gives read on
+// its value (§5.3). A state z: s ↦ u(z) that nothing else reads, and the value only
+// by |z|, is ℓ: |s| ↦ ℓ + g when |u(z)| = |z| + g: each step places z once and g
+// bindings around it, |{...P ...x ...Q}| = |x| + |P| + |Q| (§5.3) through its carves,
+// expansions and patterns — the length passes through the fold as through an
+// operator.
 fold_length :: proc(k: ^Kernel, f: ^Fold, span: syn.Span) -> (n: Type, ok: bool) {
-	for z, i in f.states {
-		if !same(k, f.value, z) do continue
-		if reads(k, f.effects, z) do return
-		for t, j in f.updates do if j != i && reads(k, t, z) do return
-		// the length of the step as a term in |z|: ℓ + g, g reading no z — z placed
-		// once, as a run, among what the step places, through its carves and
-		// expansions (§5.3)
+	length := run_law(k, .Length, {f.value}, span)
+	next: for z, i in f.states {
+		if reads(k, f.effects, z) do continue
+		for t, j in f.updates do if j != i && reads(k, t, z) do continue next
 		l := new_unknown(k, nil)
 		l.layout = COUNTS
-		length := rewrite(k, run_law(k, .Length, {f.updates[i]}, span), append_read(nil, new_operation(.Length, z), l))
-		one, g := affine_in(k, length, l) or_return
-		if !is_int(one, 1) || reads(k, g, z) || reads(k, g, l) do return
+		at := append_read(nil, new_operation(.Length, z), l)
+		value := rewrite(k, length, at)
+		if reads(k, value, z) do continue
+		// the length of the step as a term in |z|: ℓ + g, g reading no z
+		one, g := affine_in(k, rewrite(k, run_law(k, .Length, {f.updates[i]}, span), at), l) or_continue
+		if !is_int(one, 1) || reads(k, g, z) || reads(k, g, l) do continue
 		h := new(Fold)
 		h^ = f^
 		h.states, h.inits, h.updates = slice.clone(f.states), slice.clone(f.inits), slice.clone(f.updates)
-		h.states[i], h.value = l, l
+		h.states[i], h.value = l, value
 		h.inits[i] = run_law(k, .Length, {f.inits[i]}, span)
 		h.updates[i] = op(k, .Add, l, g)
 		return fold_law(k, h), true
@@ -1637,33 +1639,46 @@ produced_items :: proc(k: ^Kernel, s: ^Scope) -> (c: Type, ok: bool) {
 	defer {
 		for x in k.equations do if x.generic == s do read_equation(k, x, false)
 	}
-	leaves := make([dynamic]Product)
-	for p in placed(k, s, .Shape) do if p.kind == .Product && p.value != nil do products(k, binding_type(k, p), &leaves)
+	items := make([dynamic]Type)
+	for p in placed(k, s, .Shape) do if p.kind == .Product && p.value != nil do run_items(k, binding_type(k, p), root, &items) or_return
+	return or_law(k, items[:]), true
+}
+
+// run_items: what the runs t may be hold, added to items: a pattern gives one of
+// its products, each read in its branch, where its reach holds (§6); a run written
+// as its bindings holds what they place — a place without a value what it admits
+// (§5.4) —; another run what its values hold. A run of a call of root places what
+// root places: X = X ∪ P adds nothing to P.
+run_items :: proc(k: ^Kernel, t: Type, root: ^Scope, items: ^[dynamic]Type) -> bool {
 	own :: proc(t: Type, root: ^Scope) -> bool {
 		c, is_call := as_call(t)
-		if !is_call do return false
+		if !is_call || root == nil do return false
 		s, is_scope := c.target.(^Scope)
 		return is_scope && origin(s) == root
 	}
-	items := make([dynamic]Type)
+	leaves := make([dynamic]Product)
+	products(k, t, &leaves)
 	for leaf in leaves {
 		if own(leaf.term, root) do continue
-		run := given(k, leaf.term).(^Scope) or_return
+		run, written := given(k, leaf.term).(^Scope)
+		if !written {
+			append(items, item_image(k, values(k, given(k, leaf.term)) or_return) or_return)
+			continue
+		}
 		for b in run_data(k, run) {
 			if b.value == nil {
-				append(&items, hole_items(k, b) or_return)
+				append(items, hole_items(k, b) or_return)
 				continue
 			}
 			v := read_in(k, leaf, binding_value(k, b))
 			if b.kind == .Push {
-				append(&items, values(k, given(k, v)) or_return)
+				append(items, values(k, given(k, v)) or_return)
 				continue
 			}
-			if own(v, root) do continue
-			append(&items, item_image(k, values(k, given(k, v)) or_return) or_return)
+			run_items(k, v, root, items) or_return
 		}
 	}
-	return or_law(k, items[:]), true
+	return true
 }
 
 // repeated: the shape {...P * n} of the runs of n pieces P.

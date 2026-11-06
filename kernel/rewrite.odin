@@ -888,25 +888,34 @@ runs_read :: proc(k: ^Kernel, t: Type) -> (out: Type, changed: bool) {
 	return operation_law(k, o.op, args, o.span), true
 }
 
-// built_image: the run a fold builds, {e₀ … eₙ₋₁}: the shape {...{E:} * 0..},
-// E the values its steps place.
+// built_image: the run a fold builds, a state z: s ↦ {...P ...z ...Q} its value
+// places P' and Q' around — {e₀ … eₙ₋₁} from {} the simplest —: the shape
+// {...{E:} * 0..}, E what s, the P and the Q may hold (§5.3), the other states what
+// their layouts say.
 built_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
-	_, es, builds := built(k, f)
-	if !builds do return
-	values_of := make([]Type, len(es))
-	for e, i in es do values_of[i] = values(k, given(k, e)) or_return
-	piece := new_scope(nil, f.span)
-	piece.source, piece.complete, piece.reached = piece, true, true
-	place := new_binding(piece, .Push, f.span)
-	// what a binding may hold: a set the laws keep written, by the range that bounds it
-	place.color = or_law(k, values_of)
-	if _, written := place.color.(^Operation); written do place.color = int_hull(k, place.color)
-	place.typed_color = place.color
-	return repeated(k, piece, COUNTS, f.span), true
+	next: for z, i in f.states {
+		prefix, suffix := run_affine(k, f.updates[i], z) or_continue
+		if reads(k, f.effects, z) do continue
+		for t, j in f.updates do if j != i && reads(k, t, z) do continue next
+		before, after := run_affine(k, f.value, z) or_continue
+		items := make([dynamic]Type)
+		if !run_items(k, f.inits[i], nil, &items) do continue
+		for part in ([][]^Binding{prefix, suffix, before, after}) do if !run_items(k, run_scope(k, part), nil, &items) do continue next
+		piece := new_scope(nil, f.span)
+		piece.source, piece.complete, piece.reached = piece, true, true
+		place := new_binding(piece, .Push, f.span)
+		// what a binding may hold: a set the laws keep written, by the range that bounds it
+		place.color = or_law(k, items[:])
+		if _, written := place.color.(^Operation); written do place.color = int_hull(k, place.color)
+		place.typed_color = place.color
+		return repeated(k, piece, COUNTS, f.span), true
+	}
+	return
 }
 
-// sum_image: the values of a fold whose value is a state x: c ↦ α·x + g, α ≥ 0 a
-// constant, g not reading x: from c, n steps of g, n its steps.
+// sum_image: the values of a fold whose value reads a state x: c ↦ α·x + g, α ≥ 0
+// a constant, g not reading x: from c, n steps of g, n its steps; the value read
+// with x there, the other states what their layouts say.
 sum_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 	// the steps: along a counter, from lo to hi; otherwise the length of the orbit of
 	// the index from its start (§5.6), the index where its layout says
@@ -923,10 +932,13 @@ sum_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 		steps = rewrite(k, n, rewriting(nil, start, f.start))
 	}
 	for z, i in f.states {
-		if !same(k, f.value, z) do continue
+		if !reads(k, f.value, z) do continue
 		// x ↦ α·x + g: the ring reads the update
-		alpha, g := affine_in(k, f.updates[i], z) or_return
-		return affine_times(k, steps, alpha, f.inits[i], rewrite(k, g, along))
+		alpha, g := affine_in(k, f.updates[i], z) or_continue
+		if reads(k, g, z) do continue
+		x := affine_times(k, steps, alpha, f.inits[i], rewrite(k, g, along)) or_continue
+		if same(k, f.value, z) do return x, true
+		return layout_image(k, rewrite(k, f.value, rewriting(nil, z, narrowing(z, x))))
 	}
 	return
 }
@@ -1082,32 +1094,38 @@ shape_field :: proc(k: ^Kernel, s: ^Scope, name: string, itself: ^Scope) -> (col
 
 // is_call_of: t is a recursive call of the scope s, or of the equation s reads.
 is_call_of :: proc(t: Type, s: ^Scope) -> bool {
+	if s == nil do return false
 	c := as_call(t) or_return
 	target := c.target.(^Scope) or_return
 	return origin(target) == origin(s)
 }
 
-// summed_image: Σ(x: 0..|X| - 1, g(X.#x)), X a recursive call, its terms reading X
-// only at x: the bounds of that sum of what the call gives (§5.6).
+// summed_image: Σ(x: 0..|X| - 1, g(X.#x)), X a recursive call or a fold that
+// builds a run, its terms reading X only at x: the bounds of that sum of what X
+// gives (§5.6).
 summed_image :: proc(k: ^Kernel, v: ^Series) -> (image: Type, ok: bool) {
 	if !is_int(v.lo, 0) do return
-	reads_at :: proc(t: Type, i: ^Unknown, out: ^[dynamic]^Collapse) {
+	reads_at :: proc(t: Type, i: ^Unknown, out: ^[dynamic]Type) {
 		if o, is_op := t.(^Operation); is_op && o.op == .Item {
-			if c, is_call := as_call(o.args[0]); is_call do if u, at := o.args[1].(^Unknown); at && same_unknown(u, i) do append(out, c)
+			_, is_call := as_call(o.args[0])
+			_, is_fold := o.args[0].(^Fold)
+			if is_call || is_fold do if u, at := o.args[1].(^Unknown); at && same_unknown(u, i) do append(out, o.args[0])
 		}
 		for p in parts(t) do reads_at(p, i, out)
 	}
-	calls := make([dynamic]^Collapse)
-	reads_at(v.term, v.index, &calls)
-	for c in calls {
-		if !same(k, v.hi, op(k, .Sub, run_law(k, .Length, {c}, v.span), Int(1))) do continue
+	runs := make([dynamic]Type)
+	reads_at(v.term, v.index, &runs)
+	for x in runs {
+		if !same(k, v.hi, op(k, .Sub, run_law(k, .Length, {x}, v.span), Int(1))) do continue
 		// at: a binding of X, what X holds at a place
-		item := new_operation(.Item, c, v.index)
+		item := new_operation(.Item, x, v.index)
 		at := new_unknown(k, nil)
 		at.layout = layout_image(k, item) or_continue
 		g := rewrite(k, v.term, append_read(nil, item, at))
 		if holds_invalid(g) do continue
 		if reads(k, g, v.index) do continue
+		if f, is_fold := x.(^Fold); is_fold do return fold_image(k, f, Measure{.Sum, g, at})
+		c, _ := as_call(x)
 		return call_image(k, c, Measure{.Sum, g, at})
 	}
 	return

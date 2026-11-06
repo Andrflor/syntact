@@ -203,9 +203,10 @@ values_of :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
 	case ^Scope:
 		return v, true // a scope is one value
 	case ^Pattern:
-		products := make([]Type, len(v.branches))
-		for b, i in v.branches do products[i] = values(k, given(k, b.product)) or_return
-		return or_law(k, products), true
+		// one of its products, each read in its branch, where its reach holds (§6)
+		products := make([dynamic]Type)
+		for x in in_branches(k, v) or_return do if x != nil do append(&products, values(k, given(k, x)) or_return)
+		return or_law(k, products[:]), true
 	case ^Operation:
 		if v.op == .Round {
 			// a value of its format, between its rounded bounds when they are read

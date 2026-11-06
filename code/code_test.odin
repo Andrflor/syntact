@@ -49,7 +49,8 @@ test_tail_call_is_a_loop :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
-	k, parsed := kernel.run("f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  1 -> acc  -> f{n -> n - 1  acc -> acc + 2}!}}\n-> f{n -> ??::u32}!")
+	// Euclid: the step reads what the call carries, no orbit (§5.6): the call stays
+	k, parsed := kernel.run("f -> {u32:n -> ??  u32:acc -> 1000  -> n ? {0 -> acc  -> f{n -> acc % n  acc -> n}!}}\n-> f{n -> ??::u32}!")
 	if !testing.expect(t, parsed, "does not parse") do return
 	prog, err := lower_program(&k)
 	if !testing.expectf(t, err == "", "%s", err) do return
@@ -98,11 +99,12 @@ test_function_gives_scope :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
-	F :: "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> {a -> acc  b -> 1}  1 -> {a -> acc  b -> 2}  -> f{n -> n - 1  acc -> (acc + n) % 1000}!}}\n"
+	// Euclid: the step reads what the call carries, no orbit (§5.6): the call stays
+	F :: "f -> {u32:n -> ??  u32:acc -> 1000  -> n ? {0 -> {a -> acc  b -> 1}  1 -> {a -> acc  b -> 2}  -> f{n -> acc % n  acc -> n}!}}\n"
 	for c in ([]struct {
 			field: string,
 			n, int: i64,
-		}{{"a", 10, 54}, {"b", 10, 2}, {"b", 0, 1}}) {
+		}{{"a", 10, 10}, {"a", 7, 6}, {"b", 7, 2}, {"b", 10, 1}, {"b", 0, 1}}) {
 		k, parsed := kernel.run(fmt.tprintf("%s-> f{{n -> ??::u32}}!.%s", F, c.field))
 		if !testing.expect(t, parsed, "does not parse") do return
 		prog, err := lower_program(&k)
