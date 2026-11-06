@@ -213,9 +213,10 @@ along_orbit :: proc(k: ^Kernel, f: ^Fold) -> (g: ^Fold, ok: bool) {
 	j := new_unknown(k, nil)
 	j.layout = COUNTS
 	n := least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), f.stop), f.span)
-	// along the orbit, before it stops: i in 0..n - 1
+	// along the orbit, before it stops: i in 0.. and below n — 0.. & ..(n - 1), none
+	// when n is 0 (a range holds what is between its ends, either way)
 	along := new_unknown(k, nil)
-	along.layout = range_law(k, Int(0), op(k, .Sub, n, Int(1)), .Int, f.span)
+	along.layout = and_law(k, {COUNTS, range_law(k, nil, op(k, .Sub, n, Int(1)), .Int, f.span)})
 	ki = rewrite(k, ki, rewriting(nil, i, along))
 	i = along
 	at := rewriting(nil, f.index, ki)
@@ -620,9 +621,10 @@ is_ring :: proc(t: Type) -> bool {
 series :: proc(k: ^Kernel, o: Operator, i: ^Unknown, lo, hi, t: Type) -> Type {
 	s := new(Series)
 	s.op, s.lo, s.hi = o, lo, hi
-	// the index takes the values lo..hi
+	// the index takes the values from lo up to hi: lo.. & ..hi, none over an empty
+	// range (a range holds what is between its ends, either way)
 	s.index = new_unknown(k, nil)
-	s.index.layout = range_law(k, lo, hi, .Int, {})
+	s.index.layout = and_law(k, {range_law(k, lo, nil, .Int, {}), range_law(k, nil, hi, .Int, {})})
 	s.term = rewrite(k, t, rewriting(nil, i, s.index))
 	return series_law(k, s)
 }
@@ -909,8 +911,15 @@ joined :: proc(k: ^Kernel, first: []Type, between: []^Binding = nil, r: Rewrite 
 		b := new_binding(s, kind, {})
 		b.value = t
 	}
+	// a part with no type: the run has none (none of a law is computed on it)
+	for t in first do if is_invalid(t) do return t
+	for t in last do if is_invalid(t) do return t
 	for t in first do place(k, s, .Expand, t)
-	for x in between do place(k, s, x.kind, rewrite(k, binding_value(k, x), r))
+	for x in between {
+		t := rewrite(k, binding_value(k, x), r)
+		if is_invalid(t) do return t
+		place(k, s, x.kind, t)
+	}
 	for t in last do place(k, s, .Expand, t)
 	// {...x} is the run x
 	if len(s.bindings) == 1 && s.bindings[0].kind == .Expand do return s.bindings[0].value

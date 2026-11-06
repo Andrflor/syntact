@@ -44,6 +44,8 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
 	v := given(k, t)
 	if _, is_scope := v.(^Scope); is_scope do return true
+	// a carve that stays is of a scope not known yet: a scope (§5.3)
+	if _, is_carve := v.(^Carve); is_carve do return true
 	// a call, or what holds one: proven in the scopes, by induction (§5.6); what is read
 	// of one, by the same induction on what it reads, or by its values
 	scopes :: proc(k: ^Kernel, t: Type) -> (bool, bool) {
@@ -150,6 +152,13 @@ collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 	s, ok := target.(^Scope)
 	if !ok {
 		if is_invalid(target) do return target
+		// a scope not known yet: the collapse stays, a term, until a rewrite gives it
+		if gives_scope(k, target) {
+			out := new(Collapse)
+			out^ = c^
+			out.target = target
+			return out
+		}
 		return problem(.Invalid_Execute, c.span, fmt.tprintf("`!` on %s, which is not a scope", print_type(target)))
 	}
 	return answered(k, collapsed(k, s, c), c.site)
@@ -159,21 +168,10 @@ collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 // above it (§4.8); none without one. A recursive call is never unfolded
 // (recursion.odin).
 product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
-	// a recursive call, or a carve of a recursive scope: its arguments go into the
-	// solution, or it stays. A carve collapsed where it is written asks its
-	// production: it is typed for the values the carve gives (§7); a call that
-	// stays has the solution of its equation, or stays
-	if c.recursive do return recursive_call(k, s, c.span)
-	if s != origin(s) && recursive(s) {
-		if p, found := first_production(k, s); found {
-			if v := binding_type(k, p); is_invalid(v) do return v
-		}
-		call := recursive_call(k, s, c.span)
-		// the call stays: as it is, or as the effect of an equation with effects
-		stays, is_call := call.(^Collapse)
-		if e, is_effect := call.(^Effect); is_effect && e.call != nil do stays, is_call = e.call, true
-		return call
-	}
+	// a recursive call, or a carve of a recursive scope: the solution of its equation
+	// at the values the carve gives, or the call stays — never its production typed
+	// at those values: that is unfolding (§5.6)
+	if c.recursive || s != origin(s) && recursive(s) do return recursive_call(k, s, c.span)
 	if p, found := first_production(k, s); found do return product(k, p)
 	return None{}
 }
@@ -199,6 +197,13 @@ carve_law :: proc(k: ^Kernel, target: Type, c: ^Carve) -> Type {
 	s, ok := target.(^Scope)
 	if !ok {
 		if is_invalid(target) do return target
+		// a scope not known yet: the carve stays, a term, until a rewrite gives it
+		if gives_scope(k, target) {
+			out := new(Carve)
+			out^ = c^
+			out.target, out.args = target, args
+			return out
+		}
 		return problem(.Invalid_Carve, c.span, fmt.tprintf("%s is not a scope: it cannot be carved", print_type(target)))
 	}
 	r := carve(k, s, args, c.span)
@@ -1034,8 +1039,28 @@ different_structures :: proc(k: ^Kernel, a, b: Type) -> bool {
 // same: two normal forms are the same term. Two scopes are equal when their
 // bindings are, in order: the same names, the same kinds, equal values (§5.3).
 same :: proc(k: ^Kernel, a, b: Type) -> bool {
+	return same_bound(k, a, b, nil)
+}
+
+// Bound_Pair: an unknown bound in one term — the index or a state of a fold, the index
+// of a Σ or a μ, what an effect gives back — and the one bound at the same place in the
+// other.
+Bound_Pair :: struct {
+	a, b: ^Unknown,
+}
+
+// same_bound: a and b are the same term, compared part by part, never rewritten: an
+// unknown bound in each is the same as the one bound at the same place in the other.
+same_bound :: proc(k: ^Kernel, a, b: Type, bound: []Bound_Pair) -> bool {
 	if a == nil || b == nil do return a == nil && b == nil
 	if a == b do return true // the very term
+	// binding: the pairs, and those a and b bind at the same places
+	binding :: proc(bound: []Bound_Pair, pairs: ..Bound_Pair) -> []Bound_Pair {
+		out := make([dynamic]Bound_Pair, 0, len(bound) + len(pairs))
+		append(&out, ..bound)
+		append(&out, ..pairs)
+		return out[:]
+	}
 	switch x in a {
 	case Char:
 		y, ok := b.(Char)
@@ -1057,45 +1082,48 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		return ok
 	case ^Unknown:
 		y, ok := b.(^Unknown)
-		return ok && same_unknown(x, y) // the same unknown, whatever layout a branch gives it
+		if !ok do return false
+		// a bound unknown is the one bound at the same place in the other term
+		for p in bound do if same_unknown(p.a, x) || same_unknown(p.b, y) do return same_unknown(p.a, x) && same_unknown(p.b, y)
+		return same_unknown(x, y) // the same unknown, whatever layout a branch gives it
 	case ^Effect:
 		// the same effect wrapping the same computation: what it gives back is bound
 		// in it, whatever its index
 		y, ok := b.(^Effect)
 		if !ok || x.id != y.id || (x.answer == nil) != (y.answer == nil) do return false
 		if (x.choice == nil) != (y.choice == nil) do return false
-		if x.choice != nil && !same(k, x.choice, y.choice) do return false
+		if x.choice != nil && !same_bound(k, x.choice, y.choice, bound) do return false
 		// the same emission, of the same value
 		if (x.emission == nil) != (y.emission == nil) do return false
-		if x.emission != nil && (x.emission.id != y.emission.id || !same(k, x.emission.sent, y.emission.sent)) do return false
+		if x.emission != nil && (x.emission.id != y.emission.id || !same_bound(k, x.emission.sent, y.emission.sent, bound)) do return false
 		// the same write: of the same place, the same value
 		if (x.write == nil) != (y.write == nil) do return false
-		if x.write != nil && (x.write.place == nil || y.write.place == nil || !same_unknown(x.write.place, y.write.place) || !same(k, x.write.value, y.write.value)) do return false
-		if x.answer == nil do return same(k, x.then, y.then)
+		if x.write != nil && (x.write.place == nil || y.write.place == nil || !same_unknown(x.write.place, y.write.place) || !same_bound(k, x.write.value, y.write.value, bound)) do return false
+		if x.answer == nil do return same_bound(k, x.then, y.then, bound)
 		if (x.call == nil) != (y.call == nil) do return false
-		if x.call != nil && !same(k, x.call, y.call) do return false
+		if x.call != nil && !same_bound(k, x.call, y.call, bound) do return false
 		if (x.fold == nil) != (y.fold == nil) do return false
-		if x.fold != nil && !same(k, x.fold, y.fold) do return false
-		if !same(k, layout_of(k, x.answer), layout_of(k, y.answer)) do return false
-		return same(k, x.then, rewrite(k, y.then, rewriting(nil, y.answer, x.answer)))
+		if x.fold != nil && !same_bound(k, x.fold, y.fold, bound) do return false
+		if !same_bound(k, layout_of(k, x.answer), layout_of(k, y.answer), bound) do return false
+		return same_bound(k, x.then, y.then, binding(bound, {x.answer, y.answer}))
 	case ^Or:
 		y, ok := b.(^Or)
-		return ok && same_all(k, x.terms, y.terms)
+		return ok && same_all_bound(k, x.terms, y.terms, bound)
 	case ^And:
 		y, ok := b.(^And)
-		return ok && same_all(k, x.terms, y.terms)
+		return ok && same_all_bound(k, x.terms, y.terms, bound)
 	case ^Not:
 		y, ok := b.(^Not)
-		return ok && same(k, x.term, y.term)
+		return ok && same_bound(k, x.term, y.term, bound)
 	case ^Is:
 		y, ok := b.(^Is)
-		return ok && same(k, x.term, y.term)
+		return ok && same_bound(k, x.term, y.term, bound)
 	case ^Range:
 		y, ok := b.(^Range)
-		return ok && x.family == y.family && same(k, x.lo, y.lo) && same(k, x.hi, y.hi)
+		return ok && x.family == y.family && same_bound(k, x.lo, y.lo, bound) && same_bound(k, x.hi, y.hi, bound)
 	case ^Operation:
 		y, ok := b.(^Operation)
-		return ok && x.op == y.op && same_all(k, x.args, y.args)
+		return ok && x.op == y.op && same_all_bound(k, x.args, y.args, bound)
 	case ^Name:
 		y, ok := b.(^Name)
 		return ok && x.binding == y.binding
@@ -1104,55 +1132,60 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		return ok && same_scope(k, x, y)
 	case ^Access:
 		y, ok := b.(^Access)
-		return ok && x.name == y.name && x.ordinal == y.ordinal && same(k, x.target, y.target)
+		return ok && x.name == y.name && x.ordinal == y.ordinal && same_bound(k, x.target, y.target, bound)
 	case ^Collapse:
 		y, ok := b.(^Collapse)
-		return ok && x.recursive == y.recursive && slice.equal(x.answered, y.answered) && same(k, x.target, y.target)
+		return ok && x.recursive == y.recursive && slice.equal(x.answered, y.answered) && same_bound(k, x.target, y.target, bound)
 	case ^Carve:
 		y, ok := b.(^Carve)
-		if !ok || len(x.args) != len(y.args) || !same(k, x.target, y.target) do return false
-		for a, i in x.args do if a.name != y.args[i].name || a.ordinal != y.args[i].ordinal || !same(k, a.value, y.args[i].value) do return false
+		if !ok || len(x.args) != len(y.args) || !same_bound(k, x.target, y.target, bound) do return false
+		for a, i in x.args do if a.name != y.args[i].name || a.ordinal != y.args[i].ordinal || !same_bound(k, a.value, y.args[i].value, bound) do return false
 		return true
 	case ^Default:
 		y, ok := b.(^Default)
-		return ok && same(k, x.color, y.color)
+		return ok && same_bound(k, x.color, y.color, bound)
 	case ^Pattern:
 		y, ok := b.(^Pattern)
-		if !ok || len(x.branches) != len(y.branches) || !same(k, x.target, y.target) do return false
-		for br, i in x.branches do if !same(k, br.cover, y.branches[i].cover) || !same(k, br.product, y.branches[i].product) do return false
+		if !ok || len(x.branches) != len(y.branches) || !same_bound(k, x.target, y.target, bound) do return false
+		for br, i in x.branches do if !same_bound(k, br.cover, y.branches[i].cover, bound) || !same_bound(k, br.product, y.branches[i].product, bound) do return false
 		return true
 	case ^Fold:
 		// the same fold: what it binds — k, its states, what its effects give back —
-		// is its own, whatever the index
+		// is its own, whatever the index: each paired with the other's, part by part
 		y, ok := b.(^Fold)
 		if !ok || len(x.states) != len(y.states) do return false
 		xs, ys := chain_answers(x.effects), chain_answers(y.effects)
 		if len(xs) != len(ys) do return false
-		bound := rewriting(nil, y.index, x.index)
-		for u, i in y.states do bound = rewriting(bound, u, x.states[i])
-		for u, i in ys {
-			if (u == nil) != (xs[i] == nil) do return false
-			if u != nil do bound = rewriting(bound, u, xs[i])
+		pairs := make([dynamic]Bound_Pair)
+		append(&pairs, Bound_Pair{x.index, y.index})
+		for u, i in x.states do append(&pairs, Bound_Pair{u, y.states[i]})
+		for u, i in xs {
+			if (u == nil) != (ys[i] == nil) do return false
+			if u != nil do append(&pairs, Bound_Pair{u, ys[i]})
 		}
-		return same_all(k, fold_parts(x), rewrite_all(k, fold_parts(y), bound))
+		return same_all_bound(k, fold_parts(x), fold_parts(y), binding(bound, ..pairs[:]))
 	case ^Least:
 		y, ok := b.(^Least)
-		return ok && same(k, x.holds, rewrite(k, y.holds, rewriting(nil, y.index, x.index)))
+		return ok && same_bound(k, x.holds, y.holds, binding(bound, {x.index, y.index}))
 	case ^Recurrent:
 		y, ok := b.(^Recurrent)
-		if !ok || len(x.coefficients) != len(y.coefficients) || !same_all(k, x.initial, y.initial) || !same(k, x.at, y.at) do return false
+		if !ok || len(x.coefficients) != len(y.coefficients) || !same_all_bound(k, x.initial, y.initial, bound) || !same_bound(k, x.at, y.at, bound) do return false
 		for c, i in x.coefficients do if c != y.coefficients[i] do return false
 		return true
 	case ^Series:
 		y, ok := b.(^Series)
-		return ok && x.op == y.op && same(k, x.lo, y.lo) && same(k, x.hi, y.hi) && same(k, x.term, rewrite(k, y.term, rewriting(nil, y.index, x.index)))
+		return ok && x.op == y.op && same_bound(k, x.lo, y.lo, bound) && same_bound(k, x.hi, y.hi, bound) && same_bound(k, x.term, y.term, binding(bound, {x.index, y.index}))
 	}
 	return false
 }
 
 same_all :: proc(k: ^Kernel, a, b: []Type) -> bool {
+	return same_all_bound(k, a, b, nil)
+}
+
+same_all_bound :: proc(k: ^Kernel, a, b: []Type, bound: []Bound_Pair) -> bool {
 	if len(a) != len(b) do return false
-	for x, i in a do if !same(k, x, b[i]) do return false
+	for x, i in a do if !same_bound(k, x, b[i], bound) do return false
 	return true
 }
 
@@ -1173,27 +1206,33 @@ same_scope :: proc(k: ^Kernel, a, b: ^Scope) -> bool {
 	return same_bindings(k, a, b, true)
 }
 
-// same_bindings: the bindings of two scopes are, in order, the same names, kinds
-// and values (§5.3) — as terms, the same colors too: `{u8:}` and `{i8:}` give the
-// same value, not the same set.
+// same_bindings: the bindings of two scopes are, in order and as written, the same
+// names, kinds and values (§5.3) — as terms, the same colors too: `{u8:}` and `{i8:}`
+// give the same value, not the same set. Compared part by part, never typed.
 same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
-	// the places of their shapes: a run without a value places no value, but it is
-	// a place, compared by its color
-	ps, qs := placed(k, a, .Shape), placed(k, b, .Shape)
-	if len(ps) != len(qs) do return false
-	for p, i in ps {
-		q := qs[i]
-		if p.name != q.name || p.kind != q.kind || (p.value == nil) != (q.value == nil) do return false
-		if p.value == nil && !same(k, binding_color(k, p), binding_color(k, q)) do return false
+	// as written, each scope written in place where it is expanded read as its
+	// bindings: {1 ...{2 3} 4} is {1 2 3 4} (§5.3)
+	written :: proc(s: ^Scope, out: ^[dynamic]^Binding) {
+		for x in s.bindings {
+			if x.kind == .Expand && x.color == nil {
+				if inner, is_scope := x.value.(^Scope); is_scope {
+					written(inner, out)
+					continue
+				}
+			}
+			append(out, x)
+		}
 	}
-	xs := placed(k, a, .Value)
-	ys := placed(k, b, .Value)
+	xs, ys := make([dynamic]^Binding), make([dynamic]^Binding)
+	written(a, &xs)
+	written(b, &ys)
 	if len(xs) != len(ys) do return false
 	for x, i in xs {
 		y := ys[i]
-		if x.name != y.name || x.kind != y.kind do return false
-		if colors && !same(k, binding_color(k, x), binding_color(k, y)) do return false
-		if !same(k, binding_type(k, x), binding_type(k, y)) do return false
+		if x.name != y.name || x.kind != y.kind || (x.value == nil) != (y.value == nil) do return false
+		// a place without a value is compared by its color
+		if (colors || x.value == nil) && !same(k, x.color, y.color) do return false
+		if !same(k, x.value, y.value) do return false
 	}
 	return true
 }
@@ -1203,6 +1242,7 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 // run_law: read on the bindings of x where they are known; otherwise it stays.
 run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked := false) -> Type {
 	for a in args do if is_invalid(a) do return a
+	for a in args do if is_none(a) do return None{} // none op c = none (§4.5)
 	x := given(k, args[0])
 	// a pattern gives one of its products: (t ? {c -> p …}).#k = t ? {c -> p.#k …}
 	if p, is_pattern := x.(^Pattern); is_pattern && !has_effect(p) {

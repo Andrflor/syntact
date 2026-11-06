@@ -275,7 +275,10 @@ exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Typ
 	if op == .In do return in_law(k, args[0], args[1])
 	for a in args do if is_none(a) do return None{} // none op c = none
 	sig, legal := legal_signature(k, op, args)
-	if !legal do return problem(.Invalid_operator, span, fmt.tprintf("`%s` is not proven to apply to %s", operator_text[op], print_types(args)))
+	if !legal {
+		if out, spread := distributed(k, op, args, span); spread do return out
+		return problem(.Invalid_operator, span, fmt.tprintf("`%s` is not proven to apply to %s", operator_text[op], print_types(args)))
+	}
 	if is_comparison(op) && (sig.args[0] == .Int || sig.args[0] == .Real) && !is_constant(args[0]) && !is_constant(args[1]) {
 		// the order is that of a ring: x < y = x - y < 0
 		zero: Type = sig.args[0] == .Int ? Type(Int(0)) : Type(real_int(0))
@@ -302,6 +305,51 @@ exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Typ
 	}
 	if out == nil do out = new_operation(op, ..args)
 	return single(k, out)
+}
+
+// distributed: op on operands whose values are of several families: an operator
+// distributes over | (§4.5), each family of values by its own signature. Legal when
+// each of those is; on constants, the | of the results, otherwise the term, legal.
+distributed :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> (out: Type, ok: bool) {
+	if op == .In || len(args) > 2 do return
+	pieces: [2][]Type
+	split, constant := false, true
+	for a, i in args {
+		pieces[i] = family_pieces(k, a)
+		split ||= len(pieces[i]) > 1
+		constant &&= is_constant(a)
+	}
+	if !split do return
+	results := make([dynamic]Type)
+	for x in pieces[0] {
+		for y in (len(args) == 2 ? pieces[1] : []Type{nil}) {
+			piece := len(args) == 2 ? []Type{x, y} : []Type{x}
+			if _, legal := legal_signature(k, op, piece); !legal do return
+			if constant do append(&results, exact_law(k, op, piece, span))
+		}
+	}
+	if constant do return or_law(k, results[:]), true
+	return new_operation(op, ..args), true
+}
+
+// family_pieces: the values of t, one set per family of them; t itself when they
+// are of one, or not known.
+family_pieces :: proc(k: ^Kernel, t: Type) -> []Type {
+	set, known := values(k, t)
+	if !known || !is_constant(set) do return clone_types({t})
+	one: [1]Type
+	cells, negated := cells_in(set, &one)
+	if negated || len(cells) < 2 do return clone_types({t})
+	by := make(map[Cell_Family][dynamic]Type)
+	for c in cells {
+		f := cell_family(c)
+		if f not_in by do by[f] = make([dynamic]Type)
+		append(&by[f], c)
+	}
+	if len(by) < 2 do return clone_types({t})
+	out := make([dynamic]Type)
+	for _, cs in by do append(&out, or_law(k, cs[:]))
+	return out[:]
 }
 
 // single: a term over unknowns whose layout is one primitive is that primitive:

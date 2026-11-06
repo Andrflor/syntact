@@ -327,6 +327,9 @@ is_law :: proc(t: Type) -> Type {
 range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span) -> Type {
 	if is_invalid(lo) do return lo
 	if is_invalid(hi) do return hi
+	// a bound that is a set gives the union of the ranges from each of its values
+	// (below): from none, none
+	if is_none(lo) || is_none(hi) do return None{}
 	for b in ([2]Type{lo, hi}) do if b != nil && !is_constant(b) do return new_range(lo, hi, family, span)
 	if is_word(lo) || is_word(hi) {
 		// between strings, `..` is about positions: l..u = (l + string) & (string + u)
@@ -350,6 +353,17 @@ range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span
 			if r.lo != nil do append(&values, r.lo)
 			if r.hi != nil do append(&values, r.hi)
 			if r.family != .Any do of = r.family
+			continue
+		}
+		// a bound that is a set of integers — cells, or an operation the laws keep
+		// written, u8 * u8 —: the union of the ranges from each of its values, from the
+		// least to the greatest
+		if least, most, integers := int_bounds(k, b); integers && !is_primitive(b) {
+			if l, has := least.?; has do append(&values, Int(l))
+			else do below = true
+			if m, has := most.?; has do append(&values, Int(m))
+			else do above = true
+			of = .Int
 			continue
 		}
 		#partial switch _ in b {

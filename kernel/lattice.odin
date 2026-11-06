@@ -1292,12 +1292,21 @@ included :: proc(k: ^Kernel, a, b: Type) -> bool {
 		verdict, _ := prove(k, in_law(k, one.term, b))
 		return verdict == .Proven
 	}
-	return is_none(and_law(k, {a, not_law(k, b)}))
+	meet := and_law(k, {a, not_law(k, b)})
+	if is_none(meet) || !is_constant(meet) && holds_nothing(k, meet) do return true
+	// a | the meet does not read whole — a scope beside other cells —: each of its
+	// terms in b, | being the least set that holds them (§4.1)
+	if any, either := a.(^Or); either {
+		for t in any.terms do if !included(k, t, b) do return false
+		return true
+	}
+	return false
 }
 
 // apart: a & b = none: a and b have no element in common.
 apart :: proc(k: ^Kernel, a, b: Type) -> bool {
-	return is_none(and_law(k, {a, b}))
+	meet := and_law(k, {a, b})
+	return is_none(meet) || !is_constant(meet) && holds_nothing(k, meet)
 }
 
 // inhabited: a constant normal form that shows an element: a ~, or a cell the laws

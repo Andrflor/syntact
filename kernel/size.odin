@@ -210,12 +210,10 @@ values_of :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
 		return or_law(k, products), true
 	case ^Operation:
 		if v.op == .Round {
-			// a value of its format, between its rounded bounds when they are read
-			f := rounded_format(v)
-			if image, ok := layout_image(k, v); ok {
-				if _, finite := count(k, image).(Type); finite do return image, true
-			}
-			return real_cell({format = f}), true
+			// between its rounded bounds when they are read — ~none when one rounds
+			// beyond the greatest value (format.odin) —, otherwise a value of its format
+			if image, ok := layout_image(k, v); ok do return image, true
+			return real_cell({format = rounded_format(v)}), true
 		}
 	}
 	if is_constant(t) do return t, true

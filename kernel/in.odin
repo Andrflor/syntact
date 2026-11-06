@@ -35,31 +35,28 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
 	// (t::L) in C when L ⊆ C (§4.1), t any term whose values are read — a binding of a
 	// run in the layout of its items
-	if _, read := x.(^Operation); read && !is_constant(c) {
+	if _, read := x.(^Operation); read && !is_constant(x) {
 		if set, known := values(k, x); known && included(k, set, c) do return Bool(true)
 	}
-	// a term in a range over unknowns, lo..hi: t - lo ≥ 0 and hi - t ≥ 0, by the
-	// theory of linear arithmetic
-	if r, is_range := c.(^Range); is_range && !is_constant(c) && r.family == .Int {
-		if f, known := family_of(k, x); known && (f == .Int || f == .Count) {
-			holds := (r.lo == nil || lia_in(k, op(k, .Sub, x, r.lo), 0, nil)) && (r.hi == nil || lia_in(k, op(k, .Sub, r.hi, x), 0, nil))
-			if holds do return Bool(true)
-		}
+	// x of degree 1 in an unknown: in S when that unknown is in the preimage of S (§4.7)
+	// — the form of an atom whose unknowns are related, by S or by a layout over the
+	// others; over unknowns nothing relates, the atom is already in normal form
+	if _, is_op := x.(^Operation); is_op && !is_constant(x) && relates(k, x, c) {
+		if u, set, read := term_preimage(k, x, c); read do return in_law(k, u, set)
 	}
-	// an integer term in a range: the negation and the axioms of its terms
-	// unsatisfiable, by the theory of linear arithmetic (lia.odin)
-	if !is_constant(x) && is_constant(c) {
-		#partial switch v in x {
-		case ^Unknown:
-			// a layout over other unknowns: its ends, read by the theory
-			if is_constant(layout_of(k, v)) do break
-			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) {
-				if f, known := family_of(k, x); known && (f == .Int || f == .Count) && lia_in(k, x, lo, hi) do return Bool(true)
-			}
-		case ^Operation, ^Fold, ^Series, ^Collapse:
-			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) {
-				if f, known := family_of(k, x); known && (f == .Int || f == .Count) && lia_in(k, x, lo, hi) do return Bool(true)
-			}
+	// an unknown in a set over unknowns: in it when its layout is, out of it when its
+	// layout is apart from it (§7)
+	if u, is_unknown := x.(^Unknown); is_unknown && !is_constant(c) {
+		layout := layout_of(k, u)
+		if included(k, layout, c) do return Bool(true)
+		if apart(k, layout, c) do return Bool(false)
+	}
+	// a term the ring does not read, in a set over unknowns: in it when its type, by
+	// the law of its operator, is (§7, term_type)
+	if !is_constant(c) {
+		if type, typed := term_type(k, x); typed {
+			if included(k, type, c) do return Bool(true)
+			if apart(k, type, c) do return Bool(false)
 		}
 	}
 	// a recursive call, by induction on its equation: in c, or in ~c — then not in c (§4.1)
@@ -119,8 +116,9 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	}
 	#partial switch v in c {
 	case ^Range:
-		// one value from l to u: l <= x [&] x <= u (§4.3)
-		if is_value(k, x) {
+		// one value from l to u: l <= x [&] x <= u (§4.3) — an unknown in a range over
+		// unknowns is already the form the preimage gives: it stays
+		if _, is_unknown := x.(^Unknown); is_value(k, x) && !(is_unknown && !is_constant(c)) {
 			out: Type = Bool(true)
 			if v.lo != nil do out = bool_and(k, out, operation_law(k, .Greater_Eq, {x, v.lo}, v.span))
 			if v.hi != nil do out = bool_and(k, out, operation_law(k, .Less_Eq, {x, v.hi}, v.span))
@@ -188,9 +186,9 @@ in_cells :: proc(k: ^Kernel, x, c: Type, cells: []Type) -> Type {
 		image, _ := layout_image(k, x)
 		return layout_in(k, x, image, c)
 	}
-	if u, a, b, linear := linear_in(x); linear && !(a == 1 && b == 0) {
-		if set, exact := preimage(k, cells, a, b); exact do return in_law(k, u, set)
-	}
+	// b << e and b ** e, b a constant: growing and one-to-one in e ≥ 0, its preimage a
+	// set of e (§4.7)
+	if e, set, exact := power_preimage(k, x, cells); exact do return in_law(k, e, set)
 	if image, ok := layout_image(k, x); ok do return layout_in(k, x, image, c)
 	return new_operation(.In, x, c)
 }
@@ -644,4 +642,280 @@ produced_within :: proc(k: ^Kernel, s: ^Scope, c: ^Or) -> bool {
 maybe_int :: proc(x: Maybe(i128)) -> Type {
 	if v, has := x.?; has do return Int(v)
 	return nil
+}
+
+// THE PREIMAGE (§4.7)
+//
+// x in S, x = a·u + b of degree 1 in an unknown u, b not reading u, is u in the
+// preimage of S: {v | a·v + b in S}. For a = ±1 it is a·(S - b), S moved by a
+// translation — one-to-one on the integers, which moves the ends of each range and
+// keeps | & ~. u is one that no layout of the others reads: its layout says all that
+// relates it to them. Over constants, any a: preimage.
+
+// term_preimage: x of degree 1 in such an unknown: the unknown, and the preimage of s.
+term_preimage :: proc(k: ^Kernel, x, s: Type) -> (u: ^Unknown, set: Type, ok: bool) {
+	back: Rewrite
+	ms, divisor, ring := monomials(atomized(k, x, &back))
+	if !ring || divisor != 1 do return
+	us := make([dynamic]^Unknown)
+	read_unknowns(x, &us)
+	inside := make([dynamic]^Unknown)
+	for r in back do if r.unknown != nil do read_unknowns(r.term, &inside)
+	next: for v in us {
+		// not while a layout of another reads it, nor inside an atom
+		for w in us do if !same_unknown(w, v) && layout_reads(k, w, v) do continue next
+		for w in inside do if same_unknown(w, v) || layout_reads(k, w, v) do continue next
+		a: i128 = 0
+		rest := make([dynamic]Type)
+		for m in ms {
+			fs := factors(m)
+			with := false
+			for f in fs do with ||= same_unknown(f, v)
+			if !with {
+				append(&rest, m)
+				continue
+			}
+			if a != 0 || len(fs) != 1 do continue next
+			a = coefficient(m)
+		}
+		if a == 0 do continue
+		b := unatomized(ring_term(rest[:], 1) or_continue, back)
+		if c, constant := b.(Int); constant && is_constant(s) {
+			one: [1]Type
+			cells, negated := cells_in(s, &one)
+			if !negated do if p, exact := preimage(k, cells, a, i128(c)); exact do return v, p, true
+		}
+		if a != 1 && a != -1 do continue
+		return v, moved(k, s, a, b) or_continue, true
+	}
+	return
+}
+
+// relates: the unknowns of x in c are related — c reads unknowns, or a layout of one of
+// them reads others.
+relates :: proc(k: ^Kernel, x, c: Type) -> bool {
+	if !is_constant(c) do return true
+	us := make([dynamic]^Unknown)
+	read_unknowns(x, &us)
+	for u in us do if !is_constant(layout_of(k, u)) do return true
+	return false
+}
+
+// moved: {v | a·v + b in S}, a = ±1: S - b, or b - S.
+moved :: proc(k: ^Kernel, s: Type, a: i128, b: Type) -> (out: Type, ok: bool) {
+	// an end e of S gives e - b, or b - e; the ends swap when a = -1
+	ends :: proc(k: ^Kernel, lo, hi: Type, a: i128, b: Type) -> (from, to: Type) {
+		end :: proc(k: ^Kernel, e: Type, a: i128, b: Type) -> Type {
+			if e == nil do return nil
+			return a == 1 ? op(k, .Sub, e, b) : op(k, .Sub, b, e)
+		}
+		from, to = end(k, lo, a, b), end(k, hi, a, b)
+		if a < 0 do from, to = to, from
+		return
+	}
+	if is_constant(s) {
+		one: [1]Type
+		cells, negated := cells_in(s, &one)
+		if negated do return
+		parts := make([]Type, len(cells))
+		for c, i in cells {
+			if cell_family(c) != .Int do return
+			lo, hi := discrete_bounds(c)
+			from, to := ends(k, maybe_int(lo), maybe_int(hi), a, b)
+			parts[i] = range_law(k, from, to, .Int, {})
+		}
+		return or_law(k, parts), true
+	}
+	#partial switch v in s {
+	case ^Range:
+		if v.family != .Int && v.family != .Any do return
+		from, to := ends(k, v.lo, v.hi, a, b)
+		return range_law(k, from, to, .Int, v.span), true
+	case ^And:
+		terms := make([]Type, len(v.terms))
+		for x, i in v.terms do terms[i] = moved(k, x, a, b) or_return
+		return and_law(k, terms), true
+	case ^Or:
+		terms := make([]Type, len(v.terms))
+		for x, i in v.terms do terms[i] = moved(k, x, a, b) or_return
+		return or_law(k, terms), true
+	case ^Not:
+		return not_law(k, moved(k, v.term, a, b) or_return), true
+	case ^Is:
+		return is_law(a == 1 ? op(k, .Sub, v.term, b) : op(k, .Sub, b, v.term)), true
+	}
+	return
+}
+
+// power_preimage: x = b << e (b·2^e) or b ** e, b ≥ 1 a constant (≥ 2 for **), in the
+// cells: the counts e for which it is, cell by cell, from the least whose power reaches
+// the cell to the greatest whose power stays in it.
+power_preimage :: proc(k: ^Kernel, x: Type, cells: []Type) -> (e, set: Type, ok: bool) {
+	o := x.(^Operation) or_return
+	if o.op != .Shl && o.op != .Pow do return
+	base, constant := o.args[0].(Int)
+	if !constant do return
+	factor, ratio := i128(base), i128(2)
+	if o.op == .Pow do factor, ratio = 1, i128(base)
+	if factor < 1 || ratio < 2 do return
+	// the least count whose power is at least m, and the greatest whose power is at most m
+	least :: proc(factor, ratio, m: i128) -> i128 {
+		n: i128 = 0
+		for p := factor; p < m; p *= ratio {
+			n += 1
+			if p > max(i128) / ratio do break
+		}
+		return n
+	}
+	greatest :: proc(factor, ratio, m: i128) -> (n: i128, any: bool) {
+		if m < factor do return 0, false
+		for p := factor; p <= m / ratio; p *= ratio do n += 1
+		return n, true
+	}
+	parts := make([dynamic]Type)
+	for c in cells {
+		if cell_family(c) != .Int do return
+		lo, hi := discrete_bounds(c)
+		from: Maybe(i128) = 0
+		if l, has := lo.?; has do from = least(factor, ratio, l)
+		to: Maybe(i128)
+		if h, has := hi.?; has {
+			n, any := greatest(factor, ratio, h)
+			if !any do continue
+			to = n
+		}
+		append(&parts, discrete_cell(.Int, from, to))
+	}
+	return o.args[1], or_law(k, parts[:]), true
+}
+
+// THE MEET OF RANGES (§4.1)
+//
+// a..b & c..d = max(a, c)..min(b, d), none when they do not meet: a set over unknowns
+// holds nothing when two of its ranges are apart — the lower end l of one above the
+// upper end h of the other, h - l in ..(-1), an equation simplified in turn. & distributes
+// over |; a range holds what is between its ends, either way: l..h = (l.. & ..h) |
+// (h.. & ..l); ~(a | b) = ~a & ~b; on the integers ~(..h) = (h + 1).., ~(l..) = ..(l - 1).
+
+// holds_nothing: the set t, over unknowns, holds no value by the law of the meet.
+holds_nothing :: proc(k: ^Kernel, t: Type) -> bool {
+	if is_none(t) do return true
+	if either, is_or := t.(^Or); is_or {
+		for x in either.terms do if !holds_nothing(k, x) do return false
+		return true
+	}
+	terms := []Type{t}
+	if meet, is_and := t.(^And); is_and do terms = meet.terms
+	// & over a union: each of its terms
+	for x, i in terms {
+		parts := union_parts(k, x) or_continue
+		rest := make([dynamic]Type)
+		for y, j in terms do if j != i do append(&rest, y)
+		for p in parts {
+			append(&rest, p)
+			if !holds_nothing(k, and_law(k, rest[:])) do return false
+			pop(&rest)
+		}
+		return true
+	}
+	lows, highs := make([dynamic]Type), make([dynamic]Type)
+	for x in terms do range_pieces(k, x, &lows, &highs)
+	below := range_law(k, nil, Int(-1), .Int, {})
+	for l in lows do for h in highs {
+		if is_constant(l) && is_constant(h) do continue
+		if is_bool(in_law(k, op(k, .Sub, h, l), below), true) do return true
+	}
+	return false
+}
+
+// union_parts: x as a union of several sets, when it is one: a union; a constant of
+// several cells; a range between two ends over unknowns, either way; ~(a | b) = ~a & ~b
+// is a meet, not a union.
+union_parts :: proc(k: ^Kernel, x: Type) -> (parts: []Type, ok: bool) {
+	if is_constant(x) {
+		one: [1]Type
+		cells, negated := cells_in(x, &one)
+		if negated || len(cells) < 2 do return
+		return cells, true
+	}
+	#partial switch v in x {
+	case ^Or:
+		return v.terms, true
+	case ^Range:
+		if v.lo == nil || v.hi == nil do return
+		out := make([]Type, 2)
+		out[0] = and_law(k, {range_law(k, v.lo, nil, .Int, {}), range_law(k, nil, v.hi, .Int, {})})
+		out[1] = and_law(k, {range_law(k, v.hi, nil, .Int, {}), range_law(k, nil, v.lo, .Int, {})})
+		return out, true
+	case ^Not:
+		// ~(l..h): below both ends, or above both — (..(l - 1) & ..(h - 1)) |
+		// ((h + 1).. & (l + 1)..), on the integers
+		r, is_range := v.term.(^Range)
+		if !is_range || r.lo == nil || r.hi == nil do return
+		out := make([]Type, 2)
+		out[0], out[1] = below_both(k, r.lo, r.hi), above_both(k, r.lo, r.hi)
+		return out, true
+	}
+	return
+}
+
+// below_both: the integers below both ends: ..(l - 1) & ..(h - 1).
+below_both :: proc(k: ^Kernel, l, h: Type) -> Type {
+	return and_law(k, {range_law(k, nil, op(k, .Sub, l, Int(1)), .Int, {}), range_law(k, nil, op(k, .Sub, h, Int(1)), .Int, {})})
+}
+
+// above_both: the integers above both ends: (l + 1).. & (h + 1)...
+above_both :: proc(k: ^Kernel, l, h: Type) -> Type {
+	return and_law(k, {range_law(k, op(k, .Add, l, Int(1)), nil, .Int, {}), range_law(k, op(k, .Add, h, Int(1)), nil, .Int, {})})
+}
+
+// range_pieces: the ends of the ranges of the integers a term of a meet is: a half-line
+// its one end, a constant range its two; ~(..h) has h + 1 below, ~(l..) has l - 1 above;
+// ~(a | b), those of ~a and ~b; =t, t; a meet, those of each term.
+range_pieces :: proc(k: ^Kernel, x: Type, lows, highs: ^[dynamic]Type) {
+	if is_constant(x) {
+		one: [1]Type
+		cells, negated := cells_in(x, &one)
+		if negated || len(cells) != 1 || cell_family(cells[0]) != .Int do return
+		lo, hi := discrete_bounds(cells[0])
+		if l, has := lo.?; has do append(lows, Int(l))
+		if h, has := hi.?; has do append(highs, Int(h))
+		return
+	}
+	#partial switch v in x {
+	case ^Range:
+		if v.lo != nil && v.hi != nil do return
+		if v.lo != nil do append(lows, v.lo)
+		if v.hi != nil do append(highs, v.hi)
+	case ^Not:
+		if either, is_or := v.term.(^Or); is_or {
+			for t in either.terms do range_pieces(k, not_law(k, t), lows, highs)
+			return
+		}
+		r, is_range := v.term.(^Range)
+		if !is_range do return
+		if r.lo == nil && r.hi != nil do append(lows, op(k, .Add, r.hi, Int(1)))
+		if r.hi == nil && r.lo != nil do append(highs, op(k, .Sub, r.lo, Int(1)))
+	case ^Is:
+		append(lows, v.term)
+		append(highs, v.term)
+	case ^And:
+		for t in v.terms do range_pieces(k, t, lows, highs)
+	}
+}
+
+// layout_reads: the layout of w reads u, itself or through the layouts it reads (a
+// layout never reads its own unknown).
+layout_reads :: proc(k: ^Kernel, w, u: ^Unknown) -> bool {
+	l := layout_of(k, w)
+	if l == nil || is_constant(l) do return false
+	return holds_unknown(k, l, u)
+}
+
+// holds_unknown: t holds u, itself or through the layouts of the unknowns it holds.
+holds_unknown :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
+	inner := make([dynamic]^Unknown)
+	read_unknowns(t, &inner)
+	for x in inner do if same_unknown(x, u) || layout_reads(k, x, u) do return true
+	return false
 }

@@ -1184,38 +1184,12 @@ in c. While the equation is read, where what is carved is unknown or at the valu
 of a call, its calls are the hypothesis: they stay calls, and nothing is proven of
 them yet.
 
-The values of a call that stays are bounded by the recursion of its bounds. What is
-bounded is a measure of what the call gives: its value, its length, or a sum over its
-bindings `Σ(x: 0..|X| - 1, g(X.#x))` — split over the bindings of a scope, an
-expansion by the sum of what it expands, a pattern by its products; a sum over the
-bindings of a call is that measure of the call. The bounds lo, hi are unknowns, and
-functions of the measures mⱼ of the fields the call carves — an integer, the length
-of a run —: `hi = c + Σ aⱼ·mⱼ`, aⱼ ≥ 0, lo likewise. Its equation, each call in it
-taken at the bound of what it carves and every other term at its own image, gives
-`hi ≥ …` and `lo ≤ …` over its products, for every value their branches let the
-fields take: linear in c and the aⱼ, their least solution, the aⱼ first, in closed
-form. With no field read, `hi = max(…)` and `lo = min(…)`. A product reading no
-call is a constant bound; `x % m`, m > 0 constant, lies in -(m - 1)..m - 1, and in 0..m - 1 when x ≥ 0;
-a step `α·y + g`, α ≥ 0, keeps hi when `α·hi + max(g) ≤ hi`, lo likewise, and
-otherwise leaves that side without bound. The least solution, the narrowest range,
-is proven by induction: the solving only proposes it. A field every call keeps holds
-what the call gives it. On a counter, each call taken at the bound y of the step
-after, the greatest is `y ↦ α·y + max(g)` from `max(c)`, the least likewise — folds,
-solved by their laws, read at what the call gives the counter. A run is the orbit of
-its positions: a call that takes the rest `m from c` makes |m| / c steps when the
-bases take only the runs of fewer than c pieces, at most as many otherwise. Its
-length likewise, each call's length taken in lo..hi. A
-field the call gives a call of another equation keeps it, over that equation's own
-fields, each an unknown of its color: the recursion follows what the other builds.
-A step that is a pattern gives one of its products, `αᵢ·y + gᵢ`: when no value is
-negative, the greatest follows the greatest αᵢ and gᵢ, the least the least:
-
-```text
-Σ(x: 0..|split{t -> s  w -> {}}!| - 1, |split{…}!.#x|)  in 0..|s|      hi = |t| + |w|
-sum{t -> build{depth -> d}!}!   in 0..1022 * 2 ** d - 511      y ↦ 2·y + 511, from 511
-count{e -> build{depth -> d}!}! in d + 1..2 ** (d + 1) - 1      y ↦ 2·y + 1 above, y + 1 below
-eval{e -> build{depth -> d}!  p -> q}! in 0..m - 1               every product x % m, x ≥ 0 in 0..m - 1
-```
+A call that stays is a term of its own: nothing is known of it but its equation.
+Its type is its equation read on types: each call in it the type of the call, an
+equation the same laws solve. A call that gives runs lies in the runs of what its
+products place (Arden). Proven in c by induction, it is read as `?::c`. A field the
+call gives a call of another equation keeps it, over that equation's own fields,
+each an unknown of its color: the recursion follows what the other builds.
 
 A recursive call whose base cases are scopes is a scope: `...` places it.
 
@@ -1302,11 +1276,10 @@ sum{t -> build{d -> m  s -> a}!}!    an equation in m and a: no tree
 
 A branch narrows the unknowns its reach speaks of: `u in S` gives `?ₖ::(L & S)`,
 `[~](u in S)` gives `?ₖ::(L & ~S)`, S over other unknowns as well: the layout of u
-then reads them. `a·u + t in S`, t not reading u, is `u in (S - t) / a`: with a = ±1
-that set exactly, otherwise its bounds at the bounds of t. A layout never reads,
-through other layouts, its own unknown: there, a set over unknowns narrows by its
-bounds — u is in what S may hold when the literal holds, out of what S always holds
-when it does not. A disjunction narrows each unknown to the union of what its sides
+then reads them. `a·u + t in S`, t not reading u, is `u in (S - t) / a`, with a = ±1
+that set exactly; one unknown so narrowed says the literal. A layout never reads,
+through other layouts, its own unknown: where it would, the literal stays, and the
+check splits on it (§7). A disjunction narrows each unknown to the union of what its sides
 narrow it to. A term t the reach speaks of, `t in S`, is `t & S` in the branch, as
 an unknown is `?ₖ::(L & S)`: one value, t where t in S (§4.1). What the reach says
 beyond that stays its guard.
@@ -1381,7 +1354,18 @@ x in C = false     when it is disjoint from C:      L & C = none
 
 The layout of `?ₖ::L` is L; the layout of a term over unknowns is the term with
 each unknown replaced by its layout: an operator distributes over `|` (§4.5).
-`?₁::u8 + 1` has the layout `1..256`.
+`?₁::u8 + 1` has the layout `1..256`. The unknowns are replaced one at a time, first
+one that no other layout reads; a term `±u + b` moves the layout of u by b, a
+translation, which moves the ends of a range and keeps `| & ~`:
+
+```text
+?₂::(0..?₁) - ?₁  =  (0..?₁) - ?₁  =  (-?₁)..0  =  (-255)..0        ?₁::u8
+```
+
+A term the ring does not read is replaced likewise by what it takes: `n % b`, n ≥ 0
+and b ≥ 1, by `0..(b - 1)` (§4.5). A Σ of n terms is n additions: from n·p to n·q, p
+and q the least and greatest its term takes; a fold that adds g at each step is its
+init and the Σ of g (§5.6).
 
 A branch types its product for the values that reach it: where its reach says
 `u in S`, the unknown `?ₖ::L` is rewritten `?ₖ::(L & S)` in the product (§6). An

@@ -218,9 +218,8 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 		said := false
 		for target in targets {
 			u, set, exact := target.unknown, rewrite(k, target.set, out), target.exact
-			// a set over unknowns whose layouts read u: u is in it all the same, a
-			// relation the linear theory reads as it is
-			if !is_constant(set) && depends(k, set, u) do exact = false
+			// a layout never reads, through other layouts, its own unknown (§6)
+			if !is_constant(set) && depends(k, set, u) do continue
 			current := layout_of(k, u)
 			if x, found := rewritten(out, u); found {
 				current = x
@@ -230,6 +229,15 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 			if is_none(layout) do return nil, false, nil
 			out = rewriting(out, u, narrowing(u, layout))
 			said ||= exact
+			// u is: its layout is not none, each lower end at most each upper one — what
+			// that says of the other unknowns narrows them in turn (inhabited)
+			if !is_constant(set) {
+				reached: bool
+				out, reached = inhabited_by(k, out, layout)
+				if !reached do return nil, false, nil
+			}
+			// one unknown narrowed exactly says the literal
+			if said do break
 		}
 		if !said {
 			unsaid = bool_and(k, unsaid, l)
@@ -238,6 +246,26 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 		}
 	}
 	return out, true, unsaid
+}
+
+// inhabited_by: r, narrowed by what a layout over other unknowns needs to hold a value
+// (§6): its ranges meet (§4.1) — the lower end l of each at most the upper end h of
+// each other, h - l in 0.., a literal over those unknowns, narrowed the same way; not
+// reached when one is false.
+inhabited_by :: proc(k: ^Kernel, r: Rewrite, layout: Type) -> (out: Rewrite, reached: bool) {
+	out = r
+	lows, highs := make([dynamic]Type), make([dynamic]Type)
+	range_pieces(k, layout, &lows, &highs)
+	for l in lows do for h in highs {
+		if is_constant(l) && is_constant(h) do continue
+		literal := in_law(k, rewrite(k, op(k, .Sub, h, l), out), COUNTS)
+		if is_bool(literal, true) do continue
+		if is_bool(literal, false) do return nil, false
+		narrowed, inside, _ := narrow(k, out, literal)
+		if !inside do return nil, false
+		out = narrowed
+	}
+	return out, true
 }
 
 // restricting: r, with the term t restricted to S, t & S — further, when r

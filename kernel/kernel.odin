@@ -8,9 +8,9 @@ import "core:slice"
 // The type algebra of specs/types.md, and nothing else. A type is a term of its
 // grammar (type.odin): the program as written is made of these terms, and the type
 // of each is its normal form, given by orienting the laws (normal.odin, lattice.odin,
-// arith.odin, in.odin, scope.odin, pattern.odin, recursion.odin, effect.odin). The
-// check is `V in C = true` for every value of the unknowns (prove.odin): what the
-// laws do not prove is refused.
+// arith.odin, in.odin, scope.odin, pattern.odin, solve.odin, fold.odin, effect.odin).
+// The check is the equation `V in C`, a term, simplified by the laws to `true`
+// (prove.odin): what the laws do not simplify to it is refused.
 
 Error_Kind :: enum u8 {
 	Undefined_Identifier,
@@ -46,7 +46,6 @@ Kernel :: struct {
 	read:       map[Read_Key]bool, // whether a node reads an unknown, once asked (rewrite.odin)
 	valued:     map[rawptr]Type, // what a shared node may hold, once read (size.odin)
 	built:      map[^Fold]Built, // what a fold builds, once read (fold.odin)
-	lia:        map[Lia_Key]bool, // what the linear theory proved of a shared node (lia.odin)
 	rewritten:  map[Rewrite_Key]Type, // within one rewrite, each shared node rewritten once (rewrite.odin)
 	rewrites:   int, // the depth of the rewrites under way
 	markers:    int, // the unknowns that stand for a hole while it is inferred

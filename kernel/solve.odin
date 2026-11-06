@@ -30,8 +30,7 @@ Recursion :: struct {
 	through:  map[^Binding]^Recursion, // a field given a call of another equation: that equation (§5.6)
 	solution: Type, // the term without calls of root, when the laws give one
 	reading:  bool, // being read: its calls are the hypothesis (§5.6)
-	values:   Type, // the type of its calls, once found (call_values)
-	ranges:   [2]Range_Found, // its range, and that of its length, over its fields (call_range)
+	values:   Type, // the values of its calls, once found (call_values)
 	valued:   bool,
 }
 
@@ -119,15 +118,21 @@ equation_built :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map
 				continue
 			}
 			u := new_unknown(k, nil)
-			u.layout = binding_color(k, b)
+			params[b], changes[b] = u, u
+		}
+		// each field an unknown of its color in the equation, where the fields above
+		// it are unknowns too: a layout over them, Array{?T} (§5.6); then the carve
+		// checked where it is written (§7)
+		generic := carved_copy(k, root, changes)
+		for b in in_order(params) {
+			u := params[b]
+			u.layout = binding_color(k, holding(generic, b))
 			if u.layout == nil {
 				f, known := family_of(k, binding_type(k, b))
 				u.layout = known ? family_term(f) : everything()
 			}
-			params[b], changes[b] = u, u
 		}
-		generic, derived := derive(k, root, changes, root.span).(^Scope)
-		if !derived do return eq
+		if carve_problem(k, generic, root.span) != nil do return eq
 		p, found := first_production(k, generic)
 		if !found do return eq
 		term := binding_type(k, p)
@@ -147,7 +152,8 @@ equation_built :: proc(k: ^Kernel, root: ^Scope, given: []^Binding, through: map
 // solution_at: the solution of the equation at the values a carve of root gives its
 // fields, its bound unknowns its own (§5.6).
 solution_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
-	return renamed(k, rewrite(k, eq.solution, values_of_call(k, eq, s)))
+	at := values_of_call(k, eq, s)
+	return rewrite(k, renamed(k, eq.solution, at), at)
 }
 
 // values_of_call: each unknown of the equation at the value the carve s gives its
@@ -286,144 +292,10 @@ instances :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	return rewrite(k, eq.term, r)
 }
 
-// call_range: the integers a call that stays gives: the least solution of its
-// definition read on types (§5.6). Along the field u its calls move, each call one
-// value y of the type T(s(u)), the step gives α·y + β, α ≥ 0 a constant — one of
-// several, a pattern —; T(u) lies between L(u) and H(u): H(u) = hi(β) + α·H(s(u)),
-// hi(base) where the bases take u — the maps compose along the orbit of u, a fold
-// its laws close —, L likewise.
-call_range :: proc(k: ^Kernel, call: ^Collapse, length := false) -> (lo, hi: Type, ok: bool) {
-	s := call.target.(^Scope) or_return
-	key, through := call_key(s), through_of(k, s)
-	eq, found := equation_found(k, origin(s), key, through)
-	if !found do eq = equation_of(k, origin(s), key, through) or_return
-	if eq.term == nil || eq.reading do return
-	// the range of the equation, over its fields, found once; read at the call
-	known := &eq.ranges[1 if length else 0]
-	if !known.found {
-		known.found = true
-		known.lo, known.hi, _ = equation_range(k, eq, length)
-	}
-	at := values_of_call(k, eq, s)
-	if known.lo != nil do lo = rewrite(k, known.lo, at)
-	if known.hi != nil do hi = rewrite(k, known.hi, at)
-	return lo, hi, lo != nil || hi != nil
-}
-
-// Range_Found: the range of an equation, over its fields, once found.
-Range_Found :: struct {
-	lo, hi: Type,
-	found:  bool,
-}
-
-// equation_range: lo and hi of the equation over its fields (call_range); of its
-// length when length.
-equation_range :: proc(k: ^Kernel, eq: ^Recursion, length: bool) -> (lo, hi: Type, ok: bool) {
-	root := eq.root
-	p := eq.term.(^Pattern) or_return
-	p = calls_joined(k, p, root)
-	u := p.target.(^Unknown) or_return
-	stop, base, step := bases_and_steps(k, p, root, u) or_return
-	if has_effect(base) || has_effect(step) do return
-	calls := calls_in(k, step, root)
-	if len(calls) == 0 do return
-	// the length of what it gives: the definition read through |·|, the morphism of
-	// the runs into the integers (§5.3)
-	y := new_unknown(k, nil)
-	y.layout = family_term(.Int)
-	r: Rewrite
-	moved: Type
-	for c in calls {
-		fields, next := moves(k, eq, c) or_return
-		if u not_in next do return
-		// an orbit of u: its step reads u alone, as narrowed by a branch or not
-		for w in fields do if w != u && reads(k, next[u], w) do return
-		m := rewrite(k, next[u], rewriting(nil, u, u))
-		if moved != nil && !same(k, moved, m) do return
-		moved = m
-		r = length ? append_read(r, op(k, .Length, c), y) : rewriting_call(r, c, y)
-		// the length of the call, |c|, taken as y too where |·| meets it
-	}
-	// the step gives one of its products (§6), each α·y + β, α ≥ 0 a constant: the
-	// type of the call is in the union of their images
-	// each product read alone: |·| of a product, not of the pattern
-	leaves := make([dynamic]Product)
-	products(k, step, &leaves)
-	a_lo, a_hi: i128 = max(i128), 0
-	qlo, qhi: Maybe(i128)
-	q_nonnegative, p_nonnegative := true, true
-	for leaf in leaves {
-		if is_none(leaf.term) do continue
-		term := read_in(k, leaf, leaf.term)
-		if length do term = op(k, .Length, term)
-		alpha, beta := affine_in(k, rewrite(k, term, r), y) or_return
-		a := i128(alpha.(Int) or_return)
-		if a < 0 || !solved(beta, root) do return
-		a_lo, a_hi = min(a_lo, a), max(a_hi, a)
-		l, h := extremes(k, beta)
-		if x, has := h.?; has {
-			if q, known := qhi.?; !known || x > q do qhi = x
-			q_nonnegative &&= x >= 0
-		} else {
-			qhi, a_hi = nil, -1
-		}
-		if x, has := l.?; has {
-			if q, known := qlo.?; !known || x < q do qlo = x
-			p_nonnegative &&= x >= 0
-		} else {
-			qlo, a_lo = nil, -1
-		}
-	}
-	if a_hi < 0 && a_lo < 0 do return
-	// the fold of the maps h ↦ q + α·h along the orbit of u, from where the call is,
-	// until the bases take it: Aₙ·b + Bₙ, A: 1 ↦ α·A, B: 0 ↦ B + q·A
-	along :: proc(k: ^Kernel, p: ^Pattern, u: ^Unknown, stop, moved: Type, a, b, q: i128) -> Type {
-		f := new(Fold)
-		f.span = p.span
-		x := new_unknown(k, nil)
-		x.layout = and_law(k, {layout_of(k, u), not_law(k, stop)})
-		A, B := new_unknown(k, nil), new_unknown(k, nil)
-		A.layout, B.layout = family_term(.Int), family_term(.Int)
-		f.index, f.start, f.next, f.stop = x, u, rewrite(k, moved, rewriting(nil, u, x)), stop
-		f.states, f.inits = slice.clone([]^Unknown{A, B}), slice.clone([]Type{Int(1), Int(0)})
-		f.updates = slice.clone([]Type{op(k, .Mul, Int(a), A), op(k, .Add, B, op(k, .Mul, Int(q), A))})
-		f.effects, f.value = None{}, op(k, .Add, op(k, .Mul, A, Int(b)), B)
-		return folded(k, f)
-	}
-	// the maps of different α bound by one: α·h ≤ α_max·h where h ≥ 0 — the bases and
-	// every β nonnegative, h is —; likewise α_min from below
-	blo, bhi: Maybe(i128)
-	bases := make([dynamic]Product)
-	products(k, base, &bases)
-	// the least and greatest any base gives: none bounded when one is not
-	low_bounded, high_bounded := true, true
-	for leaf in bases {
-		if is_none(leaf.term) do continue
-		term := read_in(k, leaf, leaf.term)
-		if length do term = op(k, .Length, term)
-		l, h := extremes(k, term)
-		if x, has := l.?; has && low_bounded {
-			if b, known := blo.?; !known || x < b do blo = x
-		} else do low_bounded = false
-		if y, has := h.?; has && high_bounded {
-			if b, known := bhi.?; !known || y > b do bhi = y
-		} else do high_bounded = false
-	}
-	if !low_bounded do blo = nil
-	if !high_bounded do bhi = nil
-	if b, has := blo.?; has && a_lo >= 0 && (a_lo == a_hi || b >= 0 && p_nonnegative) {
-		if q, has_q := qlo.?; has_q do lo = along(k, p, u, stop, moved, a_lo, b, q)
-	}
-	if b, has := bhi.?; has && a_hi >= 0 && (a_lo == a_hi || b >= 0 && q_nonnegative) {
-		if q, has_q := qhi.?; has_q do hi = along(k, p, u, stop, moved, a_hi, b, q)
-	}
-	return lo, hi, lo != nil || hi != nil
-}
-
-// call_values: the values of a call that stays that gives runs: the least solution
-// of its definition read on types (§5.6). Its products place bindings and expand
-// runs and its calls: X = B | {P ...X ...Q} lies in the runs of what they place
-// (Arden), proven by induction on the equation.
+// call_values: the values of a call that stays that gives runs: its equation read on
+// types (§5.6). Its products place bindings and expand runs and its calls: X = B |
+// {P ...X ...Q} lies in the runs of what they place (Arden), proven by induction on
+// the equation.
 call_values :: proc(k: ^Kernel, call: ^Collapse) -> (set: Type, ok: bool) {
 	s := call.target.(^Scope) or_return
 	key, through := call_key(s), through_of(k, s)

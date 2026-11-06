@@ -75,7 +75,12 @@ lands :: proc(k: ^Kernel, p, v: Type, u: ^Unknown, role: Role, l: ^Landing) {
 		append(role == .Sent ? &l.sent : &l.required, v)
 	case ^Scope:
 		value, is_scope := v.(^Scope)
-		if !is_scope || role != .Sent do return
+		if !is_scope {
+			// a term at the place of a carve: what is known of it, its values
+			if set, known := values(k, v); known do lands_known(k, x, set, u, role, l)
+			return
+		}
+		if role != .Sent do return
 		shape := x
 		if recursive(shape) {
 			solution, solved := arden(k, shape)
@@ -105,6 +110,19 @@ lands :: proc(k: ^Kernel, p, v: Type, u: ^Unknown, role: Role, l: ^Landing) {
 		xs := placed(k, value, .Value)
 		if !fixed || n == 0 || len(xs) % n != 0 do return
 		for i := 0; i < len(xs); i += n do lands(k, a, run_scope(k, xs[i:i + n]), u, .Sent, l)
+	}
+}
+
+// lands_known: the values of a term set at the place of the carve p: a carve of the
+// same scope, each value it gives a field set at the place of that field; a meet,
+// each of its terms, since the term is in each.
+lands_known :: proc(k: ^Kernel, p: ^Scope, set: Type, u: ^Unknown, role: Role, l: ^Landing) {
+	#partial switch y in set {
+	case ^And:
+		for t in y.terms do lands_known(k, p, t, u, role, l)
+	case ^Scope:
+		if p.carved == nil || y.carved != p.carved do return
+		for b in in_order(p.changes) do if w, given := y.changes[b]; given do lands(k, p.changes[b], w, u, role, l)
 	}
 }
 

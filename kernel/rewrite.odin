@@ -59,18 +59,90 @@ node_of :: proc(t: Type) -> rawptr {
 	return (^rawptr)(&node)^
 }
 
-// reads: t holds the unknown u: rewriting u changes it.
+// reads: t holds the unknown u, in one of the parts a rewrite rewrites: a structural
+// reading, nothing rewritten.
 reads :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
 	#partial switch _ in t {
 	case nil, Char, Int, Real, Bool, None, Invalid:
 		return false
 	}
-	// a node is never changed once built: what it reads, asked once
+	// a node is never changed once built: what it reads, asked once; a scope that
+	// names itself is not read again
 	key := Read_Key{node = node_of(t), unknown = u.id}
 	if known, found := k.read[key]; found do return known
-	read := !same(k, rewrite(k, t, rewriting(nil, u, new_unknown(k, nil))), t)
+	k.read[key] = false
+	read := reads_part(k, t, u)
 	k.read[key] = read
 	return read
+}
+
+// reads_part: the parts of t rewrite_node rewrites, read for u.
+reads_part :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
+	any :: proc(k: ^Kernel, ts: []Type, u: ^Unknown) -> bool {
+		for t in ts do if reads(k, t, u) do return true
+		return false
+	}
+	switch v in t {
+	case Char, Int, Real, Bool, None, Invalid, ^Name, ^Default:
+		return false
+	case ^Carve:
+		if reads(k, v.target, u) do return true
+		for a in v.args do if a.carves == nil && !a.handler && reads(k, a.value, u) do return true
+		return false
+	case ^Unknown:
+		// itself, or a layout over other unknowns that reads it
+		return same_unknown(v, u) || v.layout != nil && !is_constant(v.layout) && reads(k, v.layout, u)
+	case ^Effect:
+		if reads(k, v.then, u) do return true
+		if v.write != nil && (reads(k, v.write.value, u) || v.write.place != nil && same_unknown(v.write.place, u)) do return true
+		if v.call != nil && reads(k, v.call, u) do return true
+		if v.fold != nil && reads(k, v.fold, u) do return true
+		if v.choice != nil && reads(k, v.choice, u) do return true
+		return v.emission != nil && reads(k, v.emission.sent, u)
+	case ^Collapse:
+		return reads(k, v.target, u)
+	case ^Fold:
+		if reads(k, v.index, u) || any(k, fold_parts(v), u) do return true
+		for z in v.states do if reads(k, z, u) do return true
+		return false
+	case ^Least:
+		return reads(k, v.index, u) || reads(k, v.holds, u)
+	case ^Series:
+		return reads(k, v.index, u) || reads(k, v.lo, u) || reads(k, v.hi, u) || reads(k, v.term, u)
+	case ^Recurrent:
+		return any(k, v.initial, u) || reads(k, v.at, u)
+	case ^Operation:
+		return !is_string_value(t) && any(k, v.args, u)
+	case ^Or:
+		return any(k, v.terms, u)
+	case ^And:
+		return any(k, v.terms, u)
+	case ^Not:
+		return reads(k, v.term, u)
+	case ^Is:
+		return reads(k, v.term, u)
+	case ^Range:
+		return reads(k, v.lo, u) || reads(k, v.hi, u)
+	case ^Pattern:
+		if reads(k, v.target, u) do return true
+		for b in v.branches do if reads(k, b.cover, u) || reads(k, b.product, u) do return true
+		return false
+	case ^Scope:
+		// what rewrite_carve rewrites: the changes of a carve, the values of a scope
+		// as written
+		if v.carved != nil {
+			for b in in_order(v.changes) do if reads(k, v.changes[b], u) do return true
+			return false
+		}
+		for b in v.bindings {
+			if b.value == nil || b.kind == .Pull || b.kind == .Handler || b.resonance != nil do continue
+			if reads(k, binding_type(k, b), u) do return true
+		}
+		return false
+	case ^Access:
+		return reads(k, v.target, u)
+	}
+	return false
 }
 
 // Read_Key: a node, and an unknown it may read.
@@ -171,7 +243,28 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		return out
 	case ^Collapse:
 		for x in r do if x.call != nil && same(k, x.call, v) do return x.term
+		if _, is_scope := v.target.(^Scope); !is_scope {
+			// a scope not known yet, collapsed: its law once the rewrite gives it
+			target := rewrite(k, v.target, r)
+			if target == v.target do return t
+			return as_normal(collapse_law(k, target, v))
+		}
 		return rewrite_call(k, v, r)
+	case ^Carve:
+		// a carve of a scope not known yet: its law once the rewrite gives it
+		target := rewrite(k, v.target, r)
+		args := slice.clone(v.args)
+		moved := target != v.target
+		for &a, i in args {
+			if a.carves != nil || a.handler || a.value == nil do continue
+			a.value = rewrite(k, a.value, r)
+			moved ||= a.value != v.args[i].value
+		}
+		if !moved do return t
+		out := new(Carve)
+		out^ = v^
+		out.target, out.args = target, args
+		return as_normal(carve_law(k, target, out))
 	case ^Fold:
 		parts := fold_parts(v)
 		rewritten := rewrite_all(k, parts, r)
@@ -183,9 +276,12 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 			renamed ||= moved
 		}
 		if identical(rewritten, parts) && !renamed do return t
+		// a part with no type: the fold has none
+		for p in rewritten do if is_invalid(p) do return p
+		// a substitution, part by part: the fold is already in normal form
 		out := with_parts(v, rewritten)
 		out.index, out.states = index, states
-		return fold_law(k, out)
+		return out
 	case ^Least:
 		holds := rewrite(k, v.holds, r)
 		index, renamed := bound_as(k, r, v.index)
@@ -269,7 +365,7 @@ rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		target := rewrite(k, v.target, r)
 		if target == v.target do return t
 		return as_normal(access_law(k, target, v))
-	case ^Name, ^Carve, ^Default:
+	case ^Name, ^Default:
 	}
 	return t
 }
@@ -339,10 +435,14 @@ bound_as :: proc(k: ^Kernel, r: Rewrite, u: ^Unknown) -> (^Unknown, bool) {
 	return u, false
 }
 
-// renamed: t, each unknown bound in it — the index and the states of a fold, the
-// index of a Σ or a μ — another of the same layout: the same term, its bound
-// unknowns its own.
-renamed :: proc(k: ^Kernel, t: Type) -> Type {
+// renamed: t before the rewrite at puts its values in it: an unknown bound in t — the
+// index and the states of a fold, the index of a Σ or a μ — that those values hold
+// would capture them, and is another of the same layout. Otherwise t is the same term:
+// the same solution at the same values is one term, shared (§5.6).
+renamed :: proc(k: ^Kernel, t: Type, at: Rewrite) -> Type {
+	held := make([dynamic]^Unknown)
+	for x in at do if x.term != nil do read_unknowns(x.term, &held)
+	if len(held) == 0 do return t
 	bound := make([dynamic]^Unknown)
 	seen := make(map[rawptr]bool)
 	defer delete(seen)
@@ -377,15 +477,18 @@ renamed :: proc(k: ^Kernel, t: Type) -> Type {
 		}
 	}
 	visit(t, &bound, &seen)
-	if len(bound) == 0 do return t
 	r: Rewrite
-	for u in bound {
+	next: for u in bound {
+		captures := false
+		for h in held do captures ||= same_unknown(h, u)
+		if !captures do continue next
 		fresh := new(Unknown)
 		fresh^ = u^
 		fresh.id = k.unknowns
 		k.unknowns += 1
 		r = rewriting(r, u, fresh)
 	}
+	if len(r) == 0 do return t
 	return rewrite(k, t, r)
 }
 
@@ -457,20 +560,18 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// computed once
 		known, plain := plain_of(k, v)
 		if plain && known.imaged do return known.image, known.image != nil
-		args := make([]Type, len(v.args))
-		image: Type
-		computed := true
 		// the images of its operands: sets of constants, or not given
+		image: Type
+		args := make([]Type, len(v.args))
+		computed := true
 		for a, i in v.args {
 			args[i], computed = layout_image(k, a)
 			computed &&= is_constant(args[i])
 			if !computed do break
 		}
-		if computed {
-			// the term computes exactly: only a rounding rounds (format.odin)
-			if v.op == .Round do image = round_law(k, args[0], bits_format(args[1]), v.span)
-			else do image = exact_law(k, v.op, args, v.span)
-		}
+		// the term computes exactly: only a rounding rounds (format.odin)
+		if computed && v.op == .Round do image = round_law(k, args[0], bits_format(args[1]), v.span)
+		else if computed do image = exact_law(k, v.op, args, v.span)
 		if plain {
 			known, _ = plain_of(k, v)
 			known.imaged, known.image = true, image
@@ -505,8 +606,22 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// =t holds the values t takes
 		return layout_image(k, v.term)
 	case ^Range:
-		// a range over unknowns: its family, the linear theory reads its ends
 		if is_constant(t) do return t, true
+		// a range over unknowns: each end replaced by what it may be, the union of the
+		// ranges between them (range_law)
+		lo, hi: Type
+		ends: if true {
+			if v.lo != nil {
+				lo = layout_image(k, v.lo) or_break ends
+				if !is_constant(lo) do break ends
+			}
+			if v.hi != nil {
+				hi = layout_image(k, v.hi) or_break ends
+				if !is_constant(hi) do break ends
+			}
+			if image := range_law(k, lo, hi, v.family, v.span); is_constant(image) do return image, true
+		}
+		// otherwise its family
 		#partial switch v.family {
 		case .Int:
 			return family_term(.Int), true
@@ -518,19 +633,19 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// a call that stays: giving scopes, the scope of its equation, read as a color
 		// (§5.4); otherwise the family it is proven in
 		f := family_of(k, v) or_return
-		if f == .Scope do if s, is_scope := v.target.(^Scope); is_scope do if eq, read := equation_of(k, origin(s), call_key(s)); read do return eq.generic, true
+		// an equation not built, without a term, says nothing of them
+		if f == .Scope do if s, is_scope := v.target.(^Scope); is_scope do if eq, read := equation_of(k, origin(s), call_key(s)); read && eq.term != nil do return eq.generic, true
 		return family_term(f), true
-	case ^Fold:
-		// a run it builds: a run of what its steps place
-		if image, known := built_image(k, v); known do return image, true
-		// its value, over the layouts of its states
-		if image, known := layout_image(k, v.value); known do return image, true
-		if f, known := family_of(k, v); known do return family_term(f), true
+	case ^Fold, ^Series:
+		// a node is never changed once built: what it may hold, read once (values), but
+		// over a call, the hypothesis while its equation is read
+		key := node_of(t)
+		if known, found := k.valued[key]; found do return known, known != nil
+		image, read := fold_image(k, t)
+		if !holds_call(k, t, false) do k.valued[key] = read ? image : nil
+		return image, read
 	case ^Least:
 		return COUNTS, true
-	case ^Series:
-		// its family: what it sums to, the linear theory bounds (lia.odin)
-		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Recurrent:
 		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Access:
@@ -545,6 +660,77 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Effect, ^Scope, ^Name, ^Carve, ^Default:
 	}
 	return nil, false
+}
+
+// THE TYPE OF A TERM THE RING DOES NOT READ
+//
+// What it takes, by the law of its operator, a set over what it reads:
+//
+//   n % b, n ≥ 0 and b ≥ 1           0..b - 1                   (§4.5)
+//   Σ(i: lo..hi, t), t in p..q       n·p..n·q, n = hi - lo + 1   + distributes over |
+//                                                                and keeps the order
+//   ⟳(…; x: s ↦ x + g; x), g in p..q s + n·p..s + n·q, n steps  its init and the Σ of
+//                                                                its steps (§5.6)
+//
+// p and q, the least and greatest of a constant type (§7).
+
+// term_type: the type of t by the law of its operator.
+term_type :: proc(k: ^Kernel, t: Type) -> (type: Type, ok: bool) {
+	#partial switch v in t {
+	case ^Operation:
+		if v.op != .Mod do return
+		n, b := v.args[0], v.args[1]
+		if !is_bool(in_law(k, n, COUNTS), true) || !is_bool(in_law(k, b, POSITIVE), true) do return
+		return and_law(k, {COUNTS, range_law(k, nil, op(k, .Sub, b, Int(1)), .Int, {})}), true
+	case ^Series:
+		if v.op != .Add do return
+		n := op(k, .Add, op(k, .Sub, v.hi, v.lo), Int(1))
+		sum := summed_type(k, Int(0), n, v.term) or_return
+		return or_law(k, {sum, Int(0)}), true
+	case ^Fold:
+		if !is_none(v.effects) do return
+		lo, hi := counter_range(k, v) or_return
+		for z, i in v.states {
+			if !same(k, v.value, z) do continue
+			one, g := affine_in(k, v.updates[i], z) or_return
+			if !is_int(one, 1) do return
+			n := op(k, .Add, op(k, .Sub, hi, lo), Int(1))
+			sum := summed_type(k, v.inits[i], n, g) or_return
+			// no step: its init
+			return or_law(k, {sum, range_law(k, v.inits[i], v.inits[i], .Int, {})}), true
+		}
+	}
+	return
+}
+
+// summed_type: s plus n terms, each one of the values g takes, from p to q: from
+// s + n·p to s + n·q.
+summed_type :: proc(k: ^Kernel, s, n, g: Type) -> (type: Type, ok: bool) {
+	each := layout_image(k, g) or_return
+	if !is_constant(each) do return
+	p, q := int_bounds(k, each) or_return
+	from, to: Type
+	if x, has := p.?; has do from = op(k, .Add, s, op(k, .Mul, n, Int(x)))
+	if x, has := q.?; has do to = op(k, .Add, s, op(k, .Mul, n, Int(x)))
+	if from == nil && to == nil do return
+	return range_law(k, from, to, .Int, {}), true
+}
+
+// fold_image: what a fold or a Σ may hold: a run a fold builds, the runs of what its
+// steps place; its type by its law (term_type); a fold's value over the layouts of its
+// states; otherwise its family.
+fold_image :: proc(k: ^Kernel, t: Type) -> (image: Type, ok: bool) {
+	if f, is_fold := t.(^Fold); is_fold {
+		if image, known := built_image(k, f); known do return image, true
+	}
+	if type, typed := term_type(k, t); typed {
+		if image, read := layout_image(k, type); read && is_constant(image) do return image, true
+	}
+	if f, is_fold := t.(^Fold); is_fold {
+		if image, known := layout_image(k, f.value); known do return image, true
+	}
+	if f, known := family_of(k, t); known do return family_term(f), true
+	return
 }
 
 // Plain: what is known of an operation over plain terms — constants, unknowns that
@@ -568,6 +754,9 @@ plain_of :: proc(k: ^Kernel, o: ^Operation) -> (Plain, bool) {
 		case ^Operation:
 			_, plain := plain_of(k, v)
 			return plain
+		case ^Fold, ^Series, ^Least, ^Recurrent:
+			// a node that holds no call: what it may hold depends on it alone
+			return !holds_call(k, t, false)
 		}
 		return false
 	}
