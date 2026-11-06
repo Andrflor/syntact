@@ -372,7 +372,16 @@ holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: Read, root: ^Scope = nil)
 		if meet, narrowed := leaf.term.(^And); narrowed && root != nil {
 			if t, _, one := value_in_meet(k, meet); one && is_call_of(t, root) do continue
 		}
-		shape := leaf.term.(^Scope) or_return
+		shape, known := leaf.term.(^Scope)
+		if !known {
+			// a scope not known yet: the field read of it, x.a (§5.6)
+			if fields.name == "" do return false
+			a := new(Access)
+			a.name, a.ordinal = fields.name, -1
+			verdict, _ := prove(k, in_law(k, given(k, access_law(k, leaf.term, a)), c))
+			if verdict != .Proven do return false
+			continue
+		}
 		for b in placed(k, shape, .Value) {
 			if b.kind != .Push && b.kind != .Expand do continue
 			if fields.name != "" && b.name != fields.name do continue

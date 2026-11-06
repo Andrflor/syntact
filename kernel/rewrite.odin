@@ -513,9 +513,9 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Recurrent:
 		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Access:
-		// x.a, x of a shape: the color of a in it
+		// x.a, x of a shape: what the color of a in it holds
 		set := values(k, v.target) or_return
-		return field_color(k, set, v.name)
+		return held(k, field_color(k, set, v.name) or_return)
 	case ^Pattern:
 		// a pattern gives one of its products (§6)
 		images := make([]Type, len(v.branches))
@@ -1118,9 +1118,19 @@ monotone_image :: proc(k: ^Kernel, t: Type, u: ^Unknown, layout: Type, direction
 	return out
 }
 
-// runs_read: t, each binding of a run it reads, x.#k, an unknown of what the run's
-// layout says it holds, when that is over unknowns: the bindings relate as unknowns do.
+// runs_read: t, each binding of a run it reads, x.#k, and each field of a scope, x.a,
+// an unknown of what the layout says it holds, when that is over unknowns: the
+// bindings relate as unknowns do.
 runs_read :: proc(k: ^Kernel, t: Type) -> (out: Type, changed: bool) {
+	if a, is_access := t.(^Access); is_access {
+		set, known := values(k, a.target)
+		if !known do return t, false
+		color, has := field_color(k, set, a.name)
+		if !has || is_constant(color) do return t, false
+		u := new_unknown(k, nil)
+		u.layout = color
+		return u, true
+	}
 	o, is_operation := t.(^Operation)
 	if !is_operation do return t, false
 	if reads_run(o.op) {
