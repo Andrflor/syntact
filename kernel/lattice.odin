@@ -1447,6 +1447,11 @@ div_extended :: proc(x, y: Extended) -> (Extended, bool) {
 
 // included: a & ~b = none: every element of a is in b.
 included :: proc(k: ^Kernel, a, b: Type) -> bool {
+	// within a meet when within each of its terms (§4.1)
+	if both, met := b.(^And); met {
+		for t in both.terms do if !included(k, a, t) do return false
+		return true
+	}
 	return is_none(and_law(k, {a, not_law(k, b)}))
 }
 
