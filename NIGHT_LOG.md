@@ -91,3 +91,26 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - Runs compose for call lengths (§5.6). respond still 3 errors; its compile time rose to ~19 s (to fix).
 - 2228152 narrows fields to their orbit by a second reading. The law it implements is already in §5.6 (linear bounds: "a field every call keeps holds what the call gives it"; counters from max(c)) — not a new law. Round 4a rewrites it as one reading of the equation with the proven bounds.
 - Launched 4a (field bounds: blur, lru, calc, graph, scene, zip cases; respond/words compile time) and 4b (reals in the ring: particles; sexp Product form; words gaps). Split-fold agent still running (strlist 400000).
+
+## Step: kernel round 4b — reals, sexp reader, orbit points (7ed6368, b1d188b, 4800611, 2ab6976)
+- 7ed6368 §4.5 the reals are a field: the ring reads real terms as monomials over a
+  divisor and writes each coefficient as a real (x + 0.0 = x, 2.0 * y - y = y).
+  Normal form of a real product is now coefficient first (2.0 * x).
+- b1d188b §5.6 a fold whose value is x: c ↦ α·x + g, α ≥ 0 constant (integer or real),
+  is bounded by its bound folds y ↦ α·y + max(g) from max(c), solved at the least and
+  greatest count of steps; μ of the orbit of k >> a read as k / (2 ** a) ** i.
+  particles: real_of's folds proven in f32 (90:16 gone).
+- 4800611 parser: `x ? {{} -> a  -> b}`: a `{` glued to the braces of the branches
+  opens the cover's scope (sexp "the form Product" was this).
+- 2ab6976 §5.6 the points of an orbit before its μ are kᵢ & ~B, kₙ is kₙ & B (when n
+  stays a μ); (t & S).#k holds what t holds within what S holds there; a run of values
+  from an unknown place is any of its suffixes; a run is in a shape of runs when its
+  length, as a term, is one the shape admits. A scan like number{t}'s step now reads
+  ((t from i) & {(48..57): ...A:}).#0, a proven place.
+- Errors: particles 8 → 5 (0.6 s), sexp 22 → 18 (1.9 s), words 49 → 50 (9 s; was 6.5 s).
+- Open: particles round32(?.#0.vel.y - 0.0625) — f32 is unbounded in Real_Bounds and
+  its greatest finite value (2^128 - 2^104) is beyond i128 rationals, so round32(f32 -
+  0.0625) ∈ f32 cannot be computed; sexp number's v * 10 + d in i64 is not provable
+  (digit runs are unbounded), its <invalid> step keeps the call and cascades;
+  words: (a * a) / vocab in 0..vocab - 1 (a = s % vocab), count-down run length,
+  captured-unknown fold bound, inclusion through expansions, narrower-rest cover.
