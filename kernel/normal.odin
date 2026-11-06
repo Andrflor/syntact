@@ -246,8 +246,12 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 	defer release(k, from)
 	if invalid := flattened(k, terms, is_or); invalid != nil do return invalid
 	flat := pushed(k, from)
+	// a bound closed by what it excludes, which may make it constant: read with the
+	// constants
+	if !is_or do closed_bounds(k, flat)
 	constants := mark(k)
 	for t in flat {
+		if t == nil do continue
 		switch {
 		case is_none(t):
 			if !is_or do return None{}
@@ -258,7 +262,6 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 		}
 	}
 	others := mark(k)
-	if !is_or do closed_bounds(k, flat)
 	for t in flat do if t != nil && !is_constant(t) && !contains_same(k, pushed(k, others), t) do push(k, t)
 	// a & ~a = none, a | ~a = ~none (§2)
 	for t in pushed(k, others) {
