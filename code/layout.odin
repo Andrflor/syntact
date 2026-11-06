@@ -113,23 +113,24 @@ named_shape :: proc(l: ^Lowering, s: ^kernel.Scope) -> bool {
 	return true
 }
 
-// fields_layout: a shape of named fields, each at its natural alignment; false when
-// a place is not named, or holds what the code does not lay out.
+// fields_layout: a shape of named fields, each at its natural alignment — a hole is
+// a type and takes no bits (§4.11) —; false when a place is not named, or holds
+// what the code does not lay out.
 fields_layout :: proc(l: ^Lowering, s: ^kernel.Scope) -> (lay: ^Layout, ok: bool) {
 	if !named_shape(l, s) do return nil, false
-	places := kernel.placed(l.k, s, .Shape)
-	fields := make([]Field_Layout, len(places))
+	fields := make([dynamic]Field_Layout)
 	size, align := 0, 1
-	for p, i in places {
+	for p in kernel.placed(l.k, s, .Shape) {
+		if p.kind == .Pull do continue
 		set := kernel.binding_color(l.k, p)
 		if set == nil do set = kernel.values(l.k, kernel.binding_value(l.k, p)) or_return
 		inner := layout_of_set(l, set) or_return
 		size = (size + inner.align - 1) / inner.align * inner.align
-		fields[i] = Field_Layout{p.name, inner, size}
+		append(&fields, Field_Layout{p.name, inner, size})
 		size += inner.size
 		align = max(align, inner.align)
 	}
-	return new_clone(Layout{kind = .Fields, fields = fields, size = (size + align - 1) / align * align, align = align}), true
+	return new_clone(Layout{kind = .Fields, fields = fields[:], size = (size + align - 1) / align * align, align = align}), true
 }
 
 // layout_of_term: the layout of the values t may take.
