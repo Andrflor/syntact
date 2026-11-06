@@ -37,7 +37,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	// unsatisfiable, by the theory of linear arithmetic (lia.odin)
 	if !is_constant(x) && is_constant(c) {
 		#partial switch _ in x {
-		case ^Operation, ^Fold, ^Series:
+		case ^Operation, ^Fold, ^Series, ^Collapse:
 			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) {
 				if f, known := family_of(k, x); known && f == .Int && lia_in(k, x, lo, hi) do return Bool(true)
 			}
@@ -317,7 +317,7 @@ call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool 
 	append(&k.induced, Induced{eq.generic, c, fields, false})
 	// the proof reads the equation: meanwhile its calls are the hypothesis
 	eq.reading = true
-	proven := induced(k, eq.root, eq.term, c, fields)
+	proven := induced(k, eq, c, fields)
 	eq.reading = false
 	k.induced[at].proven = proven
 	return proven
@@ -331,23 +331,34 @@ Induced :: struct {
 	proven:   bool,
 }
 
-induced :: proc(k: ^Kernel, root: ^Scope, e: Type, c: Type, fields: Read) -> bool {
+induced :: proc(k: ^Kernel, eq: ^Recursion, c: Type, fields: Read) -> bool {
+	root, e := eq.root, eq.term
 	assumed: Rewrite
 	taken :: proc(k: ^Kernel, c: Type) -> Type {
 		u := new_unknown(k, nil)
 		u.layout = c
 		return u
 	}
+	// the hypothesis: a call of this equation, at values of its fields; a call of
+	// another — root at a value not of its fields — by its own induction
+	holds :: proc(k: ^Kernel, eq: ^Recursion, call: ^Collapse, c: Type, fields: Read) -> bool {
+		if _, _, instance := moves(k, eq, call); instance do return true
+		return call_in(k, call, c, fields)
+	}
 	if fields.fields {
 		// what is read of its calls: taken in c; the calls themselves stay, the
 		// hypothesis
-		for read in call_reads(k, e, root) do if fields.name == "" || read_of(read) == fields do assumed = append_read(assumed, read, taken(k, c))
+		for read in call_reads(k, e, root) {
+			if fields.name != "" && read_of(read) != fields do continue
+			call, _ := call_read(read)
+			if holds(k, eq, call, c, read_of(read)) do assumed = append_read(assumed, read, taken(k, c))
+		}
 	} else {
 		// each call, and each one a read of a field holds
 		calls := make([dynamic]^Collapse)
 		append(&calls, ..calls_in(k, e, root))
 		for read in call_reads(k, e, root) do if call, _ := call_read(read); !slice.contains(calls[:], call) do append(&calls, call)
-		for inner in calls do assumed = rewriting_call(assumed, inner, taken(k, c))
+		for inner in calls do if holds(k, eq, inner, c, fields) do assumed = rewriting_call(assumed, inner, taken(k, c))
 		// a call with effects: what it gives back, its answer, is taken in c likewise
 		for x in call_answers(k, e, root) do assumed = rewriting(assumed, x, taken(k, c))
 	}

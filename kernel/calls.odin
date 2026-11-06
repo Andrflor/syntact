@@ -209,7 +209,7 @@ production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	key := make([dynamic]^Binding)
 	for x in in_order(carved) do append(&key, x)
 	eq: ^Recursion
-	for x in k.equations do if x.root == root && slice.equal(x.given, key[:]) do eq = x
+	if x, found := equation_covering(k, root, key[:], nil); found do eq = x
 	if eq == nil do eq = equation_built(k, root, key[:])
 	if eq.solution != nil do return solution_at(k, eq, b.scope)
 	return value

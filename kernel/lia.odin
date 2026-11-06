@@ -9,7 +9,9 @@ package kernel
 //   ring does not read — a product of unknowns, x % m, x / c, a fold, a Σ —, named;
 //   an unknown lies in its layout; x % m, m > 0, in 0..m − 1 when x ≥ 0 (Euclid);
 //   x / c, c > 0, x ≥ 0: c·q ≤ x ≤ c·q + c − 1; x [&] m, m ≥ 0: in 0..m;
+//   a call that stays, in its type: the least solution of its definition (call_range);
 //   a pattern, one of its products: between the least and the greatest of them;
+//   b ** e, b ≥ 1, e ≥ 0: b ** p ≤ b ** e ≤ b ** q, p ≤ e ≤ q;
 //   a Σ of n terms g, or a fold adding g at each of its n steps, from s:
 //   s + n·p ≤ S ≤ s + n·q, p ≤ g ≤ q what the theory gives of g (induction on the
 //   steps);
@@ -146,12 +148,49 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 			upper.coefs[a] -= i128(c)
 			upper.constant -= i128(c) - 1
 			append(&s.rows, upper)
+		case .Pow:
+			// b ** e, b ≥ 1 a constant, e ≥ 0: from b ** least to b ** greatest of e
+			b, constant := v.args[0].(Int)
+			if !constant || b < 1 do return true
+			p, q := extremes(k, v.args[1])
+			least, has_least := p.?
+			if !has_least || least < 0 do return true
+			power :: proc(b, e: i128) -> (i128, bool) {
+				out: i128 = 1
+				for _ in 0 ..< e {
+					if out > (i128(1) << 100) / b do return 0, false
+					out *= b
+				}
+				return out, true
+			}
+			low, _ := power(i128(b), least)
+			high: Maybe(i128)
+			if greatest, has := q.?; has do if x, fits := power(i128(b), greatest); fits do high = x
+			within(s, a, low, high)
 		case .Bit_And:
 			for arg in v.args do if m, constant := arg.(Int); constant && m >= 0 do within(s, a, 0, i128(m))
 		case:
 			if image, known := layout_image(k, t); known && is_constant(image) {
 				if lo, hi, bounded := int_bounds(k, image); bounded do within(s, a, lo, hi)
 			}
+		}
+	case ^Collapse:
+		// a call that stays: its type, the least solution of its definition
+		if !v.recursive do return true
+		l, h, ranged := call_range(k, v)
+		if !ranged do return true
+		if l != nil {
+			// l − a ≤ 0
+			x := linear_of(k, s, l) or_return
+			x.coefs[a] -= 1
+			append(&s.rows, x)
+		}
+		if h != nil {
+			// a − h ≤ 0
+			x := linear_of(k, s, h) or_return
+			x = scaled(x, -1)
+			x.coefs[a] += 1
+			append(&s.rows, x)
 		}
 	case ^Pattern:
 		// a pattern gives one of its products, each read in its branch (§6): a
