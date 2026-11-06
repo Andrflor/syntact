@@ -1,15 +1,18 @@
-// tree (Goose bench/goose/tree.goose): a complete binary tree of the given depth,
-// each node v = xs_mod(seed, 1000), children seeded xs_next(seed) and
-// xs_next(seed + 1); then eight sums of v ^ p. Prints the node count and the total.
+// tree: Goose bench/cpp/tree.cpp (the C++ the harness compares Goose with), in plain
+// Syntact. A complete binary tree of the given depth, each node v = seed % 1000, its
+// children seeded xs_next(seed) and xs_next(seed + 1); then eight sums of v ^ p.
+// Prints the node count and the total.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
+// struct TNode { int32_t v; unique_ptr<TNode> l, r; }: {} is the null child
 Node -> {
   -> {}
   -> {i32:v  Node:l  Node:r}
@@ -26,25 +29,34 @@ build -> {
     }
   }
 }
-sum -> {
-  Node:t -> {}
-  u8:p -> 0
-  -> t ? {
-    {i32:v  Node:l  Node:r} -> (v ^ p) + sum{t -> l  p -> p}! + sum{t -> r  p -> p}!
+// s = v ^ p; if (l) s += sum_tree(l, p); if (r) s += sum_tree(r, p)
+sum_tree -> {
+  Node:n -> {}
+  i64:p -> 0
+  -> n ? {
+    {i32:v  Node:l  Node:r} -> (v ^ p) + sum_tree{n -> l  p -> p}! + sum_tree{n -> r  p -> p}!
     -> 0
   }
 }
+node_count -> {
+  (0..30):depth -> ??
+  -> (1 << (depth + 1)) - 1
+}
+// for (p = 0; p < 8; p++) total += sum_tree(root, p)
 passes -> {
-  Node:t -> {}
-  u8:p -> 0
+  Node:root -> {}
+  i64:p -> 0
+  i64:total -> 0
   -> p ? {
-    >=8 -> 0
-    -> sum{t -> t  p -> p}! + passes{t -> t  p -> p + 1}!
+    >=8 -> total
+    -> passes{root -> root  p -> p + 1  total -> total + sum_tree{n -> root  p -> p}!}!
   }
 }
 -> {
   (0..30):depth -> ??
   Node:root -> build{depth -> depth}!
-  c -> io.printf{format -> "%lld\n"  n -> (1 << (depth + 1)) - 1}!
-  -> io.printf{format -> "%lld\n"  n -> passes{t -> root}!}!
+  count -> node_count{depth -> depth}!
+  total -> passes{root -> root}!
+  a -> io.printf{format -> "%lld\n"  n -> count}!
+  -> io.printf{format -> "%lld\n"  n -> total}!
 }!

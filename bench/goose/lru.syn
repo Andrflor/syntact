@@ -1,96 +1,265 @@
-// lru (Goose bench/goose/lru.goose): an LRU cache of capacity N/8 over keys
-// (a * a) / KEYS, a = xs_mod(r, KEYS), KEYS = N/4; an invalidation when
-// xs_mod(r >> 40, 16) = 0. The cache is a run, most recent first, searched by its
-// pattern (no hash table: the spec has no update of a run at a computed position).
-// Prints hits, misses, removes, the size, the walk hash and the sum of the vals.
+// lru: Goose bench/cpp/lru.cpp (the C++ the harness compares Goose with), in plain
+// Syntact. Syntact has no library list or map, so this is the hand-written cache of
+// the C++ VARIANT 1: a pool of nodes linked by index with a free list, two
+// sentinels, and an open-addressed table (Fibonacci hash, linear probing,
+// backward-shift deletion). An LRU cache of capacity N / 8 over keys (a * a) / KEYS,
+// a = xs_mod(r, KEYS), KEYS = CAP * 2; an invalidation when xs_mod(r >> 40, 16) = 0.
+// Prints hits, misses, removes, the count, the walk hash (u64) and the sum of the vals.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
+  printu -> <printf>{string:format, u64:n, -> !?::i32}
 }
+// an array that captures its length in a hole
 Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
+  T <- {}
+  n <- 0..
+  -> {...({T:} * n):}
 }
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-Node -> {i32:key  i32:val}
-Found -> {bool:hit  Array{Node}:rest  Node:node}
-// the node of key taken out of the run, and the run without it
-take -> {
-  Array{Node}:xs -> {}
-  i32:key -> 0
-  -> xs ? {
-    {Node(h) ...Array{Node}:(t)} -> h.key ? {
-      =key -> Found{hit -> true  rest -> t  node -> h}
-      -> {
-        f -> take{xs -> t  key -> key}!
-        -> Found{hit -> f.hit  rest -> {h ...f.rest}  node -> f.node}
-      }!
+lru -> {
+  // BENCH_N: KEYS = 2 * (n / 8) divides, so n >= 8; a val, an int32_t, reaches
+  // 999 + n, so n <= 2 ** 31 - 1000
+  (8..2147482648):n -> ??
+  CAP -> n / 8
+  KEYS -> CAP * 2
+  // nslots = 16; while (nslots < CAP * 2) nslots *= 2;
+  grow -> {
+    i64:nslots -> 16
+    -> nslots ? {
+      >=(CAP * 2) -> nslots
+      -> grow{nslots -> nslots * 2}!
     }
-    -> Found{hit -> false  rest -> {}  node -> Node}
   }
-}
-// the run without its last node
-init -> {
-  Array{Node}:xs -> {}
-  -> xs ? {
-    {Node(h)} -> {}
-    {Node(h) ...Array{Node}:(t)} -> {h ...init{xs -> t}!}
-    -> {}
+  nslots -> grow!
+  mask -> nslots - 1
+  Place -> 0..mask
+  // struct Node { int32_t key, val; uint32_t prev, next; }: its links are places of
+  // a pool of m nodes
+  Node -> {
+    m <- 0..
+    -> {i32:key  i32:val  (0..(m - 1)):prev  (0..(m - 1)):next}
   }
-}
-Stats -> {Array{Node}:recent  u32:size  i64:hits  i64:misses  i64:removes}
-run -> {
-  u32:n -> ??
-  u32:cap -> 1
-  (1..4294967295):keys -> 1
-  u64:r -> 12345
-  Stats:s -> Stats
-  -> n ? {
-    0 -> s
+  // struct Slot { int32_t key, idx; }: idx < 0 empty, else a place of the pool
+  Slot -> {
+    m <- 0..
+    -> {i32:key  (-1..(m - 1)):idx}
+  }
+  // ((key * 0x9E3779B97F4A7C15) >> 24) & mask
+  home -> {
+    i64:key -> 0
+    -> (((key * 0x9E3779B97F4A7C15) [&] 0xffffffffffffffff) >> 24) [&] mask
+  }
+  // while (slots[i].idx >= 0 && slots[i].key != key) i = (i + 1) & mask;
+  probe -> {
+    m <- 0..
+    Array{T <- Slot{m <- m}  n <- nslots}:slots -> ??
+    i64:key -> 0
+    Place:i -> 0
     -> {
-      r1 -> xs{x -> r}!
-      a -> r1 % keys
-      key -> (a * a) / keys
-      f -> take{xs -> s.recent  key -> key}!
-      next -> (r1 >> 40) % 16 ? {
-        0 -> f.hit ? {
-          true -> Stats{f.rest  s.size - 1  s.hits  s.misses  s.removes + 1}
-          -> s
-        }
-        -> f.hit ? {
-          true -> Stats{{Node{f.node.key  f.node.val + 1} ...f.rest}  s.size  s.hits + 1  s.misses  s.removes}
-          -> s.size ? {
-            =cap -> Stats{{Node{key  key % 1000} ...init{xs -> s.recent}!}  s.size  s.hits  s.misses + 1  s.removes}
-            -> Stats{{Node{key  key % 1000} ...s.recent}  s.size + 1  s.hits  s.misses + 1  s.removes}
-          }
+      s -> slots.#i
+      -> s.idx ? {
+        <0 -> i
+        -> (s.key = key) ? {
+          true -> i
+          -> probe{slots -> slots  key -> key  i -> (i + 1) [&] mask}!
         }
       }
-      -> run{n -> n - 1  cap -> cap  keys -> keys  r -> r1  s -> next}!
     }!
   }
-}
-walk -> {
-  Array{Node}:xs -> {}
-  u64:w -> 0
-  i64:vals -> 0
-  -> xs ? {
-    {Node(h) ...Array{Node}:(t)} -> walk{xs -> t  w -> (w * 31 + h.key) [&] 0xffffffffffffffff  vals -> vals + h.val}!
-    -> {w  vals}
+  find_slot -> {
+    m <- 0..
+    Array{T <- Slot{m <- m}  n <- nslots}:slots -> ??
+    i64:key -> 0
+    -> probe{slots -> slots  key -> key  i -> home{key -> key}!}!
   }
+  // for (;;) { j = (j + 1) & mask; s = slots[j]; if (s.idx < 0) break; h = home(s.key);
+  //   if ((i < j && (h <= i || h > j)) || (i > j && h <= i && h > j)) { slots[i] = s; i = j; } }
+  // slots[i].idx = -1;
+  shift -> {
+    m <- 0..
+    Array{T <- Slot{m <- m}  n <- nslots}:slots -> ??
+    Place:i -> 0
+    Place:j -> 0
+    -> {
+      j1 -> (j + 1) [&] mask
+      s -> slots.#j1
+      -> s.idx ? {
+        <0 -> slots{#i -> slots.#i{idx -> -1}}
+        -> {
+          h -> home{key -> s.key}!
+          moved -> ((i < j1) [&] ((h <= i) [|] (h > j1))) [|] ((i > j1) [&] (h <= i) [&] (h > j1))
+          -> moved ? {
+            true -> shift{slots -> slots{#i -> s}  i -> j1  j -> j1}!
+            -> shift{slots -> slots  i -> i  j -> j1}!
+          }
+        }!
+      }
+    }!
+  }
+  map_remove -> {
+    m <- 0..
+    Array{T <- Slot{m <- m}  n <- nslots}:slots -> ??
+    Place:at -> 0
+    -> shift{slots -> slots  i -> at  j -> at}!
+  }
+  // p = pool[n].prev, q = pool[n].next; pool[p].next = q; pool[q].prev = p;
+  unlink -> {
+    m <- 0..
+    Array{T <- Node{m <- m}  n <- m}:pool -> ??
+    (0..(m - 1)):k -> 0
+    -> {
+      p -> pool.#k.prev
+      q -> pool.#k.next
+      linked -> pool{#p -> pool.#p{next -> q}}
+      -> linked{#q -> linked.#q{prev -> p}}
+    }!
+  }
+  // q = pool[head].next; pool[n].prev = head; pool[n].next = q; pool[q].prev = n; pool[head].next = n;
+  link_front -> {
+    m <- 0..
+    Array{T <- Node{m <- m}  n <- m}:pool -> ??
+    (0..(m - 1)):head -> 0
+    (0..(m - 1)):k -> 0
+    -> {
+      q -> pool.#head.next
+      p1 -> pool{#k -> pool.#k{prev -> head  next -> q}}
+      p2 -> p1{#q -> p1.#q{prev -> k}}
+      -> p2{#head -> p2.#head{next -> k}}
+    }!
+  }
+  // if (!freelist.empty()) { k = freelist.back(); freelist.pop_back(); pool[k].key = key; pool[k].val = val; return k; }
+  // pool.push_back(Node { key, val, 0, 0 }); return pool.size() - 1;
+  // (the free list is a stack, its top the front of the run)
+  alloc_node -> {
+    m <- 0..
+    Index -> 0..(m - 1)
+    Array{T <- Node{m <- m}  n <- m}:pool -> ??
+    Array{T <- Index}:free -> {}
+    i32:key -> 0
+    i32:val -> 0
+    -> free ? {
+      {Index(k)  ...Array{T <- Index}:(rest)} -> {pool -> pool{#k -> pool.#k{key -> key  val -> val}}  free -> rest  k -> k}
+      -> {pool -> {...pool  {key -> key  val -> val  prev -> 0  next -> 0}}  free -> free  k -> m}
+    }
+  }
+  // for (op = 0; op < BENCH_N; op++) { ... }
+  ops -> {
+    m <- 0..
+    Array{T <- Node{m <- m}  n <- m}:pool -> ??
+    Array{T <- 0..(m - 1)}:free -> {}
+    Array{T <- Slot{m <- m}  n <- nslots}:slots -> ??
+    (0..(m - 1)):hi -> 0
+    (0..(m - 1)):ti -> 0
+    i64:count -> 0
+    i64:hits -> 0
+    i64:misses -> 0
+    i64:removes -> 0
+    u64:r -> 12345
+    i64:op -> 0
+    -> op ? {
+      >=n -> {pool -> pool  hi -> hi  count -> count  hits -> hits  misses -> misses  removes -> removes}
+      -> {
+        s -> xs{x -> r}!
+        a -> s % KEYS
+        key -> (a * a) / KEYS
+        at -> find_slot{slots -> slots  key -> key}!
+        fi -> slots.#at.idx
+        -> ((s >> 40) % 16) ? {
+          // an invalidation: drop the entry if it is cached
+          0 -> fi ? {
+            >=0 -> ops{
+              pool -> unlink{pool -> pool  k -> fi}!
+              free -> {fi  ...free}
+              slots -> map_remove{slots -> slots  at -> at}!
+              hi -> hi  ti -> ti
+              count -> count - 1  hits -> hits  misses -> misses  removes -> removes + 1
+              r -> s  op -> op + 1
+            }!
+            -> ops{pool -> pool  free -> free  slots -> slots  hi -> hi  ti -> ti  count -> count  hits -> hits  misses -> misses  removes -> removes  r -> s  op -> op + 1}!
+          }
+          -> fi ? {
+            // a hit: pool[fi].val += 1; unlink(fi); link_front(hi, fi);
+            >=0 -> {
+              bumped -> pool{#fi -> pool.#fi{val -> pool.#fi.val + 1}}
+              -> ops{
+                pool -> link_front{pool -> unlink{pool -> bumped  k -> fi}!  head -> hi  k -> fi}!
+                free -> free  slots -> slots  hi -> hi  ti -> ti
+                count -> count  hits -> hits + 1  misses -> misses  removes -> removes
+                r -> s  op -> op + 1
+              }!
+            }!
+            // a miss: evict the least recent when full, then insert
+            -> {
+              evicted -> count ? {
+                =CAP -> {
+                  lru -> pool.#ti.prev
+                  p1 -> unlink{pool -> pool  k -> lru}!
+                  lat -> find_slot{slots -> slots  key -> p1.#lru.key}!
+                  li -> slots.#lat.idx
+                  s1 -> map_remove{slots -> slots  at -> lat}!
+                  -> {pool -> p1  free -> {li  ...free}  slots -> s1  count -> count - 1  ins -> find_slot{slots -> s1  key -> key}!}
+                }!
+                -> {pool -> pool  free -> free  slots -> slots  count -> count  ins -> at}
+              }
+              made -> alloc_node{pool -> evicted.pool  free -> evicted.free  key -> key  val -> key % 1000}!
+              ins -> evicted.ins
+              ni -> made.k
+              -> ops{
+                pool -> link_front{pool -> made.pool  head -> hi  k -> ni}!
+                free -> made.free
+                slots -> evicted.slots{#ins -> {key -> key  idx -> ni}}
+                hi -> hi  ti -> ti
+                count -> evicted.count + 1  hits -> hits  misses -> misses + 1  removes -> removes
+                r -> s  op -> op + 1
+              }!
+            }!
+          }
+        }
+      }!
+    }
+  }
+  // for (cur = pool[hi].next; pool[cur].key >= 0; cur = pool[cur].next) { walk = walk * 31 + key; vals += val; }
+  walk -> {
+    m <- 0..
+    Array{T <- Node{m <- m}  n <- m}:pool -> ??
+    (0..(m - 1)):cur -> 0
+    u64:walk -> 0
+    i64:vals -> 0
+    -> pool.#cur.key ? {
+      >=0 -> walk{pool -> pool  cur -> pool.#cur.next  walk -> (walk * 31 + pool.#cur.key) [&] 0xffffffffffffffff  vals -> vals + pool.#cur.val}!
+      -> {walk -> walk  vals -> vals}
+    }
+  }
+  // slots.assign(nslots, Slot { 0, -1 })
+  empties -> {
+    i64:i -> 0
+    Array{T <- Slot{m <- 0}}:slots -> {}
+    -> i ? {
+      >=nslots -> slots
+      -> empties{i -> i + 1  slots -> {...slots  {key -> 0  idx -> -1}}}!
+    }
+  }
+  // two sentinels: hi = alloc_node(-1, 0), ti = alloc_node(-1, 0); pool[hi].next = ti; pool[ti].prev = hi;
+  h -> alloc_node{pool -> {}  key -> -1  val -> 0}!
+  t -> alloc_node{pool -> h.pool  free -> h.free  key -> -1  val -> 0}!
+  hi -> h.k
+  ti -> t.k
+  p1 -> t.pool{#hi -> t.pool.#hi{next -> ti}}
+  start -> p1{#ti -> p1.#ti{prev -> hi}}
+  done -> ops{pool -> start  free -> t.free  slots -> empties!  hi -> hi  ti -> ti}!
+  first -> done.hi
+  w -> walk{pool -> done.pool  cur -> done.pool.#first.next}!
+  a -> io.printf{format -> "%lld\n"  n -> done.hits}!
+  b -> io.printf{format -> "%lld\n"  n -> done.misses}!
+  c -> io.printf{format -> "%lld\n"  n -> done.removes}!
+  d -> io.printf{format -> "%lld\n"  n -> done.count}!
+  e -> io.printu{format -> "%llu\n"  n -> w.walk}!
+  -> io.printf{format -> "%lld\n"  n -> w.vals}!
 }
--> {
-  // the input Goose supports: a node's val, i32, is at most 999 + n
-  (8..2147482648):n -> ??
-  s -> run{n -> n  cap -> n / 8  keys -> n / 4}!
-  a -> io.printf{format -> "%lld\n"  n -> s.hits}!
-  b -> io.printf{format -> "%lld\n"  n -> s.misses}!
-  c -> io.printf{format -> "%lld\n"  n -> s.removes}!
-  d -> io.printf{format -> "%lld\n"  n -> s.size}!
-  -> walk{xs -> s.recent}!
-}!
+-> lru{n -> ??::(8..2147482648)}!

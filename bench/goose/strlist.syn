@@ -1,106 +1,138 @@
-// strlist (Goose bench/goose/strlist.goose): one buffer of N words of 3..20 random
-// letters, each followed by a space, as bytes; split into a list of words; four
-// scans of |w| + w[0] + w[last]. Prints the count of words and the total.
+// strlist: Goose bench/cpp/strlist.cpp (the C++ the harness compares Goose with), in
+// plain Syntact. A text of N words of 3..20 random letters, each followed by a
+// space; split at its spaces into a list of words; four scans summing
+// w.size() + w[0] + w[w.size() - 1]. Prints the count of words and the total.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
+// an array that captures its length in a hole
 Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
+  T <- {}
+  n <- 0..
+  -> {...({T:} * n):}
 }
-A -> Array{u8}
-// a word: one letter at least
-Word -> {u8: ...A:}
-W -> Array{Word}
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+// v.size(): the length the array captures
+len -> {
+  T <- {}
+  n <- 0..
+  Array{T <- T  n <- n}:xs -> {}
+  -> n
+}
+// std::string
+String -> Array{T <- u8}
+// a word of the text: the bytes between two spaces, one at least
+Word -> Array{T <- u8  n <- 1..}
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-// the letters of a word: n of them, each from the next state of the chain
+// for (j = 0; j < wl; j++) { r = xs_next(r); text.push_back('a' + xs_mod(r, 26)); }
 letters -> {
-  u64:r -> ??
-  (0..20):n -> ??
-  -> n ? {
-    0 -> {}
-    -> {97 + xs{x -> r}! % 26  ...letters{r -> xs{x -> r}!  n -> n - 1}!}
-  }
-}
-// the state of the chain after n letters
-after -> {
-  u64:r -> ??
-  (0..20):n -> ??
-  -> n ? {
-    0 -> r
-    -> after{r -> xs{x -> r}!  n -> n - 1}!
-  }
-}
-// the buffer: n words, each its letters then a space
-text -> {
-  u32:n -> ??
-  u64:r -> 12345
-  -> n ? {
-    0 -> {}
+  u64:r -> 0
+  i64:wl -> 0
+  i64:j -> 0
+  String:text -> {}
+  -> j ? {
+    >=wl -> {r -> r  text -> text}
     -> {
-      r1 -> xs{x -> r}!
-      wl -> 3 + r1 % 18
-      -> {...letters{r -> r1  n -> wl}!  32  ...text{n -> n - 1  r -> after{r -> r1  n -> wl}!}!}
+      s -> xs{x -> r}!
+      -> letters{r -> s  wl -> wl  j -> j + 1  text -> {...text  97 + s % 26}}!
     }!
   }
 }
-// split: the words of a buffer, cut at its spaces; w the letters read so far
+// for (i = 0; i < N; i++) { r = xs_next(r); wl = 3 + xs_mod(r, 18); the letters; text.push_back(' '); }
+make_text -> {
+  u32:n -> ??
+  i64:i -> 0
+  u64:r -> 12345
+  String:text -> {}
+  -> i ? {
+    >=n -> text
+    -> {
+      s -> xs{x -> r}!
+      word -> letters{r -> s  wl -> 3 + s % 18  text -> text}!
+      -> make_text{n -> n  i -> i + 1  r -> word.r  text -> {...word.text  32}}!
+    }!
+  }
+}
+// while (i < tl && text[i] != ' ') i++;
+word_end -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:i -> 0
+  -> i ? {
+    >=tl -> i
+    -> text.#i ? {
+      32 -> i
+      -> word_end{text -> text  i -> i + 1}!
+    }
+  }
+}
+// while (i < tl && text[i] == ' ') i++;
+spaces_end -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:i -> 0
+  -> i ? {
+    >=tl -> i
+    -> text.#i ? {
+      32 -> spaces_end{text -> text  i -> i + 1}!
+      -> i
+    }
+  }
+}
+// std::string(text.data() + start, i - start): the bytes of text from start up to e
+copy -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:k -> 0
+  (0..tl):e -> 0
+  String:w -> {}
+  -> k ? {
+    >=e -> w
+    -> copy{text -> text  k -> k + 1  e -> e  w -> {...w  text.#k}}!
+  }
+}
+// for (i = 0; i < tl; ) { start = i; skip the word; words.emplace_back(...); skip the spaces; }
 split -> {
-  Array{u8}:t -> {}
-  Array{u8}:w -> {}
-  -> t ? {
-    {32  ...Array{u8}:(rest)} -> w ? {
-      {} -> split{t -> rest  w -> {}}!
-      -> {w  ...split{t -> rest  w -> {}}!}
-    }
-    {u8(c)  ...Array{u8}:(rest)} -> split{t -> rest  w -> {...w  c}}!
-    -> w ? {
-      {} -> {}
-      -> {w}
-    }
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:i -> 0
+  Array{T <- Word}:words -> {}
+  -> i ? {
+    >=tl -> words
+    -> {
+      start -> i
+      e -> word_end{text -> text  i -> i}!
+      -> split{text -> text  i -> spaces_end{text -> text  i -> e}!  words -> {...words  copy{text -> text  k -> start  e -> e}!}}!
+    }!
   }
 }
-size -> {
-  Array{u8}:t -> {}
-  -> t ? {
-    {u8(h)  ...Array{u8}:(rest)} -> 1 + size{t -> rest}!
-    -> 0
-  }
-}
-count -> {
-  W:ws -> {}
-  -> ws ? {
-    {Word(h)  ...W:(t)} -> 1 + count{ws -> t}!
-    -> 0
-  }
-}
+// for (w : words) total += w.size() + w[0] + w[w.size() - 1]
 scan -> {
-  W:ws -> {}
-  acc -> 0
-  -> ws ? {
-    {Word(w)  ...W:(t)} -> scan{ws -> t  acc -> acc + size{t -> w}! + w.#0 + w.#(size{t -> w}! - 1)}!
-    -> acc
+  Array{T <- Word}:words -> {}
+  i64:total -> 0
+  -> words ? {
+    {Word(w)  ...Array{T <- Word}:(rest)} -> scan{words -> rest  total -> total + len{xs -> w}! + w.#0 + w.#(len{xs -> w}! - 1)}!
+    -> total
   }
 }
+// for (p = 0; p < 4; p++) the scan, on one total
 passes -> {
-  (0..4):p -> 4
-  W:ws -> {}
-  acc -> 0
+  Array{T <- Word}:words -> {}
+  i64:p -> 0
+  i64:total -> 0
   -> p ? {
-    0 -> acc
-    -> passes{p -> p - 1  ws -> ws  acc -> acc + scan{ws -> ws}!}!
+    >=4 -> total
+    -> passes{words -> words  p -> p + 1  total -> scan{words -> words  total -> total}!}!
   }
 }
 -> {
-  u32:n -> ??
-  W:ws -> split{t -> text{n -> n}!}!
-  a -> io.printf{format -> "%lld\n"  n -> count{ws -> ws}!}!
-  -> io.printf{format -> "%lld\n"  n -> passes{ws -> ws}!}!
+  String:text -> make_text{n -> ??::u32}!
+  Array{T <- Word}:words -> split{text -> text}!
+  a -> io.printf{format -> "%lld\n"  n -> len{xs -> words}!}!
+  -> io.printf{format -> "%lld\n"  n -> passes{words -> words}!}!
 }!

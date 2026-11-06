@@ -1,19 +1,19 @@
-// scene (Goose bench/goose/scene.goose): a scene graph of the given depth, each
-// node with 1..4 children, a local transform (a quarter-turn rotation about one
-// axis and an integer translation) and a world transform; 16 frames move a seventh
-// of the nodes, recompute the world transforms down the tree, and sum the
-// components of their translations. Prints the count of nodes and the total.
-// Every value is exact in binary32. The nodes are numbered as Goose pushes them in
-// its pool: a node, then its children's subtrees in turn.
+// scene: Goose bench/cpp/scene.cpp (the C++ the harness compares Goose with), in
+// plain Syntact. A scene graph of the given depth, each node with 1..4 children, a
+// local transform (a quarter-turn rotation about one axis and an integer
+// translation) and a world transform; 16 frames move a seventh of the nodes,
+// recompute the world transforms down the tree, and sum the components of their
+// translations. Prints the count of nodes and the total.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
+// an array that captures its length in a hole
 Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
+  T <- {}
+  n <- 0..
+  -> {...({T:} * n):}
 }
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
@@ -22,168 +22,187 @@ xs -> {
 }
 FRAMES -> 16
 MAXKIDS -> 4
-
-// --- integers and reals ----------------------------------------------------------
-
-// the real of a digit 0..8, as Goose's `as f32`
-real_of -> {
-  (0..8):k -> 0
-  -> k ? {
-    0 -> 0.0
-    -> real_of{k -> k - 1}! + 1.0
-  }
-}
-// the integer part of x >= 0, below 2 ** 31: k the integer found so far and rk
-// its real, bit the digit tried and rbit its real, from the highest down
-floor_of -> {
-  f64:x -> 0.0
-  i64:k -> 0
-  f64:rk -> 0.0
-  (0..1073741824):bit -> 1073741824
-  f64:rbit -> 1073741824.0
-  -> bit ? {
-    0 -> k
-    -> (rbit <= x - rk) ? {
-      true -> floor_of{x -> x  k -> k + bit  rk -> rk + rbit  bit -> bit >> 1  rbit -> rbit * 0.5}!
-      -> floor_of{x -> x  k -> k  rk -> rk  bit -> bit >> 1  rbit -> rbit * 0.5}!
-    }
-  }
-}
-// x rounded toward 0, as C's (long long)x
-trunc -> {
-  f64:x -> 0.0
-  -> x ? {
-    <0.0 -> 0 - floor_of{x -> 0.0 - x}!
-    -> floor_of{x -> x}!
-  }
-}
-
-// --- transforms ------------------------------------------------------------------
-
 F3 -> {f32:x  f32:y  f32:z}
-Xf -> {f32:m0 f32:m1 f32:m2 f32:m3 f32:m4 f32:m5 f32:m6 f32:m7 f32:m8  F3:t}
-IDENT -> Xf{1.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 1.0 F3{0.0 0.0 0.0}}
-
-// one of twelve axis-aligned rotations, from the seed; its translation t
+// struct Xf { float m[9]; F3 t; }
+Xf -> {Array{T <- f32  n <- 9}:m  F3:t}
+IDENT -> {m -> {1.0  0.0  0.0  0.0  1.0  0.0  0.0  0.0  1.0}  t -> {x -> 0.0  y -> 0.0  z -> 0.0}}
+// the matrix of one of twelve axis-aligned rotations, from the seed
 rotation -> {
   u64:seed -> 0
-  F3:t -> F3{0.0 0.0 0.0}
-  axis -> seed % 3
-  quarter -> (seed >> 8) % 4
-  f32:c -> quarter ? {
-    1 -> 0.0
-    2 -> 0.0 - 1.0
-    3 -> 0.0
-    -> 1.0
-  }
-  f32:s -> quarter ? {
-    1 -> 1.0
-    2 -> 0.0
-    3 -> 0.0 - 1.0
-    -> 0.0
-  }
-  -> axis ? {
-    0 -> Xf{1.0 0.0 0.0 0.0 c 0.0 - s 0.0 s c t}
-    1 -> Xf{c 0.0 s 0.0 1.0 0.0 0.0 - s 0.0 c t}
-    -> Xf{c 0.0 - s 0.0 s c 0.0 0.0 0.0 1.0 t}
-  }
+  -> {
+    axis -> seed % 3
+    quarter -> (seed >> 8) % 4
+    f32:c -> quarter ? {1 -> 0.0  2 -> -1.0  3 -> 0.0  -> 1.0}
+    f32:s -> quarter ? {1 -> 1.0  2 -> 0.0  3 -> -1.0  -> 0.0}
+    -> axis ? {
+      0 -> {1.0  0.0  0.0  0.0  c  (-s)  0.0  s  c}
+      1 -> {c  0.0  s  0.0  1.0  0.0  (-s)  0.0  c}
+      -> {c  (-s)  0.0  s  c  0.0  0.0  0.0  1.0}
+    }
+  }!
 }
-
-// world = parent ∘ local: a 3x3 product and a transformed translation
+// w = p ∘ l: for (i < 3) for (j < 3) { s = 0.0f; for (k < 3) s = s + p.m[i*3+k] * l.m[k*3+j]; w.m[i*3+j] = s; }
+// then w.t = p.m · l.t + p.t
 compose -> {
-  Xf:p -> IDENT
-  Xf:l -> IDENT
-  -> Xf{
-    p.m0 * l.m0 + p.m1 * l.m3 + p.m2 * l.m6  p.m0 * l.m1 + p.m1 * l.m4 + p.m2 * l.m7  p.m0 * l.m2 + p.m1 * l.m5 + p.m2 * l.m8
-    p.m3 * l.m0 + p.m4 * l.m3 + p.m5 * l.m6  p.m3 * l.m1 + p.m4 * l.m4 + p.m5 * l.m7  p.m3 * l.m2 + p.m4 * l.m5 + p.m5 * l.m8
-    p.m6 * l.m0 + p.m7 * l.m3 + p.m8 * l.m6  p.m6 * l.m1 + p.m7 * l.m4 + p.m8 * l.m7  p.m6 * l.m2 + p.m7 * l.m5 + p.m8 * l.m8
-    F3{p.m0 * l.t.x + p.m1 * l.t.y + p.m2 * l.t.z + p.t.x  p.m3 * l.t.x + p.m4 * l.t.y + p.m5 * l.t.z + p.t.y  p.m6 * l.t.x + p.m7 * l.t.y + p.m8 * l.t.z + p.t.z}
-  }
+  Xf:p -> ??
+  Xf:l -> ??
+  Xf:w -> ??
+  -> {
+    dot -> {
+      (0..2):i -> 0
+      (0..2):j -> 0
+      i64:k -> 0
+      f32:s -> 0.0
+      -> k ? {
+        >=3 -> s
+        -> dot{i -> i  j -> j  k -> k + 1  s -> s + p.m.#(i * 3 + k) * l.m.#(k * 3 + j)}!
+      }
+    }
+    cols -> {
+      Array{T <- f32  n <- 9}:m -> ??
+      (0..2):i -> 0
+      i64:j -> 0
+      -> j ? {
+        >=3 -> m
+        -> {
+          at -> i * 3 + j
+          -> cols{m -> m{#at -> dot{i -> i  j -> j}!}  i -> i  j -> j + 1}!
+        }!
+      }
+    }
+    rows -> {
+      Array{T <- f32  n <- 9}:m -> ??
+      i64:i -> 0
+      -> i ? {
+        >=3 -> m
+        -> rows{m -> cols{m -> m  i -> i}!  i -> i + 1}!
+      }
+    }
+    -> w{
+      m -> rows{m -> w.m}!
+      t -> w.t{
+        x -> p.m.#0 * l.t.x + p.m.#1 * l.t.y + p.m.#2 * l.t.z + p.t.x
+        y -> p.m.#3 * l.t.x + p.m.#4 * l.t.y + p.m.#5 * l.t.z + p.t.y
+        z -> p.m.#6 * l.t.x + p.m.#7 * l.t.y + p.m.#8 * l.t.z + p.t.z
+      }
+    }
+  }!
 }
-
-// --- the scene graph -------------------------------------------------------------
-
-// a node: its number in the pool, its local transform, its children
+// struct Node { int32_t id; Xf local, world; std::vector<std::unique_ptr<Node>> kids; }
 Node -> {
-  -> {i64:id  Xf:local  Array{Node}:kids}
+  -> {i32:id  Xf:local  Xf:world  Array{T <- Node}:kids}
 }
-// the nodes built, and the number of the next one
-Built -> {Array{Node}:nodes  i64:next}
-
-// the children i..n - 1 of a node at depth + 1 whose state is r, the first
-// numbered id: each the node of state xs(r + i), then its own children
+// r = xs_next(seed); nd->id = node_count++; the local transform; nd->world = IDENT;
+// if (depth == 0) return nd; n = 1 + xs_mod(r >> 40, MAXKIDS);
+// for (i = 0; i < n; i++) nd->kids.push_back(build(depth - 1, xs_next(r + i)));
 build -> {
   (0..16):depth -> 0
-  u64:r -> 0
-  (0..4):i -> 0
-  (0..4):n -> 1
-  i64:id -> 0
-  -> i ? {
-    >=n -> Built{{}  id}
-    -> {
-      s -> xs{x -> (r + i) [&] 0xffffffffffffffff}!
-      local -> rotation{seed -> s  t -> F3{real_of{k -> (s >> 16) % 9}!  real_of{k -> (s >> 24) % 9}!  real_of{k -> (s >> 32) % 9}!}}!
-      kids -> depth ? {
-        0 -> Built{{}  id + 1}
-        -> build{depth -> depth - 1  r -> s  i -> 0  n -> 1 + (s >> 40) % MAXKIDS  id -> id + 1}!
-      }
-      rest -> build{depth -> depth  r -> r  i -> i + 1  n -> n  id -> kids.next}!
-      -> Built{{{id -> id  local -> local  kids -> kids.nodes}  ...rest.nodes}  rest.next}
-    }!
-  }
-}
-
-// frame f: the nodes whose number is f % 7 modulo 7 moved to x = f % 5, z = 8 - x
-animate -> {
-  Array{Node}:nodes -> {}
-  (0..15):f -> 0
-  -> nodes ? {
-    {Node(h)  ...Array{Node}:(rest)} -> {
-      {
-        id -> h.id
-        local -> h.id % 7 = f % 7 ? {
-          true -> h.local{t -> F3{real_of{k -> f % 5}!  h.local.t.y  8.0 - real_of{k -> f % 5}!}}
-          -> h.local
-        }
-        kids -> animate{nodes -> h.kids  f -> f}!
-      }
-      ...animate{nodes -> rest  f -> f}!
+  u64:seed -> 0
+  i64:count -> 0
+  -> {
+    r -> xs{x -> seed}!
+    nd -> {
+      id -> count \ i32
+      local -> {m -> rotation{seed -> r}!  t -> {x -> ((r >> 16) % 9) \ f32  y -> ((r >> 24) % 9) \ f32  z -> ((r >> 32) % 9) \ f32}}
+      world -> IDENT
+      kids -> {}
     }
-    -> {}
-  }
+    children -> {
+      (1..16):depth -> 1
+      Node:nd -> ??
+      i64:n -> 0
+      i64:i -> 0
+      i64:count -> 0
+      -> i ? {
+        >=n -> {node -> nd  count -> count}
+        -> {
+          c -> build{depth -> depth - 1  seed -> xs{x -> (r + i) [&] 0xffffffffffffffff}!  count -> count}!
+          -> children{depth -> depth  nd -> nd{kids -> {...nd.kids  c.node}}  n -> n  i -> i + 1  count -> c.count}!
+        }!
+      }
+    }
+    -> depth ? {
+      0 -> {node -> nd  count -> count + 1}
+      -> children{depth -> depth  nd -> nd  n -> 1 + (r >> 40) % MAXKIDS  count -> count + 1}!
+    }
+  }!
 }
-
-// the world transforms down the nodes, under parent: the sum of the components of
-// their translations, each truncated to an integer
+// if (n->id % 7 == phase) { n->local.t.x = step; n->local.t.z = 8.0f - step; }
+// for (auto &k : n->kids) animate(k.get(), phase, step);
+animate -> {
+  Node:n -> ??
+  i64:phase -> 0
+  f32:step -> 0.0
+  -> {
+    moved -> (n.id % 7 = phase) ? {
+      true -> n{local -> n.local{t -> n.local.t{x -> step  z -> 8.0 - step}}}
+      -> n
+    }
+    each -> {
+      m <- 0..
+      Array{T <- Node  n <- m}:kids -> {}
+      i64:i -> 0
+      -> i ? {
+        >=m -> kids
+        -> each{kids -> kids{#i -> animate{n -> kids.#i  phase -> phase  step -> step}!}  i -> i + 1}!
+      }
+    }
+    -> moved{kids -> each{kids -> moved.kids}!}
+  }!
+}
+// compose(parent, n->local, n->world); for (auto &k : n->kids) update(k.get(), n->world);
 update -> {
-  Array{Node}:nodes -> {}
-  Xf:parent -> IDENT
-  -> nodes ? {
-    {Node(h)  ...Array{Node}:(rest)} -> {
-      w -> compose{p -> parent  l -> h.local}!
-      -> trunc{x -> w.t.x + w.t.y + w.t.z}! + update{nodes -> h.kids  parent -> w}! + update{nodes -> rest  parent -> parent}!
-    }!
-    -> 0
-  }
+  Node:n -> ??
+  Xf:parent -> ??
+  -> {
+    placed -> n{world -> compose{p -> parent  l -> n.local  w -> n.world}!}
+    each -> {
+      m <- 0..
+      Array{T <- Node  n <- m}:kids -> {}
+      i64:i -> 0
+      -> i ? {
+        >=m -> kids
+        -> each{kids -> kids{#i -> update{n -> kids.#i  parent -> placed.world}!}  i -> i + 1}!
+      }
+    }
+    -> placed{kids -> each{kids -> placed.kids}!}
+  }!
 }
-
-// the frames f..FRAMES - 1, each animating the nodes then updating them
+// t = (long long)(n->world.t.x + n->world.t.y + n->world.t.z); for (k : n->kids) t += gather(k.get());
+gather -> {
+  Node:n -> ??
+  -> {
+    each -> {
+      m <- 0..
+      Array{T <- Node  n <- m}:kids -> {}
+      i64:i -> 0
+      i64:t -> 0
+      -> i ? {
+        >=m -> t
+        -> each{kids -> kids  i -> i + 1  t -> t + gather{n -> kids.#i}!}!
+      }
+    }
+    -> each{kids -> n.kids  t -> (n.world.t.x + n.world.t.y + n.world.t.z) \ i64}!
+  }!
+}
+// for (f = 0; f < FRAMES; f++) { animate(root, f % 7, (float)(f % 5)); update(root, IDENT); total += gather(root); }
 frames -> {
-  (0..16):f -> 0
-  Array{Node}:nodes -> {}
+  Node:root -> ??
+  i64:f -> 0
   i64:total -> 0
   -> f ? {
     >=FRAMES -> total
     -> {
-      moved -> animate{nodes -> nodes  f -> f}!
-      -> frames{f -> f + 1  nodes -> moved  total -> total + update{nodes -> moved}!}!
+      moved -> animate{n -> root  phase -> f % 7  step -> (f % 5) \ f32}!
+      placed -> update{n -> moved  parent -> IDENT}!
+      -> frames{root -> placed  f -> f + 1  total -> total + gather{n -> placed}!}!
     }!
   }
 }
-
 -> {
   (0..16):depth -> ??
-  root -> build{depth -> depth  r -> 12345  i -> 0  n -> 1  id -> 0}!
-  a -> io.printf{format -> "%lld\n"  n -> root.next}!
-  -> io.printf{format -> "%lld\n"  n -> frames{nodes -> root.nodes}!}!
+  built -> build{depth -> depth  seed -> 12345}!
+  total -> frames{root -> built.node}!
+  a -> io.printf{format -> "%lld\n"  n -> built.count}!
+  -> io.printf{format -> "%lld\n"  n -> total}!
 }!

@@ -1,17 +1,17 @@
-// blur (Goose bench/goose/blur.goose): a WxW u8 image from xorshift64 (xs_mod(r,
-// 256) per pixel), then 16 passes of a 3x3 Gaussian blur, [1 2 1] x [1 2 1] >> 4,
-// ping-ponged between two buffers: each pass writes the inner pixels of dst, read
-// at y * W + x, and leaves its border as it is (zeros in b, the image in a).
-// Prints W and the sum of the image.
+// blur: Goose bench/cpp/blur.cpp (the C++ the harness compares Goose with), in plain
+// Syntact. A WxW 8-bit image from xorshift64 and a second buffer of zeros, then 16
+// passes of a 3x3 Gaussian blur ping-ponged between them; the border pixels are
+// never written. Prints W and the sum of the image.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
+// an array that captures its length in a hole
 Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
+  T <- {}
+  n <- 0..
+  -> {...({T:} * n):}
 }
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
@@ -19,83 +19,78 @@ xs -> {
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
 PASSES -> 16
-blur -> {
-  (1..65535):w -> ??
-  // a buffer: w * w pixels
-  Img -> {...({u8:} * (w * w)):}
-  // n pixels, each from the next state of the chain; n zeros
-  image -> {
-    u32:n -> ??
-    u32:i -> 0
-    u64:r -> 12345
-    -> i ? {
-      >=n -> {}
-      -> {
-        s -> xs{x -> r}!
-        -> {s % 256  ...image{n -> n  i -> i + 1  r -> s}!}
-      }!
-    }
+// for (i = 0; i < W * W; i++) { r = xs_next(r); a.push_back(xs_mod(r, 256)); b.push_back(0); }
+init -> {
+  i64:w -> 0
+  i64:i -> 0
+  u64:r -> 12345
+  Array{T <- u8}:a -> {}
+  Array{T <- u8}:b -> {}
+  -> i ? {
+    >=(w * w) -> {a -> a  b -> b}
+    -> {
+      s -> xs{x -> r}!
+      -> init{w -> w  i -> i + 1  r -> s  a -> {...a  s % 256}  b -> {...b  0}}!
+    }!
   }
-  zeros -> {
-    u32:n -> ??
-    u32:i -> 0
-    -> i ? {
-      >=n -> {}
-      -> {0  ...zeros{n -> n  i -> i + 1}!}
-    }
-  }
-  // the row y of dst from the column x on: each inner pixel the stencil of src
-  // around it
-  row -> {
-    Img:src -> zeros{n -> w * w}!
-    Img:dst -> zeros{n -> w * w}!
-    u32:y -> 1
-    u32:x -> 1
-    -> x ? {
-      >=(w - 1) -> dst
-      -> {
-        i -> y * w + x
-        s -> src.#(i - w - 1) + src.#(i - w) * 2 + src.#(i - w + 1)
-           + src.#(i - 1) * 2 + src.#i * 4 + src.#(i + 1) * 2
-           + src.#(i + w - 1) + src.#(i + w) * 2 + src.#(i + w + 1)
-        -> row{src -> src  dst -> dst{#i -> s >> 4}  y -> y  x -> x + 1}!
-      }!
-    }
-  }
-  // one pass: the rows of dst from y on
-  pass -> {
-    Img:src -> zeros{n -> w * w}!
-    Img:dst -> zeros{n -> w * w}!
-    u32:y -> 1
-    -> y ? {
-      >=(w - 1) -> dst
-      -> pass{src -> src  dst -> row{src -> src  dst -> dst  y -> y}!  y -> y + 1}!
-    }
-  }
-  // p more pairs of passes, a into b then b into a
-  passes -> {
-    Img:a -> zeros{n -> w * w}!
-    Img:b -> zeros{n -> w * w}!
-    u8:p -> PASSES / 2
-    -> p ? {
-      0 -> a
-      -> {
-        b2 -> pass{src -> a  dst -> b}!
-        -> passes{a -> pass{src -> b2  dst -> a}!  b -> b2  p -> p - 1}!
-      }!
-    }
-  }
-  total -> {
-    Array{u8}:px -> {}
-    i64:acc -> 0
-    -> px ? {
-      {u8(h)  ...Array{u8}:(t)} -> total{px -> t  acc -> acc + h}!
-      -> acc
-    }
-  }
-  Img:a -> image{n -> w * w}!
-  Img:b -> zeros{n -> w * w}!
-  c -> io.printf{format -> "%lld\n"  n -> w}!
-  -> io.printf{format -> "%lld\n"  n -> total{px -> passes{a -> a  b -> b}!}!}!
 }
--> blur{w -> ??::(1..65535)}!
+// for (x = 1; x < W - 1; x++) { i = y * W + x; s = the stencil of src at i; dst[i] = s >> 4; }
+row -> {
+  i64:w -> 0
+  Array{T <- u8  n <- w * w}:src -> {}
+  Array{T <- u8  n <- w * w}:dst -> {}
+  i64:y -> 1
+  i64:x -> 1
+  -> x ? {
+    >=(w - 1) -> dst
+    -> {
+      i -> y * w + x
+      s -> src.#(i - w - 1) + src.#(i - w) * 2 + src.#(i - w + 1)
+         + src.#(i - 1) * 2 + src.#i * 4 + src.#(i + 1) * 2
+         + src.#(i + w - 1) + src.#(i + w) * 2 + src.#(i + w + 1)
+      -> row{w -> w  src -> src  dst -> dst{#i -> s >> 4}  y -> y  x -> x + 1}!
+    }!
+  }
+}
+// for (y = 1; y < W - 1; y++) the row y
+blur -> {
+  i64:w -> 0
+  Array{T <- u8  n <- w * w}:src -> {}
+  Array{T <- u8  n <- w * w}:dst -> {}
+  i64:y -> 1
+  -> y ? {
+    >=(w - 1) -> dst
+    -> blur{w -> w  src -> src  dst -> row{w -> w  src -> src  dst -> dst  y -> y}!  y -> y + 1}!
+  }
+}
+// for (p = 0; p < PASSES / 2; p++) { blur(a, b); blur(b, a); }
+passes -> {
+  i64:w -> 0
+  Array{T <- u8  n <- w * w}:a -> {}
+  Array{T <- u8  n <- w * w}:b -> {}
+  i64:p -> 0
+  -> p ? {
+    >=(PASSES / 2) -> a
+    -> {
+      b1 -> blur{w -> w  src -> a  dst -> b}!
+      a1 -> blur{w -> w  src -> b1  dst -> a}!
+      -> passes{w -> w  a -> a1  b -> b1  p -> p + 1}!
+    }!
+  }
+}
+// for (v : a) total += v
+total -> {
+  Array{T <- u8}:a -> {}
+  i64:total -> 0
+  -> a ? {
+    {u8(v)  ...Array{T <- u8}:(rest)} -> total{a -> rest  total -> total + v}!
+    -> total
+  }
+}
+-> {
+  u16:w -> ??
+  bufs -> init{w -> w}!
+  a -> passes{w -> w  a -> bufs.a  b -> bufs.b}!
+  c -> io.printf{format -> "%lld\n"  n -> w}!
+  -> io.printf{format -> "%lld\n"  n -> total{a -> a}!}!
+}!

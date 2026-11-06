@@ -1,216 +1,207 @@
-// respond (Goose bench/goose/respond.goose): a web service's hot loop. For each of
-// N requests, build the typed response -- an id, a user name, a list of line items
-// each with a sku, a qty and a price -- render it as JSON into an output buffer of
-// bytes, and hash the buffer with FNV-1a. Prints N, the bytes rendered and the
-// hash, h ^ (fnv * 31 + i) over the requests.
+// respond: Goose bench/cpp/respond.cpp (the C++ the harness compares Goose with,
+// VARIANT 0: the response object, then std::string rendering), in plain Syntact.
+// For each of N requests, build the response -- an id, a user name, a list of line
+// items each with a sku, a qty and a price -- render it as JSON, and hash it with
+// FNV-1a. Prints N, the bytes rendered and the hash, h ^ (fnv * 31 + i) over the
+// requests. A string is an array of bytes; literals are written by their codes.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
+  printu -> <printf>{string:format, u64:n, -> !?::i32}
 }
-// the hash is a u64 and printed as one
-iou -> <libc.so.6>{
-  printf -> {string:format, u64:n, -> !?::i32}
-}
+// an array that captures its length in a hole
 Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
+  T <- {}
+  n <- 0..
+  -> {...({T:} * n):}
 }
-A -> Array{u8}
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+// v.size(): the length the array captures
+len -> {
+  T <- {}
+  n <- 0..
+  Array{T <- T  n <- n}:xs -> {}
+  -> n
+}
+// std::string
+String -> Array{T <- u8}
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-Item -> {A:sku  (1..5):qty  (100..99999):price}
-Resp -> {u32:id  A:user  Array{Item}:items}
-
-// --- the response ------------------------------------------------------------
-
-// the letters of a user name: n of them, each from the next state of the chain;
-// when odd, the second one is a quote or a backslash, so the escaping is real
-letters -> {
-  u64:r -> ??
-  u8:n -> 0
-  u8:i -> 0
-  bool:odd -> false
-  -> i ? {
-    >=n -> {}
-    -> {
-      r1 -> xs{x -> r}!
-      c -> (odd [&] (i = 1)) ? {
-        true -> r1 % 2 ? {0 -> 34  -> 92}
-        -> 97 + r1 % 26
-      }
-      -> {c  ...letters{r -> r1  n -> n  i -> i + 1  odd -> odd}!}
-    }!
-  }
-}
-// a user name of 3..10 letters; one in eight carries a quote or a backslash
-name_of -> {
-  u64:seed -> ??
-  r -> xs{x -> seed}!
-  -> letters{r -> r  n -> 3 + r % 8  odd -> (r >> 8) % 8 = 0}!
-}
-// the n digits of a sku, each from the next state of the chain
-digits -> {
-  u64:r -> ??
-  u8:n -> 0
-  -> n ? {
-    0 -> {}
-    -> {
-      r1 -> xs{x -> r}!
-      -> {48 + r1 % 10  ...digits{r -> r1  n -> n - 1}!}
-    }!
-  }
-}
-// a stock keeping unit: two capital letters and four digits
-sku_of -> {
-  u64:seed -> ??
-  r -> xs{x -> seed}!
-  -> {65 + r % 26  65 + (r >> 8) % 26  ...digits{r -> r  n -> 4}!}
-}
-// the n line items, each from the next state of the chain
-make_items -> {
-  u64:r -> ??
-  u8:n -> 0
-  -> n ? {
-    0 -> {}
-    -> {
-      r1 -> xs{x -> r}!
-      -> {
-        Item{sku -> sku_of{seed -> r1}!  qty -> 1 + (r1 >> 8) % 5  price -> 100 + (r1 >> 16) % 99900}
-        ...make_items{r -> r1  n -> n - 1}!
-      }
-    }!
-  }
-}
-
-// --- rendering ---------------------------------------------------------------
-// The buffer out is carried through every emitter, which gives it back extended.
-// Bytes are written by their codes: there is no operator from a character to an
-// integer (specs/language/02).
-
-// the decimal digits of v, lowest first, each put before those already read:
-// tmp holds them in the order they are written
-digits_of -> {
-  i64:v -> 0
-  A:tmp -> {}
-  -> v ? {
-    0 -> tmp
-    -> digits_of{v -> v / 10  tmp -> {48 + v % 10  ...tmp}}!
-  }
-}
-// the decimal text of v, after out
-emit_int -> {
-  A:out -> {}
-  i64:v -> 0
-  -> v ? {
-    0 -> {...out  48}
-    -> {...out  ...digits_of{v -> v}!}
-  }
-}
-// the bytes of s, a backslash before each quote and backslash
-escape -> {
-  A:out -> {}
-  A:s -> {}
-  -> s ? {
-    {34  ...A:(t)} -> escape{out -> {...out  92 34}  s -> t}!
-    {92  ...A:(t)} -> escape{out -> {...out  92 92}  s -> t}!
-    {u8(c)  ...A:(t)} -> escape{out -> {...out  c}  s -> t}!
-    -> out
-  }
-}
-// s quoted, after out
-emit_str -> {
-  A:out -> {}
-  A:s -> {}
-  -> {...escape{out -> {...out  34}  s -> s}!  34}
-}
-// the buffer after the items, and the total of qty * price they add up
-Rendered -> {A:out  int:total}
-emit_items -> {
-  A:out -> {}
-  Array{Item}:items -> {}
-  bool:first -> true
-  int:total -> 0
-  -> items ? {
-    {Item(it)  ...Array{Item}:(t)} -> {
-      sep -> first ? {true -> out  -> {...out  44}}
-      // {"sku":
-      o1 -> emit_str{out -> {...sep  123 34 115 107 117 34 58}  s -> it.sku}!
-      // ,"qty":
-      o2 -> emit_int{out -> {...o1  44 34 113 116 121 34 58}  v -> it.qty}!
-      // ,"price":
-      o3 -> emit_int{out -> {...o2  44 34 112 114 105 99 101 34 58}  v -> it.price}!
-      -> emit_items{out -> {...o3  125}  items -> t  first -> false  total -> total + it.qty * it.price}!
-    }!
-    -> Rendered{out -> out  total -> total}
-  }
-}
-render -> {
-  Resp:r -> Resp
-  // {"id":
-  o1 -> emit_int{out -> {123 34 105 100 34 58}  v -> r.id}!
-  // ,"user":
-  o2 -> emit_str{out -> {...o1  44 34 117 115 101 114 34 58}  s -> r.user}!
-  // ,"items":[
-  its -> emit_items{out -> {...o2  44 34 105 116 101 109 115 34 58 91}  items -> r.items}!
-  // ],"total":
-  o3 -> emit_int{out -> {...its.out  93 44 34 116 111 116 97 108 34 58}  v -> its.total}!
-  -> {...o3  125}
-}
-
-// FNV-1a over the bytes, the checksum every row of the benchmark computes
+// h = 0xcbf29ce484222325; for (c : s) h = (h ^ c) * 0x100000001b3;
 fnv -> {
-  A:s -> {}
+  String:s -> {}
   u64:h -> 0xcbf29ce484222325
   -> s ? {
-    {u8(b)  ...A:(t)} -> fnv{s -> t  h -> ((h ^ b) * 0x100000001b3) [&] 0xffffffffffffffff}!
+    {u8(c)  ...String:(rest)} -> fnv{s -> rest  h -> ((h ^ c) * 0x100000001b3) [&] 0xffffffffffffffff}!
     -> h
   }
 }
-size -> {
-  A:s -> {}
-  -> s ? {
-    {u8(b)  ...A:(t)} -> 1 + size{s -> t}!
-    -> 0
+// struct Item { std::string sku; int qty, price; }; struct Resp { int64_t id; std::string user; std::vector<Item> items; }
+Item -> {String:sku  i32:qty  i32:price}
+Resp -> {i64:id  String:user  Array{T <- Item}:items}
+// r = xs_next(seed); n = 3 + xs_mod(r, 8); odd = xs_mod(r >> 8, 8) == 0;
+// for (i = 0; i < n; i++) { r = xs_next(r); if (odd && i == 1) s.push_back(xs_mod(r, 2) == 0 ? '"' : '\\'); else s.push_back('a' + xs_mod(r, 26)); }
+name_of -> {
+  u64:seed -> 0
+  -> {
+    r -> xs{x -> seed}!
+    letters -> {
+      u64:r -> 0
+      i64:n -> 0
+      bool:odd -> false
+      i64:i -> 0
+      String:s -> {}
+      -> i ? {
+        >=n -> s
+        -> {
+          r1 -> xs{x -> r}!
+          c -> (odd [&] (i = 1)) ? {
+            true -> (r1 % 2) ? {0 -> 34  -> 92}
+            -> 97 + r1 % 26
+          }
+          -> letters{r -> r1  n -> n  odd -> odd  i -> i + 1  s -> {...s  c}}!
+        }!
+      }
+    }
+    -> letters{r -> r  n -> 3 + r % 8  odd -> (r >> 8) % 8 = 0}!
+  }!
+}
+// r = xs_next(seed); s.push_back('A' + xs_mod(r, 26)); s.push_back('A' + xs_mod(r >> 8, 26));
+// for (i = 0; i < 4; i++) { r = xs_next(r); s.push_back('0' + xs_mod(r, 10)); }
+sku_of -> {
+  u64:seed -> 0
+  -> {
+    r -> xs{x -> seed}!
+    digits -> {
+      u64:r -> 0
+      i64:i -> 0
+      String:s -> {}
+      -> i ? {
+        >=4 -> s
+        -> {
+          r1 -> xs{x -> r}!
+          -> digits{r -> r1  i -> i + 1  s -> {...s  48 + r1 % 10}}!
+        }!
+      }
+    }
+    -> digits{r -> r  s -> {65 + r % 26  65 + (r >> 8) % 26}}!
+  }!
+}
+// for (i = 0; i < n; i++) { r = xs_next(r); t.push_back(Item { sku_of(r), 1 + xs_mod(r >> 8, 5), 100 + xs_mod(r >> 16, 99900) }); }
+make_items -> {
+  u64:r -> 0
+  i64:n -> 0
+  i64:i -> 0
+  Array{T <- Item}:t -> {}
+  -> i ? {
+    >=n -> t
+    -> {
+      r1 -> xs{x -> r}!
+      -> make_items{r -> r1  n -> n  i -> i + 1  t -> {...t  {sku -> sku_of{seed -> r1}!  qty -> 1 + (r1 >> 8) % 5  price -> 100 + (r1 >> 16) % 99900}}}!
+    }!
   }
 }
-
-// --- the service -------------------------------------------------------------
-
-// one request: the response object and its rendering
-Handled -> {u64:hash  i64:len}
+// std::to_string: the decimal digits of v >= 0, the highest first
+decimal -> {
+  (0..9223372036854775808):v -> 0
+  -> v ? {
+    <10 -> {48 + v}
+    -> {...decimal{v -> v / 10}!  48 + v % 10}
+  }
+}
+to_string -> {
+  i64:v -> 0
+  -> v ? {
+    <0 -> {45  ...decimal{v -> -v}!}
+    -> decimal{v -> v}!
+  }
+}
+// out.push_back('"'); for (c : s) { if (c == '"' || c == '\\') out.push_back('\\'); out.push_back(c); } out.push_back('"');
+emit_str -> {
+  String:out -> {}
+  String:s -> {}
+  -> {
+    chars -> {
+      String:out -> {}
+      String:s -> {}
+      -> s ? {
+        {u8(c)  ...String:(rest)} -> chars{
+          out -> ((c = 34) [|] (c = 92)) ? {
+            true -> {...out  92  c}
+            -> {...out  c}
+          }
+          s -> rest
+        }!
+        -> out
+      }
+    }
+    -> {...chars{out -> {...out  34}  s -> s}!  34}
+  }!
+}
+// for (it : resp.items) { if (!first) out.push_back(','); first = false; out += "{\"sku\":"; emit_str(out, it.sku);
+//   out += ",\"qty\":"; out += std::to_string(it.qty); out += ",\"price\":"; out += std::to_string(it.price);
+//   out.push_back('}'); total += it.qty * it.price; }
+emit_items -> {
+  String:out -> {}
+  Array{T <- Item}:items -> {}
+  bool:first -> true
+  i64:total -> 0
+  -> items ? {
+    {Item(it)  ...Array{T <- Item}:(rest)} -> {
+      o0 -> first ? {true -> out  -> {...out  44}}
+      // {"sku":
+      o1 -> emit_str{out -> {...o0  123  34  115  107  117  34  58}  s -> it.sku}!
+      // ,"qty":
+      o2 -> {...o1  44  34  113  116  121  34  58  ...to_string{v -> it.qty}!}
+      // ,"price":
+      o3 -> {...o2  44  34  112  114  105  99  101  34  58  ...to_string{v -> it.price}!}
+      -> emit_items{out -> {...o3  125}  items -> rest  first -> false  total -> total + it.qty * it.price}!
+    }!
+    -> {out -> out  total -> total}
+  }
+}
+render -> {
+  Resp:resp -> ??
+  -> {
+    // {"id":
+    o1 -> {123  34  105  100  34  58  ...to_string{v -> resp.id}!}
+    // ,"user":
+    o2 -> emit_str{out -> {...o1  44  34  117  115  101  114  34  58}  s -> resp.user}!
+    // ,"items":[
+    its -> emit_items{out -> {...o2  44  34  105  116  101  109  115  34  58  91}  items -> resp.items}!
+    // ],"total":
+    o3 -> {...its.out  93  44  34  116  111  116  97  108  34  58  ...to_string{v -> its.total}!}
+    -> {...o3  125}
+  }!
+}
+// r = xs_next(seed); n = 1 + xs_mod(r, 8); Resp resp { xs_mod(r >> 4, 1000000), name_of(r >> 8), make_items(r >> 16, n) };
+// out = render(resp); len = out.size(); return fnv(out);
 handle -> {
-  u64:seed -> ??
-  r -> xs{x -> seed}!
-  resp -> Resp{
-    id -> (r >> 4) % 1000000
-    user -> name_of{seed -> r >> 8}!
-    items -> make_items{r -> r >> 16  n -> 1 + r % 8}!
-  }
-  out -> render{r -> resp}!
-  -> Handled{hash -> fnv{s -> out}!  len -> size{s -> out}!}
+  u64:seed -> 0
+  -> {
+    r -> xs{x -> seed}!
+    n -> 1 + r % 8
+    resp -> {id -> (r >> 4) % 1000000  user -> name_of{seed -> r >> 8}!  items -> make_items{r -> r >> 16  n -> n}!}
+    out -> render{resp -> resp}!
+    -> {hash -> fnv{s -> out}!  len -> len{xs -> out}!}
+  }!
 }
-Served -> {u64:h  i64:bytes}
+// for (i = 0; i < BENCH_N; i++) { seed = xs_next(seed); hh = handle(seed, l); h = h ^ (hh * 31 + i); bytes += l; }
 serve -> {
   u32:n -> ??
-  u32:i -> 0
+  i64:i -> 0
   u64:seed -> 12345
   u64:h -> 0
   i64:bytes -> 0
   -> i ? {
-    >=n -> Served{h -> h  bytes -> bytes}
+    >=n -> {h -> h  bytes -> bytes}
     -> {
       s -> xs{x -> seed}!
       d -> handle{seed -> s}!
-      -> serve{
-        n -> n  i -> i + 1  seed -> s
-        h -> h ^ ((d.hash * 31 + i) [&] 0xffffffffffffffff)
-        bytes -> bytes + d.len
-      }!
+      -> serve{n -> n  i -> i + 1  seed -> s  h -> h ^ ((d.hash * 31 + i) [&] 0xffffffffffffffff)  bytes -> bytes + d.len}!
     }!
   }
 }
@@ -219,5 +210,5 @@ serve -> {
   s -> serve{n -> n}!
   a -> io.printf{format -> "%lld\n"  n -> n}!
   b -> io.printf{format -> "%lld\n"  n -> s.bytes}!
-  -> iou.printf{format -> "%llu\n"  n -> s.h}!
+  -> io.printu{format -> "%llu\n"  n -> s.h}!
 }!

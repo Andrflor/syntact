@@ -1,24 +1,30 @@
-// calc (Goose bench/goose/calc.goose): N arithmetic expressions of depth 3..6 are
-// generated as text, one in four damaged -- a paren dropped, a stray character, a
-// truncated text, a division by zero --, each parsed by recursive descent into its
-// own tree and evaluated in u64. An error stops its input from deep inside the
-// recursion and is counted by kind. Prints the characters read, the nodes built
-// (bad inputs included), the inputs that evaluate, the count of each error and the
-// checksum of the values.
+// calc: Goose bench/cpp/calc.cpp (the C++ the harness compares Goose with, VARIANT
+// 0: unique_ptr trees, errors thrown), in plain Syntact. N arithmetic expressions of
+// depth 3..6 generated as text, one in four damaged -- a paren dropped, a stray
+// character, a truncated text, a division by zero --, each parsed by recursive
+// descent into its own tree and evaluated in u64. A thrown error is a result that
+// each caller passes up. Prints the characters read, the nodes built (bad inputs
+// included), the inputs that evaluate, the count of each error and the checksum.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
+  printu -> <printf>{string:format, u64:n, -> !?::i32}
 }
-// the checksum is a u64 and printed as one
-iou -> <libc.so.6>{
-  printf -> {string:format, u64:n, -> !?::i32}
-}
+// an array that captures its length in a hole
 Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
+  T <- {}
+  n <- 0..
+  -> {...({T:} * n):}
 }
-A -> Array{u8}
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+// v.size(): the length the array captures
+len -> {
+  T <- {}
+  n <- 0..
+  Array{T <- T  n <- n}:xs -> {}
+  -> n
+}
+// std::string
+String -> Array{T <- u8}
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
@@ -32,273 +38,301 @@ E_TOKEN -> 3
 E_DIV0 -> 4
 Error -> 1..4
 
-// --- generation --------------------------------------------------------------
-// The text is carried through the generator, which gives it back extended with
-// the state of the chain. Bytes are written by their codes: there is no operator
-// from a character to an integer (specs/language/02).
+// --- the text --------------------------------------------------------------------
 
-// v in 1..99, after text
+// if (v >= 10) text.push_back('0' + v / 10); text.push_back('0' + v % 10);
 emit_num -> {
-  A:text -> {}
-  (1..99):v -> 1
-  -> v ? {
-    >=10 -> {...text  48 + v / 10  48 + v % 10}
-    -> {...text  48 + v}
-  }
+  String:text -> {}
+  i64:v -> 0
+  -> {
+    t1 -> v ? {
+      >=10 -> {...text  48 + v / 10}
+      -> text
+    }
+    -> {...t1  48 + v % 10}
+  }!
 }
-// the byte of an operator: + - * /
-opchar -> {
-  (0..3):op
-  -> op ? {0 -> 43  1 -> 45  2 -> 42  -> 47}
-}
-Gen -> {A:text  u64:r}
-// an expression of at most the given depth after text, with the state of the
-// chain after it
+// r = xs_next(seed); k = xs_mod(r, 8);
+// if (depth == 0 || k == 0) { emit_num(1 + xs_mod(r >> 8, 99)); return r; }
+// if (k == 1) { text.push_back('-'); return gen(depth - 1, r); }
+// if (k == 2) { text.push_back('('); r = gen(depth - 1, r); text.push_back(')'); return r; }
+// r = gen(depth - 1, r); op = xs_mod(r >> 16, 4); text += " op "; return gen(depth - 1, xs_next(r));
 gen -> {
-  A:text -> {}
   (0..6):depth -> 0
   u64:seed -> 0
+  String:text -> {}
   -> {
     r -> xs{x -> seed}!
     k -> r % 8
-    num -> Gen{emit_num{text -> text  v -> 1 + (r >> 8) % 99}!  r}
-    -> depth ? {
-      0 -> num
+    -> ((depth = 0) [|] (k = 0)) ? {
+      true -> {r -> r  text -> emit_num{text -> text  v -> 1 + (r >> 8) % 99}!}
       -> k ? {
-        0 -> num
-        1 -> gen{text -> {...text  45}  depth -> depth - 1  seed -> r}!
+        1 -> gen{depth -> depth - 1  seed -> r  text -> {...text  45}}!
         2 -> {
-          g -> gen{text -> {...text  40}  depth -> depth - 1  seed -> r}!
-          -> Gen{{...g.text  41}  g.r}
+          g -> gen{depth -> depth - 1  seed -> r  text -> {...text  40}}!
+          -> {r -> g.r  text -> {...g.text  41}}
         }!
         -> {
-          l -> gen{text -> text  depth -> depth - 1  seed -> r}!
-          op -> opchar{op -> (l.r >> 16) % 4}!
-          -> gen{text -> {...l.text  32 op 32}  depth -> depth - 1  seed -> xs{x -> l.r}!}!
+          g -> gen{depth -> depth - 1  seed -> r  text -> text}!
+          op -> (g.r >> 16) % 4
+          c -> op ? {0 -> 43  1 -> 45  2 -> 42  -> 47}
+          -> gen{depth -> depth - 1  seed -> xs{x -> g.r}!  text -> {...g.text  32  c  32}}!
         }!
       }
     }
   }!
 }
-
-size -> {
-  A:s -> {}
-  -> s ? {
-    {u8(b)  ...A:(t)} -> 1 + size{s -> t}!
-    -> 0
-  }
-}
-// t with its last ')' made a space, and whether there was one
-Unparen -> {bool:found  A:text}
-unparen -> {
-  A:t -> {}
-  -> t ? {
-    {u8(c)  ...A:(rest)} -> {
-      u -> unparen{t -> rest}!
-      -> u.found ? {
-        true -> Unparen{true  {c  ...u.text}}
-        -> c ? {
-          41 -> Unparen{true  {32  ...rest}}
-          -> Unparen{false  t}
-        }
-      }
-    }!
-    -> Unparen{false  {}}
-  }
-}
-// t with its byte at place k made b
-set -> {
-  A:t -> {}
-  u64:k -> 0
-  u8:b -> 0
-  -> t ? {
-    {u8(c)  ...A:(rest)} -> k ? {
-      0 -> {b  ...rest}
-      -> {c  ...set{t -> rest  k -> k - 1  b -> b}!}
-    }
-    -> {}
-  }
-}
-// the first n bytes of t
+// text.resize(text.size() / 2): the bytes of text up to e
 prefix -> {
-  A:t -> {}
-  u64:n -> 0
-  -> n ? {
-    0 -> {}
-    -> t ? {
-      {u8(c)  ...A:(rest)} -> {c  ...prefix{t -> rest  n -> n - 1}!}
-      -> {}
-    }
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:k -> 0
+  (0..tl):e -> 0
+  String:w -> {}
+  -> k ? {
+    >=e -> w
+    -> prefix{text -> text  k -> k + 1  e -> e  w -> {...w  text.#k}}!
   }
 }
-// one in four inputs is damaged after generation
+// kind = xs_mod(seed, 16);
+// 0: the last ')' becomes ' ', or text[0] = '#' when there is none; 1: text[xs_mod(seed >> 8, size)] = '#';
+// 2: text.resize(size / 2); 3: text += " / 0";
 corrupt -> {
-  A:text -> {}
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
   u64:seed -> 0
-  -> seed % 16 ? {
-    0 -> {
-      u -> unparen{t -> text}!
-      -> u.found ? {
-        true -> u.text
-        -> set{t -> text  k -> 0  b -> 35}!
+  -> {
+    // while (i > 0) { i--; if (text[i] == ')') { text[i] = ' '; return; } } text[0] = '#';
+    last_paren -> {
+      (0..tl):i -> 0
+      -> i ? {
+        >0 -> text.#(i - 1) ? {
+          41 -> text{#(i - 1) -> 32}
+          -> last_paren{i -> i - 1}!
+        }
+        -> text{#0 -> 35}
       }
-    }!
-    1 -> set{t -> text  k -> (seed >> 8) % size{s -> text}!  b -> 35}!
-    2 -> prefix{t -> text  n -> size{s -> text}! / 2}!
-    // " / 0"
-    3 -> {...text  32 47 32 48}
-    -> text
-  }
+    }
+    -> (seed % 16) ? {
+      0 -> last_paren{i -> tl}!
+      1 -> {
+        at -> (seed >> 8) % tl
+        -> text{#at -> 35}
+      }!
+      2 -> prefix{text -> text  e -> tl / 2}!
+      // " / 0"
+      3 -> {...text  32  47  32  48}
+      -> text
+    }
+  }!
 }
 
-// --- the tree ----------------------------------------------------------------
+// --- the parse -------------------------------------------------------------------
 
+// Num { v }, Neg { l }, Paren { l }, Bin { op, l, r }
 Expr -> {
-  -> {u64:v}
+  -> {i64:v}
   -> {Expr:neg}
   -> {Expr:paren}
   -> {u8:op  Expr:l  Expr:r}
 }
-
-// --- parsing -----------------------------------------------------------------
-// The cursor is the text from it on. Every node built is counted, on the inputs
-// that fail too.
-
-skip -> {
-  A:t -> {}
-  -> t ? {
-    {32  ...A:(rest)} -> skip{t -> rest}!
-    -> t
-  }
-}
-// a number read from the front of t, after the digits v read so far
-Number -> {u64:v  A:rest}
-number -> {
-  A:t -> {}
-  u64:v -> 0
-  -> t ? {
-    {(48..57):(c)  ...A:(rest)} -> number{t -> rest  v -> (v * 10 + (c - 48)) [&] M}!
-    -> Number{v -> v  rest -> t}
-  }
-}
-// an expression read from t, or the error that stops the input, with the nodes
-// built so far
+// an expression parsed and the position after it, or the error thrown; with the nodes built
 Parsed -> {
-  -> {Expr:e  A:rest  i64:nodes}
+  -> {Expr:node  u64:pos  i64:nodes}
   -> {Error:err  i64:nodes}
 }
-// the operator of a level at the front of t, or 0: + - for expressions (0),
-// * / for terms (1)
-binop -> {
-  (0..1):level
-  A:t -> {}
-  -> t ? {
-    {u8(c)  ...A:} -> level ? {
-      0 -> c ? {43 -> 43  45 -> 45  -> 0}
-      -> c ? {42 -> 42  47 -> 47  -> 0}
+// while (pos < text.size() && text[pos] == ' ') pos++;
+skip -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:pos -> 0
+  -> pos ? {
+    >=tl -> pos
+    -> text.#pos ? {
+      32 -> skip{text -> text  pos -> pos + 1}!
+      -> pos
     }
-    -> 0
   }
 }
-// The recursive descent: level 0 is parse_expr, 1 parse_term, 2 parse_factor.
-// With more, the loop of an expression or a term goes on after lhs.
-parse -> {
-  A:t -> {}
-  (0..2):level -> 0
+// while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9') { v = v * 10 + (text[pos] - '0'); pos++; }
+number -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:pos -> 0
+  i64:v -> 0
+  -> pos ? {
+    >=tl -> {pos -> pos  v -> v}
+    -> {
+      d -> text.#pos
+      -> ((d >= 48) [&] (d <= 57)) ? {
+        true -> number{text -> text  pos -> pos + 1  v -> v * 10 + (d - 48)}!
+        -> {pos -> pos  v -> v}
+      }
+    }!
+  }
+}
+// parse_expr, parse_term and parse_factor call each other: a name is read only above
+// its use, so the two others are written inside parse_expr, over its text
+parse_expr -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:pos -> 0
   i64:nodes -> 0
-  bool:more -> false
-  Expr:lhs -> {v -> 0}
-  -> level ? {
-    2 -> skip{t -> t}! ? {
-      {(48..57):  ...A:} -> {
-        num -> number{t -> skip{t -> t}!}!
-        -> {e -> {v -> num.v}  rest -> num.rest  nodes -> nodes + 1}
-      }!
-      {45  ...A:(rest)} -> {
-        Parsed:f -> parse{t -> rest  level -> 2  nodes -> nodes}!
-        -> f ? {
-          {Expr:e  A:rest  i64:nodes} -> {e -> {neg -> e}  rest -> rest  nodes -> nodes + 1}
-          -> f
-        }
-      }!
-      {40  ...A:(rest)} -> {
-        Parsed:x -> parse{t -> rest  level -> 0  nodes -> nodes}!
-        -> x ? {
-          {Expr:e  A:rest  i64:nodes} -> skip{t -> rest}! ? {
-            {41  ...A:(after)} -> {e -> {paren -> e}  rest -> after  nodes -> nodes + 1}
-            -> {err -> E_PAREN  nodes -> nodes}
+  -> {
+  // skip(); if (pos >= size) throw E_EOF; a number, or '-' factor, or '(' expr ')', else throw E_TOKEN
+  parse_factor -> {
+    u64:pos -> 0
+    i64:nodes -> 0
+    -> {
+      p -> skip{text -> text  pos -> pos}!
+      -> p ? {
+        >=tl -> {err -> E_EOF  nodes -> nodes}
+        -> {
+          c -> text.#p
+          -> ((c >= 48) [&] (c <= 57)) ? {
+            true -> {
+              num -> number{text -> text  pos -> p}!
+              -> {node -> {v -> num.v}  pos -> num.pos  nodes -> nodes + 1}
+            }!
+            -> c ? {
+              45 -> {
+                f -> parse_factor{pos -> p + 1  nodes -> nodes}!
+                -> f ? {
+                  {Expr:node  u64:pos  i64:nodes} -> {node -> {neg -> node}  pos -> pos  nodes -> nodes + 1}
+                  -> f
+                }
+              }!
+              40 -> {
+                x -> parse_expr{text -> text  pos -> p + 1  nodes -> nodes}!
+                -> x ? {
+                  {Expr:node  u64:pos  i64:nodes} -> {
+                    q -> skip{text -> text  pos -> pos}!
+                    -> q ? {
+                      >=tl -> {err -> E_PAREN  nodes -> nodes}
+                      -> text.#q ? {
+                        41 -> {node -> {paren -> node}  pos -> q + 1  nodes -> nodes + 1}
+                        -> {err -> E_PAREN  nodes -> nodes}
+                      }
+                    }
+                  }!
+                  -> x
+                }
+              }!
+              -> {err -> E_TOKEN  nodes -> nodes}
+            }
           }
-          -> x
-        }
-      }!
-      {u8:  ...A:} -> {err -> E_TOKEN  nodes -> nodes}
-      -> {err -> E_EOF  nodes -> nodes}
-    }
-    -> more ? {
-      true -> {
-        s -> skip{t -> t}!
-        op -> binop{level -> level  t -> s}!
-        -> op ? {
-          0 -> {e -> lhs  rest -> s  nodes -> nodes}
-          -> s ? {
-            {u8:  ...A:(rest)} -> {
-              Parsed:y -> parse{t -> rest  level -> level + 1  nodes -> nodes}!
-              -> y ? {
-                {Expr:e  A:rest  i64:nodes} -> parse{
-                  t -> rest  level -> level  nodes -> nodes + 1  more -> true
-                  lhs -> {op -> op  l -> lhs  r -> e}
-                }!
-                -> y
+        }!
+      }
+    }!
+  }
+  // for (;;) { skip(); if (pos >= size || (text[pos] != '*' && text[pos] != '/')) break;
+  //   op = text[pos]; pos++; rhs = parse_factor(); nodes++; lhs = Bin(op, lhs, rhs); }
+  terms -> {
+    Expr:lhs -> {v -> 0}
+    u64:pos -> 0
+    i64:nodes -> 0
+    -> {
+      p -> skip{text -> text  pos -> pos}!
+      stop -> {node -> lhs  pos -> p  nodes -> nodes}
+      -> p ? {
+        >=tl -> stop
+        -> {
+          c -> text.#p
+          -> ((c = 42) [|] (c = 47)) ? {
+            true -> {
+              f -> parse_factor{pos -> p + 1  nodes -> nodes}!
+              -> f ? {
+                {Expr:node  u64:pos  i64:nodes} -> terms{lhs -> {op -> c  l -> lhs  r -> node}  pos -> pos  nodes -> nodes + 1}!
+                -> f
               }
             }!
-            -> {e -> lhs  rest -> s  nodes -> nodes}
+            -> stop
           }
-        }
-      }!
-      -> {
-        Parsed:x -> parse{t -> t  level -> level + 1  nodes -> nodes}!
-        -> x ? {
-          {Expr:e  A:rest  i64:nodes} -> parse{t -> rest  level -> level  nodes -> nodes  more -> true  lhs -> e}!
-          -> x
-        }
-      }!
-    }
+        }!
+      }
+    }!
   }
+  parse_term -> {
+    u64:pos -> 0
+    i64:nodes -> 0
+    -> {
+      f -> parse_factor{pos -> pos  nodes -> nodes}!
+      -> f ? {
+        {Expr:node  u64:pos  i64:nodes} -> terms{lhs -> node  pos -> pos  nodes -> nodes}!
+        -> f
+      }
+    }!
+  }
+  // for (;;) { skip(); if (pos >= size || (text[pos] != '+' && text[pos] != '-')) break;
+  //   op = text[pos]; pos++; rhs = parse_term(); nodes++; lhs = Bin(op, lhs, rhs); }
+  sums -> {
+    Expr:lhs -> {v -> 0}
+    u64:pos -> 0
+    i64:nodes -> 0
+    -> {
+      p -> skip{text -> text  pos -> pos}!
+      stop -> {node -> lhs  pos -> p  nodes -> nodes}
+      -> p ? {
+        >=tl -> stop
+        -> {
+          c -> text.#p
+          -> ((c = 43) [|] (c = 45)) ? {
+            true -> {
+              t -> parse_term{pos -> p + 1  nodes -> nodes}!
+              -> t ? {
+                {Expr:node  u64:pos  i64:nodes} -> sums{lhs -> {op -> c  l -> lhs  r -> node}  pos -> pos  nodes -> nodes + 1}!
+                -> t
+              }
+            }!
+            -> stop
+          }
+        }!
+      }
+    }!
+  }
+  t -> parse_term{pos -> pos  nodes -> nodes}!
+  -> t ? {
+    {Expr:node  u64:pos  i64:nodes} -> sums{lhs -> node  pos -> pos  nodes -> nodes}!
+    -> t
+  }
+  }!
 }
 
-// --- evaluation --------------------------------------------------------------
-// Unsigned: u64 wraps, written as a mask.
+// --- the evaluation --------------------------------------------------------------
 
+// a value, or the error thrown
 Value -> {
-  -> {u64:val}
+  -> {u64:value}
   -> {Error:err}
 }
+// Num: (uint64_t)v; Neg: 0 - eval(l); Paren: eval(l);
+// Bin: a = eval(l); b = eval(r); + - * wrap; '/': if (b == 0) throw E_DIV0; a / b
 eval -> {
   Expr:e -> {v -> 0}
   -> e ? {
-    {u64:v} -> {val -> v}
+    {i64:v} -> {value -> v \ u64}
     {Expr:neg} -> {
-      Value:a -> eval{e -> neg}!
+      a -> eval{e -> neg}!
       -> a ? {
-        {u64:val} -> {val -> (0 - val) [&] M}
+        {u64:value} -> {value -> (0 - value) [&] M}
         -> a
       }
     }!
     {Expr:paren} -> eval{e -> paren}!
     {u8:op  Expr:l  Expr:r} -> {
-      Value:a -> eval{e -> l}!
+      a -> eval{e -> l}!
       -> a ? {
-        {u64:val} -> {
-          x -> val
-          Value:b -> eval{e -> r}!
+        {u64:value} -> {
+          x -> value
+          b -> eval{e -> r}!
           -> b ? {
-            {u64:val} -> op ? {
-              43 -> {val -> (x + val) [&] M}
-              45 -> {val -> (x - val) [&] M}
-              42 -> {val -> (x * val) [&] M}
-              -> val ? {
+            {u64:value} -> op ? {
+              43 -> {value -> (x + value) [&] M}
+              45 -> {value -> (x - value) [&] M}
+              42 -> {value -> (x * value) [&] M}
+              -> value ? {
                 0 -> {err -> E_DIV0}
-                -> {val -> x / val}
+                -> {value -> x / value}
               }
             }
             -> b
@@ -309,70 +343,68 @@ eval -> {
     }!
   }
 }
-
-// one input: its own tree, gone when it is done however the input ends
-Run -> {
-  -> {u64:val  i64:nodes}
-  -> {Error:err  i64:nodes}
-}
+// pos = 0; root = parse_expr(); skip(); if (pos != text.size()) return E_TOKEN; out = eval(root); return 0;
+// (the error, 0 when the input evaluates; its value; the nodes)
 run_one -> {
-  A:text -> {}
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  i64:nodes -> 0
   -> {
-    Parsed:p -> parse{t -> text}!
-    -> p ? {
-      {Expr:e  A:rest  i64:nodes} -> skip{t -> rest}! ? {
-        {} -> {
-          Value:v -> eval{e -> e}!
-          -> v ? {
-            {u64:val} -> {val -> val  nodes -> nodes}
-            {Error:err} -> {err -> err  nodes -> nodes}
-          }
-        }!
-        -> {err -> E_TOKEN  nodes -> nodes}
-      }
-      {Error:err  i64:nodes} -> {err -> err  nodes -> nodes}
+    x -> parse_expr{text -> text  pos -> 0  nodes -> nodes}!
+    -> x ? {
+      {Expr:node  u64:pos  i64:nodes} -> {
+        q -> skip{text -> text  pos -> pos}!
+        -> (q = tl) ? {
+          true -> {
+            v -> eval{e -> node}!
+            -> v ? {
+              {u64:value} -> {err -> 0  value -> value  nodes -> nodes}
+              {Error:err} -> {err -> err  value -> 0  nodes -> nodes}
+            }
+          }!
+          -> {err -> E_TOKEN  value -> 0  nodes -> nodes}
+        }
+      }!
+      {Error:err  i64:nodes} -> {err -> err  value -> 0  nodes -> nodes}
     }
   }!
 }
-
-Stats -> {i64:chars  i64:nodes  i64:ok  i64:eof  i64:paren  i64:token  i64:div0  u64:sum}
+// for (i = 0; i < BENCH_N; i++) { seed = xs_next(seed); text.clear(); depth = 3 + xs_mod(seed, 4);
+//   s = gen(depth, seed >> 8); corrupt(s); chars += text.size(); err = run_one(v);
+//   if (err == 0) { ok++; sum = sum * 31 + v; } else errs[err] += 1; }
 inputs -> {
   u32:n -> ??
+  i64:i -> 0
   u64:seed -> 12345
-  Stats:s -> Stats{0  0  0  0  0  0  0  0}
-  -> n ? {
-    0 -> s
+  i64:ok -> 0
+  i64:chars -> 0
+  Array{T <- i64  n <- 5}:errs -> {0  0  0  0  0}
+  u64:sum -> 0
+  i64:nodes -> 0
+  -> i ? {
+    >=n -> {ok -> ok  chars -> chars  errs -> errs  sum -> sum  nodes -> nodes}
     -> {
-      sd -> xs{x -> seed}!
-      g -> gen{depth -> 3 + sd % 4  seed -> sd >> 8}!
-      text -> corrupt{text -> g.text  seed -> g.r}!
-      Run:o -> run_one{text -> text}!
-      chars -> s.chars + size{s -> text}!
-      -> inputs{
-        n -> n - 1
-        seed -> sd
-        s -> o ? {
-          {u64:val  i64:nodes} -> Stats{chars  nodes + s.nodes  s.ok + 1  s.eof  s.paren  s.token  s.div0  (s.sum * 31 + val) [&] M}
-          {Error:err  i64:nodes} -> err ? {
-            1 -> Stats{chars  nodes + s.nodes  s.ok  s.eof + 1  s.paren  s.token  s.div0  s.sum}
-            2 -> Stats{chars  nodes + s.nodes  s.ok  s.eof  s.paren + 1  s.token  s.div0  s.sum}
-            3 -> Stats{chars  nodes + s.nodes  s.ok  s.eof  s.paren  s.token + 1  s.div0  s.sum}
-            -> Stats{chars  nodes + s.nodes  s.ok  s.eof  s.paren  s.token  s.div0 + 1  s.sum}
-          }
-        }
-      }!
+      s -> xs{x -> seed}!
+      g -> gen{depth -> 3 + s % 4  seed -> s >> 8  text -> {}}!
+      String:text -> corrupt{text -> g.text  seed -> g.r}!
+      run -> run_one{text -> text  nodes -> nodes}!
+      e -> run.err
+      -> e ? {
+        0 -> inputs{n -> n  i -> i + 1  seed -> s  ok -> ok + 1  chars -> chars + len{xs -> text}!  errs -> errs  sum -> (sum * 31 + run.value) [&] M  nodes -> run.nodes}!
+        -> inputs{n -> n  i -> i + 1  seed -> s  ok -> ok  chars -> chars + len{xs -> text}!  errs -> errs{#e -> errs.#e + 1}  sum -> sum  nodes -> run.nodes}!
+      }
     }!
   }
 }
 -> {
   u32:n -> ??
-  s -> inputs{n -> n}!
-  a -> io.printf{format -> "%lld\n"  n -> s.chars}!
-  b -> io.printf{format -> "%lld\n"  n -> s.nodes}!
-  c -> io.printf{format -> "%lld\n"  n -> s.ok}!
-  d -> io.printf{format -> "%lld\n"  n -> s.eof}!
-  e -> io.printf{format -> "%lld\n"  n -> s.paren}!
-  f -> io.printf{format -> "%lld\n"  n -> s.token}!
-  g -> io.printf{format -> "%lld\n"  n -> s.div0}!
-  -> iou.printf{format -> "%llu\n"  n -> s.sum}!
+  t -> inputs{n -> n}!
+  a -> io.printf{format -> "%lld\n"  n -> t.chars}!
+  b -> io.printf{format -> "%lld\n"  n -> t.nodes}!
+  c -> io.printf{format -> "%lld\n"  n -> t.ok}!
+  d -> io.printf{format -> "%lld\n"  n -> t.errs.#E_EOF}!
+  e -> io.printf{format -> "%lld\n"  n -> t.errs.#E_PAREN}!
+  f -> io.printf{format -> "%lld\n"  n -> t.errs.#E_TOKEN}!
+  g -> io.printf{format -> "%lld\n"  n -> t.errs.#E_DIV0}!
+  -> io.printu{format -> "%llu\n"  n -> t.sum}!
 }!

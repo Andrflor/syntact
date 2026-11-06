@@ -1,65 +1,72 @@
-// bintrees (Goose bench/goose/bintrees.goose, the Benchmarks Game binary-trees):
-// build, check and discard trees; prints the same lines as the C++ version.
+// bintrees: Goose bench/cpp/bintrees.cpp (the C++ the harness compares Goose with),
+// in plain Syntact; the Benchmarks Game's binary-trees. A stretch tree of depth
+// max + 1 built and checked; a long-lived tree of depth max; for d = 4, 6, ... <= max,
+// 1 << (max - d + 4) trees of depth d built and checked. Prints the stretch check,
+// then iters, d and the sum for each d, then the long-lived tree's check.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
-Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
-}
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
-xs -> {
-  u64:x
-  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
-  b -> a ^ (a >> 7)
-  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
-}
+// struct Node { Node *l = nullptr, *r = nullptr; }: {} is the null child
 Node -> {
   -> {}
   -> {Node:l  Node:r}
 }
 make -> {
-  (0..30):depth -> ??
+  (0..30):depth -> 0
   -> depth ? {
     0 -> {l -> {}  r -> {}}
     -> {l -> make{depth -> depth - 1}!  r -> make{depth -> depth - 1}!}
   }
 }
+// if (!n->l) return 1; if (!n->r) return 1; return 1 + check(n->l) + check(n->r)
 check -> {
-  Node:t -> {}
-  -> t ? {
+  (Node & ~{}):n -> {l -> {}  r -> {}}
+  -> n ? {
     {Node:l  Node:r} -> l ? {
       {} -> 1
-      -> 1 + check{t -> l}! + check{t -> r}!
+      -> r ? {
+        {} -> 1
+        -> 1 + check{n -> l}! + check{n -> r}!
+      }
     }
-    -> 1
   }
 }
-iterate -> {
-  (0..30):d -> 4
-  u32:i -> ??
-  sum -> 0
-  -> i ? {0 -> sum  -> iterate{d -> d  i -> i - 1  sum -> sum + check{t -> make{depth -> d}!}!}!}
+// build, check, discard
+tree_check -> {
+  (0..30):depth -> 0
+  -> check{n -> make{depth -> depth}!}!
 }
+// for (i = 0; i < iters; i++) sum += tree_check(d)
+iterate -> {
+  (0..30):d -> 0
+  i64:iters -> 0
+  i64:i -> 0
+  i64:sum -> 0
+  -> i ? {
+    >=iters -> sum
+    -> iterate{d -> d  iters -> iters  i -> i + 1  sum -> sum + tree_check{depth -> d}!}!
+  }
+}
+// for (d = MINDEPTH; d <= MAXDEPTH; d += 2) { iters = 1 << (MAXDEPTH - d + MINDEPTH); ... }
 depths -> {
-  (0..30):max -> 15
-  (4..32):d -> 4
+  (0..29):max -> 0
+  i32:d -> 4
   -> d ? {
     >max -> 0
     -> {
       iters -> 1 << (max - d + 4)
+      sum -> iterate{d -> d  iters -> iters}!
       a -> io.printf{format -> "%lld\n"  n -> iters}!
       b -> io.printf{format -> "%lld\n"  n -> d}!
-      c -> io.printf{format -> "%lld\n"  n -> iterate{d -> d  i -> iters}!}!
+      c -> io.printf{format -> "%lld\n"  n -> sum}!
       -> depths{max -> max  d -> d + 2}!
     }!
   }
 }
 -> {
-  (4..29):max -> ??
-  Node:long -> make{depth -> max}!
-  s -> io.printf{format -> "%lld\n"  n -> check{t -> make{depth -> max + 1}!}!}!
-  r -> depths{max -> max}!
-  -> io.printf{format -> "%lld\n"  n -> check{t -> long}!}!
+  (0..29):max -> ??
+  stretch -> io.printf{format -> "%lld\n"  n -> tree_check{depth -> max + 1}!}!
+  Node:lroot -> make{depth -> max}!
+  loop -> depths{max -> max}!
+  -> io.printf{format -> "%lld\n"  n -> check{n -> lroot}!}!
 }!

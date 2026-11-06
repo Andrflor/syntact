@@ -1,46 +1,65 @@
-// sum (Goose bench/goose/sum.goose): N values from xorshift64, each mod 1000, then
-// eight passes, total += x ^ p. Prints the length and the total.
+// sum: Goose bench/cpp/sum.cpp (the C++ the harness compares Goose with), in plain
+// Syntact. N values from xorshift64, each mod 1000, pushed to an array; then eight
+// passes, total += x ^ p. Prints the length of the array and the total.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
-Array -> {T -> {}  -> {}  -> {T: ...Array{T}:}}
+// an array that captures its length in a hole
+Array -> {
+  T <- {}
+  n <- 0..
+  -> {...({T:} * n):}
+}
+// data.size(): the length the array captures
+len -> {
+  T <- {}
+  n <- 0..
+  Array{T <- T  n <- n}:xs -> {}
+  -> n
+}
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
+// for (i = 0; i < N; i++) { r = xs_next(r); data.push_back(xs_mod(r, 1000)); }
 build -> {
   u32:n -> ??
+  u32:i -> 0
   u64:r -> 12345
-  Array{u16}:acc -> {}
-  -> n ? {0 -> acc  -> build{n -> n - 1  r -> xs{x -> r}!  acc -> {...acc  xs{x -> r}! % 1000}}!}
+  Array{T <- i32}:data -> {}
+  -> i ? {
+    >=n -> data
+    -> {
+      s -> xs{x -> r}!
+      -> build{n -> n  i -> i + 1  r -> s  data -> {...data  s % 1000}}!
+    }!
+  }
 }
+// for (x : data) total += x ^ p;
 scan -> {
-  Array{u16}:data -> {}
-  u8:p -> 0
-  acc -> 0
+  Array{T <- i32}:data -> {}
+  i64:p -> 0
+  i64:total -> 0
   -> data ? {
-    {u16(h) ...Array{u16}:(t)} -> scan{data -> t  p -> p  acc -> acc + (h ^ p)}!
-    -> acc
+    {i32(x)  ...Array{T <- i32}:(rest)} -> scan{data -> rest  p -> p  total -> total + (x ^ p)}!
+    -> total
   }
 }
-count -> {
-  Array{u16}:data -> {}
-  acc -> 0
-  -> data ? {
-    {u16(h) ...Array{u16}:(t)} -> count{data -> t  acc -> acc + 1}!
-    -> acc
-  }
-}
+// for (p = 0; p < 8; p++) the scan, on one total
 passes -> {
-  Array{u16}:data -> {}
-  u8:p -> 0
-  acc -> 0
-  -> p ? {>=8 -> acc  -> passes{data -> data  p -> p + 1  acc -> acc + scan{data -> data  p -> p}!}!}
+  Array{T <- i32}:data -> {}
+  i64:p -> 0
+  i64:total -> 0
+  -> p ? {
+    >=8 -> total
+    -> passes{data -> data  p -> p + 1  total -> scan{data -> data  p -> p  total -> total}!}!
+  }
 }
 -> {
-  data -> build{n -> ??::u32}!
-  a -> io.printf{format -> "%lld\n"  n -> count{data -> data}!}!
+  Array{T <- i32}:data -> build{n -> ??::u32}!
+  a -> io.printf{format -> "%lld\n"  n -> len{xs -> data}!}!
   -> io.printf{format -> "%lld\n"  n -> passes{data -> data}!}!
 }!

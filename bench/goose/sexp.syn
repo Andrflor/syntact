@@ -1,20 +1,28 @@
-// sexp (Goose bench/goose/sexp.goose): generate N s-expression forms of depth 4 as
-// one text of bytes -- symbols of 3..14 letters, numbers below 100000, lists of
-// 2..5 forms --, parse the text into trees, walk them four times. The children of
-// a list are linked first-child / previous-sibling, so every node is complete when
-// it is built and the walk sees them in reverse source order. Prints the length of
-// the text, the count of nodes, the count of roots, the length of the error and
-// the total of the walks.
+// sexp: Goose bench/cpp/sexp.cpp (the C++ the harness compares Goose with), in
+// plain Syntact. N random s-expressions of depth up to 4 written into one text
+// (symbols of 3..14 letters, numbers below 100000, lists of 2..5 items), then
+// parsed back into nodes, each list's items chained in reverse through next; four
+// passes walk the roots. Prints the text's size, the node count, the root count, 0
+// and the total.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
+// an array that captures its length in a hole
 Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
+  T <- {}
+  n <- 0..
+  -> {...({T:} * n):}
 }
-A -> Array{u8}
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+// v.size(): the length the array captures
+len -> {
+  T <- {}
+  n <- 0..
+  Array{T <- T  n <- n}:xs -> {}
+  -> n
+}
+// std::string
+String -> Array{T <- u8}
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
@@ -24,261 +32,288 @@ xs -> {
 DEPTH -> 4
 PASSES -> 4
 
-// --- generation --------------------------------------------------------------
-// The text is carried through the generator, which gives it back extended with
-// the state of the chain. Bytes are written by their codes: there is no operator
-// from a character to an integer (specs/language/02).
+// --- the text --------------------------------------------------------------------
 
-// the n letters of a symbol, each from the next state of the chain
-letters -> {
-  u64:r -> ??
-  u8:n -> 0
-  -> n ? {
-    0 -> {}
+// r = seed; n = 3 + xs_mod(r, 12); for (i = 0; i < n; i++) { r = xs_next(r); text.push_back('a' + xs_mod(r, 26)); }
+emit_sym -> {
+  String:text -> {}
+  u64:seed -> 0
+  -> {
+    letters -> {
+      String:text -> {}
+      u64:r -> 0
+      i64:n -> 0
+      i64:i -> 0
+      -> i ? {
+        >=n -> text
+        -> {
+          r1 -> xs{x -> r}!
+          -> letters{text -> {...text  97 + r1 % 26}  r -> r1  n -> n  i -> i + 1}!
+        }!
+      }
+    }
+    -> letters{text -> text  r -> seed  n -> 3 + seed % 12}!
+  }!
+}
+// if (v == 0) { text.push_back('0'); return; }
+// while (v > 0) { tmp[k++] = '0' + v % 10; v /= 10; } while (k > 0) text.push_back(tmp[--k]);
+emit_num -> {
+  String:text -> {}
+  i64:v -> 0
+  -> v ? {
+    0 -> {...text  48}
     -> {
-      r1 -> xs{x -> r}!
-      -> {97 + r1 % 26  ...letters{r -> r1  n -> n - 1}!}
+      down -> {
+        i64:v -> 0
+        String:tmp -> {}
+        -> v ? {
+          >0 -> down{v -> v / 10  tmp -> {...tmp  48 + v % 10}}!
+          -> tmp
+        }
+      }
+      up -> {
+        m <- 0..
+        Array{T <- u8  n <- m}:tmp -> {}
+        (0..m):k -> 0
+        String:text -> {}
+        -> k ? {
+          >0 -> up{tmp -> tmp  k -> k - 1  text -> {...text  tmp.#(k - 1)}}!
+          -> text
+        }
+      }
+      tmp -> down{v -> v}!
+      -> up{tmp -> tmp  k -> len{xs -> tmp}!  text -> text}!
     }!
   }
 }
-// the decimal digits of v, lowest first, each put before those already read
-digits_of -> {
-  i64:v -> 0
-  A:tmp -> {}
-  -> v ? {
-    0 -> tmp
-    -> digits_of{v -> v / 10  tmp -> {48 + v % 10  ...tmp}}!
-  }
-}
-// format_int(text, v, 10, 0, ' '): the decimal text of v
-format_int -> {
-  i64:v -> 0
-  -> v ? {
-    0 -> {48}
-    -> digits_of{v -> v}!
-  }
-}
-// an atom and its space: a symbol of 3..14 letters or a number below 100000
-atom -> {
-  A:text -> {}
-  u64:r -> ??
-  -> (r >> 8) % 2 ? {
-    0 -> {...text  ...letters{r -> r  n -> 3 + r % 12}!  32}
-    -> {...text  ...format_int{v -> (r >> 16) % 100000}!  32}
-  }
-}
-Gen -> {A:text  u64:r}
-// one form of the given depth after text, with the state of the chain after it;
-// kids > 0 writes instead the kids forms left in a list of forms of that depth,
-// then closes it
+// r = xs_next(seed);
+// if (depth == 0 || xs_mod(r, 4) == 0) { a symbol or a number; text.push_back(' '); return r; }
+// text.push_back('('); kids = 2 + xs_mod(r >> 24, 4); for (k = 0; k < kids; k++) r = gen(depth - 1, r);
+// text.push_back(')'); text.push_back(' '); return r;
 gen -> {
-  A:text -> {}
-  (0..4):depth -> DEPTH
-  u64:seed -> 12345
-  (0..5):kids -> 0
-  -> kids ? {
-    0 -> {
-      r -> xs{x -> seed}!
-      -> depth ? {
-        0 -> Gen{atom{text -> text  r -> r}!  r}
-        -> r % 4 ? {
-          0 -> Gen{atom{text -> text  r -> r}!  r}
-          -> gen{text -> {...text  40}  depth -> depth - 1  seed -> r  kids -> 2 + (r >> 24) % 4}!
+  (0..4):depth -> 0
+  u64:seed -> 0
+  String:text -> {}
+  -> {
+    r -> xs{x -> seed}!
+    -> ((depth = 0) [|] (r % 4 = 0)) ? {
+      true -> {
+        atom -> ((r >> 8) % 2) ? {
+          0 -> emit_sym{text -> text  seed -> r}!
+          -> emit_num{text -> text  v -> (r >> 16) % 100000}!
         }
-      }
-    }!
-    -> {
-      c -> gen{text -> text  depth -> depth  seed -> seed}!
-      -> kids ? {
-        1 -> Gen{{...c.text  41 32}  c.r}
-        -> gen{text -> c.text  depth -> depth  seed -> c.r  kids -> kids - 1}!
-      }
-    }!
-  }
+        -> {r -> r  text -> {...atom  32}}
+      }!
+      -> {
+        children -> {
+          (1..4):depth -> 1
+          i64:kids -> 0
+          i64:k -> 0
+          u64:r -> 0
+          String:text -> {}
+          -> k ? {
+            >=kids -> {r -> r  text -> text}
+            -> {
+              g -> gen{depth -> depth - 1  seed -> r  text -> text}!
+              -> children{depth -> depth  kids -> kids  k -> k + 1  r -> g.r  text -> g.text}!
+            }!
+          }
+        }
+        g -> children{depth -> depth  kids -> 2 + (r >> 24) % 4  r -> r  text -> {...text  40}}!
+        -> {r -> g.r  text -> {...g.text  41  32}}
+      }!
+    }
+  }!
 }
-// the text of n forms
-forms -> {
+// for (i = 0; i < BENCH_N; i++) seed = gen(DEPTH, seed);
+texts -> {
   u32:n -> ??
-  Gen:g -> Gen{{}  12345}
-  -> n ? {
-    0 -> g.text
-    -> forms{n -> n - 1  g -> gen{text -> g.text  seed -> g.r}!}!
-  }
-}
-
-// --- the tree ----------------------------------------------------------------
-
-// a symbol's text: one byte at least
-Name -> {u8: ...A:}
-// a node and the sibling before it; {} ends a chain
-Sexp -> {
-  -> {}
-  -> {Name:name  Sexp:next}
-  -> {i64:v  Sexp:next}
-  -> {Sexp:first  Sexp:next}
-}
-
-// --- parsing -----------------------------------------------------------------
-// The cursor is the text from it on.
-
-skip_space -> {
-  A:t -> {}
-  -> t ? {
-    {32  ...A:(rest)} -> skip_space{t -> rest}!
-    -> t
-  }
-}
-// a number read from the front of t, after the digits v read so far
-Number -> {i64:v  A:rest}
-number -> {
-  A:t -> {}
-  i64:v -> 0
-  -> t ? {
-    {(48..57):(c)  ...A:(rest)} -> number{t -> rest  v -> v * 10 + (c - 48)}!
-    -> Number{v -> v  rest -> t}
-  }
-}
-// the bytes of a symbol after its first, from the front of t, up to a space or
-// a parenthesis
-Symbol -> {A:name  A:rest}
-symbol -> {
-  A:t -> {}
-  A:name -> {}
-  -> t ? {
-    {32  ...A:} -> Symbol{name -> name  rest -> t}
-    {40  ...A:} -> Symbol{name -> name  rest -> t}
-    {41  ...A:} -> Symbol{name -> name  rest -> t}
-    {u8(c)  ...A:(rest)} -> symbol{t -> rest  name -> {...name  c}}!
-    -> Symbol{name -> name  rest -> t}
-  }
-}
-// a node read from t, or the error that stops the parse
-Parsed -> {
-  -> {Sexp:node  A:rest}
-  -> {A:err}
-}
-// "eof"
-EOF -> {101 111 102}
-// "unclosed"
-UNCLOSED -> {117 110 99 108 111 115 101 100}
-// the node at the front of t, linked to prev; open, the children of a list read
-// so far, last first, until its ')' closes it as the node linked to prev
-parse_node -> {
-  A:t -> {}
-  Sexp:prev -> {}
-  bool:open -> false
-  Sexp:chain -> {}
-  -> open ? {
-    true -> skip_space{t -> t}! ? {
-      {41  ...A:(rest)} -> {node -> {first -> chain  next -> prev}  rest -> rest}
-      {u8:  ...A:} -> {
-        Parsed:c -> parse_node{t -> skip_space{t -> t}!  prev -> chain}!
-        -> c ? {
-          {Sexp:node  A:rest} -> parse_node{t -> rest  prev -> prev  open -> true  chain -> node}!
-          -> c
-        }
-      }!
-      -> {err -> UNCLOSED}
-    }
-    -> skip_space{t -> t}! ? {
-      {40  ...A:(rest)} -> parse_node{t -> rest  prev -> prev  open -> true  chain -> {}}!
-      {(48..57):  ...A:} -> {
-        num -> number{t -> skip_space{t -> t}!}!
-        -> {node -> {v -> num.v  next -> prev}  rest -> num.rest}
-      }!
-      {u8(c)  ...A:(rest)} -> {
-        sym -> symbol{t -> rest}!
-        -> {node -> {name -> {c  ...sym.name}  next -> prev}  rest -> sym.rest}
-      }!
-      -> {err -> EOF}
-    }
-  }
-}
-// every root of the text, in order, and the error that stopped the parse
-Roots -> {Array{Sexp}:roots  A:err}
-parse_all -> {
-  A:t -> {}
-  Array{Sexp}:roots -> {}
-  -> skip_space{t -> t}! ? {
-    {u8:  ...A:} -> {
-      Parsed:p -> parse_node{t -> t}!
-      -> p ? {
-        {Sexp:node  A:rest} -> parse_all{t -> rest  roots -> {...roots  node}}!
-        {A:err} -> Roots{roots -> roots  err -> err}
-      }
+  i64:i -> 0
+  u64:seed -> 12345
+  String:text -> {}
+  -> i ? {
+    >=n -> text
+    -> {
+      g -> gen{depth -> DEPTH  seed -> seed  text -> text}!
+      -> texts{n -> n  i -> i + 1  seed -> g.r  text -> g.text}!
     }!
-    -> Roots{roots -> roots  err -> {}}
   }
 }
 
-// --- walking -----------------------------------------------------------------
+// --- the parse -------------------------------------------------------------------
 
-size -> {
-  A:s -> {}
-  -> s ? {
-    {u8(b)  ...A:(t)} -> 1 + size{s -> t}!
-    -> 0
+// struct Node { int kind; std::string name; int32_t v; std::unique_ptr<Node> first, next; }: {} is null
+Node -> {
+  -> {}
+  -> {i32:kind  String:name  i32:v  Node:first  Node:next}
+}
+// a node, not null
+Live -> Node & ~{}
+// while (pos < text.size() && text[pos] == ' ') pos++;
+skip_space -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:pos -> 0
+  -> pos ? {
+    >=tl -> pos
+    -> text.#pos ? {
+      32 -> skip_space{text -> text  pos -> pos + 1}!
+      -> pos
+    }
   }
 }
-// a node and the siblings it links to; a root links to none. The pass index
-// rides along, so the four walks are four different computations
+// n->name.assign(text, start, pos - start): the bytes of text from start up to e
+copy -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:k -> 0
+  (0..tl):e -> 0
+  String:w -> {}
+  -> k ? {
+    >=e -> w
+    -> copy{text -> text  k -> k + 1  e -> e  w -> {...w  text.#k}}!
+  }
+}
+parse_node -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:pos -> 0
+  i64:count -> 0
+  Node:prev -> {}
+  -> {
+    p0 -> skip_space{text -> text  pos -> pos}!
+    c -> text.#p0
+    -> c ? {
+      // pos++; for (;;) { skip_space(); if (text[pos] == ')') { pos++; break; } chain = parse_node(chain); }
+      40 -> {
+        items -> {
+          u64:pos -> 0
+          i64:count -> 0
+          Node:chain -> {}
+          -> {
+            p1 -> skip_space{text -> text  pos -> pos}!
+            -> text.#p1 ? {
+              41 -> {pos -> p1 + 1  count -> count  chain -> chain}
+              -> {
+                q -> parse_node{text -> text  pos -> p1  count -> count  prev -> chain}!
+                -> items{pos -> q.pos  count -> q.count  chain -> q.node}!
+              }!
+            }
+          }!
+        }
+        l -> items{pos -> p0 + 1  count -> count + 1}!
+        -> {node -> {kind -> 2  name -> {}  v -> 0  first -> l.chain  next -> prev}  pos -> l.pos  count -> l.count}
+      }!
+      -> ((c >= 48) [&] (c <= 57)) ? {
+        // while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9') { v = v * 10 + (text[pos] - '0'); pos++; }
+        true -> {
+          number -> {
+            u64:pos -> 0
+            i64:v -> 0
+            -> pos ? {
+              >=tl -> {pos -> pos  v -> v}
+              -> {
+                d -> text.#pos
+                -> ((d >= 48) [&] (d <= 57)) ? {
+                  true -> number{pos -> pos + 1  v -> v * 10 + (d - 48)}!
+                  -> {pos -> pos  v -> v}
+                }
+              }!
+            }
+          }
+          num -> number{pos -> p0}!
+          -> {node -> {kind -> 1  name -> {}  v -> num.v \ i32  first -> {}  next -> prev}  pos -> num.pos  count -> count + 1}
+        }!
+        // while (pos < text.size() && text[pos] != ' ' && text[pos] != '(' && text[pos] != ')') pos++;
+        -> {
+          symbol_end -> {
+            u64:pos -> 0
+            -> pos ? {
+              >=tl -> pos
+              -> text.#pos ? {
+                32 -> pos
+                40 -> pos
+                41 -> pos
+                -> symbol_end{pos -> pos + 1}!
+              }
+            }
+          }
+          e -> symbol_end{pos -> p0}!
+          -> {node -> {kind -> 0  name -> copy{text -> text  k -> p0  e -> e}!  v -> 0  first -> {}  next -> prev}  pos -> e  count -> count + 1}
+        }!
+      }
+    }
+  }!
+}
+// for (;;) { skip_space(); if (pos >= text.size()) break; roots.push_back(parse_node(nullptr)); }
+parse_all -> {
+  tl <- 0..
+  Array{T <- u8  n <- tl}:text -> ??
+  u64:pos -> 0
+  i64:count -> 0
+  Array{T <- Live}:roots -> {}
+  -> {
+    p -> skip_space{text -> text  pos -> pos}!
+    -> p ? {
+      >=tl -> {roots -> roots  count -> count}
+      -> {
+        q -> parse_node{text -> text  pos -> p  count -> count}!
+        -> parse_all{text -> text  pos -> q.pos  count -> q.count  roots -> {...roots  q.node}}!
+      }!
+    }
+  }!
+}
+
+// --- the walk --------------------------------------------------------------------
+
+// case 0: name.size() + name[0] + p; case 1: v ^ p; default: 1 + walk_chain(first, p)
+// walk_chain(c, p) = c ? walk(c, p) + walk_chain(c->next, p) : 0
 walk -> {
-  Sexp:c -> {}
+  Live:n -> ??
   i64:p -> 0
-  -> c ? {
-    {Name:name  Sexp:next} -> size{s -> name}! + name.#0 + p + walk{c -> next  p -> p}!
-    {i64:v  Sexp:next} -> (v ^ p) + walk{c -> next  p -> p}!
-    {Sexp:first  Sexp:next} -> 1 + walk{c -> first  p -> p}! + walk{c -> next  p -> p}!
-    -> 0
-  }
+  -> {
+    chain -> {
+      Node:c -> {}
+      -> c ? {
+        {} -> 0
+        -> walk{n -> c  p -> p}! + chain{c -> c.next}!
+      }
+    }
+    -> n.kind ? {
+      0 -> len{xs -> n.name}! + n.name.#0 + p
+      1 -> n.v ^ p
+      -> 1 + chain{c -> n.first}!
+    }
+  }!
 }
-// the nodes of a chain, those of the lists in it included
-nodes -> {
-  Sexp:c -> {}
-  -> c ? {
-    {Name:name  Sexp:next} -> 1 + nodes{c -> next}!
-    {i64:v  Sexp:next} -> 1 + nodes{c -> next}!
-    {Sexp:first  Sexp:next} -> 1 + nodes{c -> first}! + nodes{c -> next}!
-    -> 0
-  }
-}
-pool -> {
-  Array{Sexp}:roots -> {}
-  -> roots ? {
-    {Sexp(r)  ...Array{Sexp}:(t)} -> nodes{c -> r}! + pool{roots -> t}!
-    -> 0
-  }
-}
-count -> {
-  Array{Sexp}:roots -> {}
-  -> roots ? {
-    {Sexp(r)  ...Array{Sexp}:(t)} -> 1 + count{roots -> t}!
-    -> 0
-  }
-}
+// for (r : roots) total += walk(r, p)
 pass -> {
-  Array{Sexp}:roots -> {}
+  Array{T <- Live}:roots -> {}
   i64:p -> 0
+  i64:total -> 0
   -> roots ? {
-    {Sexp(r)  ...Array{Sexp}:(t)} -> walk{c -> r  p -> p}! + pass{roots -> t  p -> p}!
-    -> 0
+    {Live(r)  ...Array{T <- Live}:(rest)} -> pass{roots -> rest  p -> p  total -> total + walk{n -> r  p -> p}!}!
+    -> total
   }
 }
+// for (p = 0; p < PASSES; p++) the pass, on one total
 passes -> {
-  Array{Sexp}:roots -> {}
-  (0..4):p -> 0
+  Array{T <- Live}:roots -> {}
+  i64:p -> 0
+  i64:total -> 0
   -> p ? {
-    >=PASSES -> 0
-    -> pass{roots -> roots  p -> p}! + passes{roots -> roots  p -> p + 1}!
+    >=PASSES -> total
+    -> passes{roots -> roots  p -> p + 1  total -> pass{roots -> roots  p -> p  total -> total}!}!
   }
 }
 -> {
   u32:n -> ??
-  text -> forms{n -> n}!
-  parsed -> parse_all{t -> text}!
-  a -> io.printf{format -> "%lld\n"  n -> size{s -> text}!}!
-  b -> io.printf{format -> "%lld\n"  n -> pool{roots -> parsed.roots}!}!
-  c -> io.printf{format -> "%lld\n"  n -> parsed.err ? {{} -> count{roots -> parsed.roots}!  -> 0}}!
-  d -> io.printf{format -> "%lld\n"  n -> size{s -> parsed.err}!}!
-  -> io.printf{format -> "%lld\n"  n -> passes{roots -> parsed.roots}!}!
+  String:text -> texts{n -> n}!
+  parsed -> parse_all{text -> text}!
+  total -> passes{roots -> parsed.roots}!
+  a -> io.printf{format -> "%lld\n"  n -> len{xs -> text}!}!
+  b -> io.printf{format -> "%lld\n"  n -> parsed.count}!
+  c -> io.printf{format -> "%lld\n"  n -> len{xs -> parsed.roots}!}!
+  d -> io.printf{format -> "%lld\n"  n -> 0}!
+  -> io.printf{format -> "%lld\n"  n -> total}!
 }!

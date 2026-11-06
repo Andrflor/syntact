@@ -1,23 +1,19 @@
-// interp (Goose bench/goose/interp.goose): an expression tree of the given depth —
-// Num, Add, Mul, Neg drawn from xorshift64 — then eight evaluations mod 1000003.
-// Prints the node count and the total.
+// interp: Goose bench/cpp/interp.cpp (the C++ the harness compares Goose with), in
+// plain Syntact. An expression tree of the given depth -- Num, Add, Mul, Neg drawn
+// from xorshift64 -- then eight evaluations mod 1000003. Prints the node count and
+// the total.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
-Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
-}
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
-// a scope names itself only in its productions (specs/language/08), so the four
-// node kinds are written there; Add and Mul differ by their names
+// Num, Add, Mul, Neg; a scope names itself only in its productions
+// (specs/language/08), so Add and Mul differ by the names of their fields
 Expr -> {
   -> {i32:v}
   -> {Expr:al  Expr:ar}
@@ -33,7 +29,7 @@ build -> {
     -> depth ? {
       0 -> {v -> s % 1000}
       -> k ? {
-        0 -> {of -> build{depth -> depth - 1  seed -> s}!}
+        <1 -> {of -> build{depth -> depth - 1  seed -> s}!}
         <5 -> {al -> build{depth -> depth - 1  seed -> s}!  ar -> build{depth -> depth - 1  seed -> xs{x -> s}!}!}
         -> {ml -> build{depth -> depth - 1  seed -> s}!  mr -> build{depth -> depth - 1  seed -> xs{x -> s}!}!}
       }
@@ -51,6 +47,7 @@ eval -> {
     {Expr:of} -> (M - eval{e -> of  p -> p}!) % M
   }
 }
+// the nodes build makes (the C++ counts them in build)
 count -> {
   Expr:e -> {v -> 0}
   -> e ? {
@@ -60,14 +57,19 @@ count -> {
     {Expr:of} -> 1 + count{e -> of}!
   }
 }
+// for (p = 0; p < 8; p++) total = (total + root->eval(p)) % M
 passes -> {
-  Expr:e -> {v -> 0}
-  u8:p -> 0
-  -> p ? {>=8 -> 0  -> (eval{e -> e  p -> p}! + passes{e -> e  p -> p + 1}!) % M}
+  Expr:root -> {v -> 0}
+  i64:p -> 0
+  i64:total -> 0
+  -> p ? {
+    >=8 -> total
+    -> passes{root -> root  p -> p + 1  total -> (total + eval{e -> root  p -> p}!) % M}!
+  }
 }
 -> {
   (0..30):depth -> ??
   Expr:root -> build{depth -> depth}!
   a -> io.printf{format -> "%lld\n"  n -> count{e -> root}!}!
-  -> io.printf{format -> "%lld\n"  n -> passes{e -> root}!}!
+  -> io.printf{format -> "%lld\n"  n -> passes{root -> root}!}!
 }!

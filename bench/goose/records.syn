@@ -1,113 +1,112 @@
-// records (Goose bench/goose/records_var.goose): a log of N variant records —
-// Tick, Move{id dx dy}, Say{id text}, Quit{id code} — drawn from xorshift64, then
-// four passes summing their contributions. Prints the length of the log and the total.
+// records: Goose bench/cpp/records.cpp (the C++ the harness compares Goose with), in
+// plain Syntact. A log of N variant records -- Tick, Move{id dx dy}, Say{id text},
+// Quit{id code} -- drawn from xorshift64, then four passes summing their
+// contributions. Prints the length of the log and the total.
 io -> <libc.so.6>{
   printf -> {string:format, i64:n, -> !?::i32}
 }
+// an array that captures its length in a hole
 Array -> {
-  T -> {}
-  -> {}
-  -> {T: ...Array{T}:}
+  T <- {}
+  n <- 0..
+  -> {...({T:} * n):}
 }
-// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+// v.size(): the length the array captures
+len -> {
+  T <- {}
+  n <- 0..
+  Array{T <- T  n <- n}:xs -> {}
+  -> n
+}
+// xorshift64, as bench/cpp/bench.h: u64 wraps, written as a mask
 xs -> {
   u64:x
   a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
   b -> a ^ (a >> 7)
   -> (b ^ (b << 17)) [&] 0xffffffffffffffff
 }
+// Tick, Move, Say, Quit; a Say's text is a word of 4..15 letters, which text[0] reads
+Word -> Array{T <- u8  n <- 4..15}
 Event -> {
   -> {}
   -> {i32:id  i16:dx  i16:dy}
-  -> {i32:id  Array{u8}:text}
+  -> {i32:id  Word:text}
   -> {i32:id  u8:code}
 }
-// the letters of a word: n of them, each from the next state of the chain
+// for (i = 0; i < n; i++) { r = xs_next(r); w.push_back('a' + xs_mod(r, 26)); }
 letters -> {
   u64:r -> ??
-  (0..15):n -> ??
-  -> n ? {
-    0 -> {}
-    -> {97 + xs{x -> r}! % 26  ...letters{r -> xs{x -> r}!  n -> n - 1}!}
+  u64:n -> 0
+  u64:i -> 0
+  Array{T <- u8}:w -> {}
+  -> i ? {
+    >=n -> w
+    -> {
+      s -> xs{x -> r}!
+      -> letters{r -> s  n -> n  i -> i + 1  w -> {...w  97 + s % 26}}!
+    }!
   }
 }
-// a word of 4..15 letters from its own chain
+// r = xs_next(seed); n = 4 + xs_mod(r, 12); then the letters
 word -> {
   u64:seed -> ??
-  r -> xs{x -> seed}!
-  -> letters{r -> r  n -> 4 + r % 12}!
-}
-event -> {
-  u64:r -> ??
   -> {
-    k -> r % 8
-    id -> (r >> 3) % 100000
-    -> k ? {
-      <4 -> {id -> id  dx -> (r >> 20) % 201 - 100  dy -> (r >> 40) % 201 - 100}
-      <6 -> {id -> id  text -> word{seed -> r}!}
-      <7 -> {id -> id  code -> (r >> 20) % 256}
-      -> {}
-    }
+    r -> xs{x -> seed}!
+    -> letters{r -> r  n -> 4 + r % 12}!
   }!
 }
-log -> {
+// for (i = 0; i < N; i++) { r = xs_next(r); k = r % 8; id = (r >> 3) % 100000; ... }
+events -> {
   u32:n -> ??
+  u32:i -> 0
   u64:r -> 12345
-  -> n ? {
-    0 -> {}
-    -> {event{r -> xs{x -> r}!}!  ...log{n -> n - 1  r -> xs{x -> r}!}!}
-  }
-}
-size -> {
-  Array{u8}:t -> {}
-  -> t ? {
-    {u8:(h)  ...Array{u8}:(rest)} -> 1 + size{t -> rest}!
-    -> 0
-  }
-}
-first -> {
-  Array{u8}:t -> {}
-  -> t ? {
-    {u8:(h)  ...Array{u8}:(rest)} -> h
-    -> 0
+  Array{T <- Event}:log -> {}
+  -> i ? {
+    >=n -> log
+    -> {
+      s -> xs{x -> r}!
+      k -> s % 8
+      id -> (s >> 3) % 100000
+      e -> k ? {
+        <4 -> {id -> id  dx -> (s >> 20) % 201 - 100  dy -> (s >> 40) % 201 - 100}
+        <6 -> {id -> id  text -> word{seed -> s}!}
+        <7 -> {id -> id  code -> (s >> 20) % 256}
+        -> {}
+      }
+      -> events{n -> n  i -> i + 1  r -> s  log -> {...log  e}}!
+    }!
   }
 }
 contrib -> {
   Event:e -> {}
   -> e ? {
     {i32:id  i16:dx  i16:dy} -> id + dx + dy
-    {i32:id  Array{u8}:text} -> id + size{t -> text}! + first{t -> text}!
+    {i32:id  Word:text} -> id + len{xs -> text}! + text.#0
     {i32:id  u8:code} -> id + code
     -> 1
   }
 }
-count -> {
-  Array{Event}:xs -> {}
-  -> xs ? {
-    {Event(h)  ...Array{Event}:(t)} -> 1 + count{xs -> t}!
-    -> 0
+// for (e : log) total += e->contrib()
+pass -> {
+  Array{T <- Event}:log -> {}
+  i64:total -> 0
+  -> log ? {
+    {Event(e)  ...Array{T <- Event}:(rest)} -> pass{log -> rest  total -> total + contrib{e -> e}!}!
+    -> total
   }
 }
-total -> {
-  Array{Event}:xs -> {}
-  acc -> 0
-  -> xs ? {
-    {Event(h)  ...Array{Event}:(t)} -> total{xs -> t  acc -> acc + contrib{e -> h}!}!
-    -> acc
-  }
-}
+// for (p = 0; p < 4; p++) the pass, on one total
 passes -> {
-  (0..4):p -> 4
-  Array{Event}:l -> {}
-  acc -> 0
+  Array{T <- Event}:log -> {}
+  i64:p -> 0
+  i64:total -> 0
   -> p ? {
-    0 -> acc
-    -> passes{p -> p - 1  l -> l  acc -> acc + total{xs -> l}!}!
+    >=4 -> total
+    -> passes{log -> log  p -> p + 1  total -> pass{log -> log  total -> total}!}!
   }
 }
 -> {
-  u32:n -> ??
-  Array{Event}:l -> log{n -> n}!
-  a -> io.printf{format -> "%lld\n"  n -> count{xs -> l}!}!
-  -> io.printf{format -> "%lld\n"  n -> passes{l -> l}!}!
+  Array{T <- Event}:log -> events{n -> ??::u32}!
+  a -> io.printf{format -> "%lld\n"  n -> len{xs -> log}!}!
+  -> io.printf{format -> "%lld\n"  n -> passes{log -> log}!}!
 }!
