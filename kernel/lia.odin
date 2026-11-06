@@ -149,6 +149,12 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 			upper.constant -= i128(c) - 1
 			append(&s.rows, upper)
 		case .Length:
+			// a length: a count, the lengths the layout of the run admits
+			within(s, a, 0, nil)
+			if u, is_unknown := v.args[0].(^Unknown); is_unknown {
+				if n, read := length_image(k, layout_of(k, u)); read do if lo, hi, bounded := int_bounds(k, n); bounded do within(s, a, lo, hi)
+				return true
+			}
 			// the length of a run a fold builds, z: I ↦ {...z  Q}: |I| + Σ |Q|, |·| a
 			// morphism of the runs into the integers (§5.3)
 			if f, is_fold := v.args[0].(^Fold); is_fold {
@@ -165,10 +171,12 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 				}
 				return true
 			}
-			// the length of a call that stays: its definition read through |·|
+			// the length of a call that stays: its definition read through |·|, along
+			// the field its calls move, or over the measures of its fields
 			c, is_call := called(v.args[0])
 			if !is_call do return true
 			l, h, ranged := call_range(k, c, true)
+			if !ranged do l, h, ranged = measure_bound(k, c, .Length)
 			if !ranged do return true
 			if l != nil {
 				x := linear_of(k, s, l) or_return
@@ -244,6 +252,23 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 		within(s, a, lo, hi)
 	case ^Series:
 		if v.op != .Add do return true
+		// a sum over the bindings of a call: that measure of the call
+		if c, g, item, over := over_bindings(k, v); over {
+			if l, h, ranged := measure_bound(k, c, .Items, g, item); ranged {
+				if l != nil {
+					x := linear_of(k, s, l) or_return
+					x.coefs[a] -= 1
+					append(&s.rows, x)
+				}
+				if h != nil {
+					x := linear_of(k, s, h) or_return
+					x = scaled(x, -1)
+					x.coefs[a] += 1
+					append(&s.rows, x)
+				}
+				return true
+			}
+		}
 		// n terms g: n·p ≤ S ≤ n·q, p ≤ g ≤ q
 		n := op(k, .Add, op(k, .Sub, v.hi, v.lo), Int(1))
 		return summed(k, s, a, v.term, v.index, range_law(k, v.lo, v.hi, .Int, v.span), n, Int(0))
@@ -258,6 +283,11 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 			if !affine || !is_int(one, 1) do return true
 			n := op(k, .Add, op(k, .Sub, hi, lo), Int(1))
 			return summed(k, s, a, g, v.index, range_law(k, lo, hi, .Int, v.span), n, v.inits[i])
+		}
+	case:
+		// a binding read, any other term: in the image of the layouts it reads
+		if image, known := layout_image(k, t); known && is_constant(image) {
+			if lo, hi, bounded := int_bounds(k, image); bounded do within(s, a, lo, hi)
 		}
 	}
 	return true
@@ -392,4 +422,37 @@ clone_coefs :: proc(m: map[int]i128) -> map[int]i128 {
 	out := make(map[int]i128)
 	for x, c in m do out[x] = c
 	return out
+}
+
+// over_bindings: Σ(x: 0..|X| - 1, g(X.#x)), X a call that stays: X, and g over the
+// unknown item, the binding read.
+over_bindings :: proc(k: ^Kernel, v: ^Series) -> (c: ^Collapse, g: Type, item: ^Unknown, ok: bool) {
+	if !is_int(v.lo, 0) do return
+	n := op(k, .Add, v.hi, Int(1))
+	length, is_op := n.(^Operation)
+	if !is_op || length.op != .Length do return
+	c = called(length.args[0]) or_return
+	item = new_unknown(k, nil)
+	reads_found := make([dynamic]Type)
+	visit :: proc(k: ^Kernel, t: Type, c: ^Collapse, i: ^Unknown, out: ^[dynamic]Type) {
+		if t == nil do return
+		if o, is_item := t.(^Operation); is_item && o.op == .Item {
+			if x, is_call := called(o.args[0]); is_call && x == c {
+				if j, at := o.args[1].(^Unknown); at && same_unknown(j, i) {
+					append(out, t)
+					return
+				}
+			}
+		}
+		for x in parts(t) do visit(k, x, c, i, out)
+	}
+	visit(k, v.term, c, v.index, &reads_found)
+	if len(reads_found) == 0 do return
+	// the item: any binding the call gives, in their layout
+	item.layout = layout_image(k, reads_found[0]) or_return
+	r: Rewrite
+	for x in reads_found do r = append_read(r, x, item)
+	g = rewrite(k, v.term, r)
+	if reads(k, g, v.index) do return
+	return c, g, item, true
 }
