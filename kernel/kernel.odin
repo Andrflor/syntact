@@ -60,6 +60,11 @@ Kernel :: struct {
 	// proofs under way: the hypotheses (§5.6) —, each one's mark toggled in and out
 	// of it (given_toggled)
 	state:      u64,
+	// the same, by what each mark is about: an equation, by its scope; a binding; what
+	// concerns no term it is apart
+	marks:      map[rawptr]u64,
+	apart:      u64,
+	anchors:    map[rawptr][]rawptr, // what the image of a term holding calls depends on, once (rewrite.odin)
 	images_in:  map[Image_Key]Image_Known, // the image of a term holding calls, in a state (rewrite.odin)
 	readings:   map[Reading_Key]^Unknown, // the unknown that reads a quotient, a remainder, x [&] m, one for each node (rewrite.odin)
 	rewrites:   map[Rewrite_Key]Type, // the operations rewritten within the rewrite under way (rewrite.odin)
@@ -82,11 +87,22 @@ Given_Kind :: enum u64 {
 // the sum, without carry, of the marks of what is given: the same hypotheses, the
 // same state.
 given_toggled :: proc(k: ^Kernel, kind: Given_Kind, item: rawptr, at := 0) {
+	// what the mark is about: the scope of an equation, a binding, or no term
+	about: rawptr
+	#partial switch kind {
+	case .Binding:
+		about = item
+	case .Read, .Deriving, .Bounds, .Proof:
+		about = origin((^Call_Equation)(item).root)
+	}
 	x := u64(uintptr(item)) ~ (u64(kind) << 58) ~ (u64(at) * 0x9e3779b97f4a7c15)
 	// splitmix64
 	x = (x ~ (x >> 30)) * 0xbf58476d1ce4e5b9
 	x = (x ~ (x >> 27)) * 0x94d049bb133111eb
-	k.state ~= x ~ (x >> 31)
+	x ~= x >> 31
+	k.state ~= x
+	if about == nil do k.apart ~= x
+	else do k.marks[about] ~= x
 }
 
 // read_equation: eq read, or no longer, at the values of a call (§5.6).

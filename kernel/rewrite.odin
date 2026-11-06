@@ -463,7 +463,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// computed once; holding calls, once for what is being given
 		known, plain := plain_of(k, v)
 		if plain && known.imaged do return known.image, known.image != nil
-		key := Image_Key{v, k.state}
+		key := Image_Key{v, plain ? 0 : given_to(k, t)}
 		if !plain do if x, found := k.images_in[key]; found do return x.image, x.ok
 		args := make([]Type, len(v.args))
 		image: Type
@@ -483,7 +483,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 			known, _ = plain_of(k, v)
 			known.imaged, known.image = true, image
 			remember_plain(k, v, known)
-		} else if key.state == k.state {
+		} else if key.state == given_to(k, t) {
 			k.images_in[key] = {image, image != nil}
 		}
 		return image, image != nil
@@ -532,14 +532,14 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		known, plain := plain_of(k, t)
 		if plain && known.imaged do return known.image, known.image != nil
 		node, _ := plain_node(t)
-		key := Image_Key{node, k.state}
+		key := Image_Key{node, plain ? 0 : given_to(k, t)}
 		if !plain do if x, found := k.images_in[key]; found do return x.image, x.ok
 		image, imaged := ordered_image(k, t)
 		if plain {
 			known.imaged = true
 			if imaged do known.image = image
 			remember_plain(k, t, known)
-		} else if key.state == k.state {
+		} else if key.state == given_to(k, t) {
 			k.images_in[key] = {image, imaged}
 		}
 		return image, imaged
@@ -603,6 +603,63 @@ ordered_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if f, known := family_of(k, t); known do return family_term(f), true
 	}
 	return nil, false
+}
+
+// given_to: the part of what is being given (given_toggled) the image of t depends on:
+// the marks of the equations its calls read and of the bindings it names, through
+// what they are written with, and the marks about no term (§5.6). A term the
+// hypotheses do not reach reads the same whatever else is being given.
+given_to :: proc(k: ^Kernel, t: Type) -> u64 {
+	node, _ := plain_node(t)
+	anchors, found := k.anchors[node]
+	if !found {
+		anchors = anchors_of(t)
+		k.anchors[node] = anchors
+	}
+	state := k.apart
+	for a in anchors do state ~= k.marks[a]
+	return state
+}
+
+// anchors_of: what the marks the image of t depends on are about, each once: the
+// scope of each scope it holds — and so of each call —, the bindings of those scopes
+// and each binding it names, through what they are written with.
+anchors_of :: proc(t: Type) -> []rawptr {
+	Reach :: struct {
+		found: map[rawptr]bool,
+		seen:  map[^Scope]bool,
+	}
+	visit :: proc(t: Type, data: rawptr) -> bool {
+		r := (^Reach)(data)
+		#partial switch v in t {
+		case ^Scope:
+			if v not_in r.seen {
+				r.found[origin(v)] = true
+				for b in v.bindings do r.found[b] = true
+			}
+		case ^Name:
+			if v.binding not_in r.found {
+				r.found[v.binding] = true
+				written_any(v.binding.color, visit, r, &r.seen)
+				written_any(v.binding.value, visit, r, &r.seen)
+			}
+		case ^Unknown:
+			if v.call != nil do written_any(v.call, visit, r, &r.seen)
+			if v.layout != nil do written_any(v.layout, visit, r, &r.seen)
+			if v.written != nil do written_any(v.written, visit, r, &r.seen)
+			if v.instance != nil do written_any(v.instance, visit, r, &r.seen)
+		}
+		return false
+	}
+	r: Reach
+	written_any(t, visit, &r, &r.seen)
+	out := make([]rawptr, len(r.found))
+	i := 0
+	for a in r.found {
+		out[i] = a
+		i += 1
+	}
+	return out
 }
 
 // Image_Key: a term holding calls, in a state of what is being given.
