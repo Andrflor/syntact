@@ -148,6 +148,39 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 			upper.coefs[a] -= i128(c)
 			upper.constant -= i128(c) - 1
 			append(&s.rows, upper)
+		case .Length:
+			// the length of a run a fold builds, z: I ↦ {...z  Q}: |I| + Σ |Q|, |·| a
+			// morphism of the runs into the integers (§5.3)
+			if f, is_fold := v.args[0].(^Fold); is_fold {
+				lo, hi, counter := counter_range(k, f)
+				if !counter || !is_none(f.effects) do return true
+				for z, i in f.states {
+					if !same(k, f.value, z) do continue
+					prefix, suffix := run_affine(k, f.updates[i], z) or_return
+					if len(prefix) != 0 do return true
+					for t, j in f.updates do if j != i && reads(k, t, z) do return true
+					n := op(k, .Add, op(k, .Sub, hi, lo), Int(1))
+					g := op(k, .Length, joined(k, nil, suffix))
+					return summed(k, s, a, g, f.index, range_law(k, lo, hi, .Int, f.span), n, op(k, .Length, f.inits[i]))
+				}
+				return true
+			}
+			// the length of a call that stays: its definition read through |·|
+			c, is_call := called(v.args[0])
+			if !is_call do return true
+			l, h, ranged := call_range(k, c, true)
+			if !ranged do return true
+			if l != nil {
+				x := linear_of(k, s, l) or_return
+				x.coefs[a] -= 1
+				append(&s.rows, x)
+			}
+			if h != nil {
+				x := linear_of(k, s, h) or_return
+				x = scaled(x, -1)
+				x.coefs[a] += 1
+				append(&s.rows, x)
+			}
 		case .Pow:
 			// b ** e, b ≥ 1 a constant, e ≥ 0: from b ** least to b ** greatest of e
 			b, constant := v.args[0].(Int)

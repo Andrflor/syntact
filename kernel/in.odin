@@ -39,7 +39,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		#partial switch _ in x {
 		case ^Operation, ^Fold, ^Series, ^Collapse:
 			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) {
-				if f, known := family_of(k, x); known && f == .Int && lia_in(k, x, lo, hi) do return Bool(true)
+				if f, known := family_of(k, x); known && (f == .Int || f == .Count) && lia_in(k, x, lo, hi) do return Bool(true)
 			}
 		}
 	}

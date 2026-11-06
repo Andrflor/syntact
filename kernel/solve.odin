@@ -299,7 +299,7 @@ instances :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 // several, a pattern —; T(u) lies between L(u) and H(u): H(u) = hi(β) + α·H(s(u)),
 // hi(base) where the bases take u — the maps compose along the orbit of u, a fold
 // its laws close —, L likewise.
-call_range :: proc(k: ^Kernel, call: ^Collapse) -> (lo, hi: Type, ok: bool) {
+call_range :: proc(k: ^Kernel, call: ^Collapse, length := false) -> (lo, hi: Type, ok: bool) {
 	s := call.target.(^Scope) or_return
 	key, through := call_key(s), through_of(k, s)
 	eq, found := equation_found(k, origin(s), key, through)
@@ -313,6 +313,9 @@ call_range :: proc(k: ^Kernel, call: ^Collapse) -> (lo, hi: Type, ok: bool) {
 	if has_effect(base) || has_effect(step) do return
 	calls := calls_in(k, step, root)
 	if len(calls) == 0 do return
+	// the length of what it gives: the definition read through |·|, the morphism of
+	// the runs into the integers (§5.3)
+	if length do base, step = op(k, .Length, base), op(k, .Length, step)
 	y := new_unknown(k, nil)
 	y.layout = family_term(.Int)
 	r: Rewrite
@@ -320,11 +323,12 @@ call_range :: proc(k: ^Kernel, call: ^Collapse) -> (lo, hi: Type, ok: bool) {
 	for c in calls {
 		fields, next := moves(k, eq, c) or_return
 		if u not_in next do return
-		// an orbit of u: its step reads u alone
+		// an orbit of u: its step reads u alone, as narrowed by a branch or not
 		for w in fields do if w != u && reads(k, next[u], w) do return
-		if moved != nil && !same(k, moved, next[u]) do return
-		moved = next[u]
-		r = rewriting_call(r, c, y)
+		m := rewrite(k, next[u], rewriting(nil, u, u))
+		if moved != nil && !same(k, moved, m) do return
+		moved = m
+		r = length ? append_read(r, op(k, .Length, c), y) : rewriting_call(r, c, y)
 	}
 	// the step gives one of its products (§6), each α·y + β, α ≥ 0 a constant: the
 	// type of the call is in the union of their images

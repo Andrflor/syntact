@@ -83,6 +83,14 @@ origin :: proc(s: ^Scope) -> ^Scope {
 // computes. A carve of it was checked where it is written (scope.odin).
 recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	root := origin(s)
+	// a definition solved is an equality for every value of its fields: substituted,
+	// whatever gives them; otherwise read through what gives them (§5.6)
+	if through := through_of(k, s); len(through) > 0 {
+		if eq, read := equation_of(k, root, call_key(s)); read && eq.solution != nil {
+			run: Rewrite
+			return renewed(k, solution_at(k, eq, s), &run)
+		}
+	}
 	if eq, read := equation_of(k, root, call_key(s), through_of(k, s)); read {
 		run: Rewrite
 		if eq.solution != nil do return renewed(k, solution_at(k, eq, s), &run)
