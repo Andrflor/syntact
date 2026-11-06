@@ -69,3 +69,10 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - Compile clean: sum, tree, interp, bintrees, records, push, strlist (7/16).
 - Fail: scene (stub, real input), respond 4, sexp 18 (Product form), calc 33, lru 8, graph 13, words 33, blur 5, particles 8 (error lines).
 - Running: backend round 2, kernel round 3.
+
+## Step: backend round 2 (089ef45, 01b8603, 7c81868, 59fefb4, 946c9bf, 63954d7)
+- Verified on clean master 63954d7: corpus 581/5, code + calc green, six outputs identical on x86 and C.
+- x64/c cases: 3 of 5 fixed (hole items admit through their color; holes take no bits; tree layout). Left: "runs built at run time", "run carved by place" (zip in i64: moved fields read at their image = orbit narrowing, sent to kernel round 3).
+- {} items none (workaround removed). strlist compile 25 s → 0.8 s (1 * 1 no longer gathers powers).
+- scene: faithful port pushed, does not type (exponential node count, f32 ranges through the recursion); sent to kernel round 3.
+- strlist at 400000 still crashes: split-as-fold agent launched (fold states bounded by the same induction as calls; backend loop writing at the run's end).
