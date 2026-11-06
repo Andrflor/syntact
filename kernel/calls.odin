@@ -222,22 +222,65 @@ production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 }
 
 // base_cases: the products of e that do not call root, through the effects that wrap
-// them (§4.8).
-base_cases :: proc(e: Type, root: ^Scope) -> []Type {
-	out := make([dynamic]Type)
-	if a, is_effect := e.(^Effect); is_effect && (a.call == nil || !a.call.recursive) do return base_cases(a.then, root)
-	if p, is_pattern := e.(^Pattern); is_pattern {
-		for b in p.branches do if solved(b.product, root) do append(&out, ..base_cases(b.product, root))
-	} else if solved(e, root) {
-		append(&out, e)
+// them (§4.8) and every branch of its patterns: the bases of the equation.
+base_cases :: proc(e: Type, root: ^Scope, out: ^[dynamic]Type) {
+	if a, is_effect := e.(^Effect); is_effect && (a.call == nil || !a.call.recursive) {
+		base_cases(a.then, root, out)
+		return
 	}
-	return out[:]
+	if p, is_pattern := e.(^Pattern); is_pattern {
+		for b in p.branches do base_cases(b.product, root, out)
+		return
+	}
+	if solved(e, root) do append(out, e)
 }
 
-// call_family: the family a recursive call is proven in: `c in F` (§4.5, call_in).
-call_family :: proc(k: ^Kernel, c: ^Collapse, fields := Read{}) -> (Family, bool) {
-	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) do if call_in(k, c, family_term(f), fields) do return f, true
-	return {}, false
+// base_family: the family of a recursive call, that of its base cases (§5.6): a product
+// that calls it is the hypothesis, X = X | P. Of what it reads of the scope it gives,
+// that of what each base gives there. Read in the equation; not known while the
+// equation is read.
+base_family :: proc(k: ^Kernel, c: ^Collapse, fields := Read{}) -> (Family, bool) {
+	s, is_scope := c.target.(^Scope)
+	if !is_scope do return {}, false
+	root := origin(s)
+	eq, read := equation_of(k, root, call_key(s), through_of(k, s))
+	if !read || eq.term == nil do return {}, false
+	bases := make([dynamic]Type)
+	base_cases(eq.term, root, &bases)
+	family: Family
+	found := false
+	for base in bases {
+		f, known := read_family(k, given(k, base), fields)
+		if !known || found && f != family do return {}, false
+		family, found = f, true
+	}
+	return family, found
+}
+
+// read_family: the family of v; with a read, of what is read of the scope v: of the
+// field named, or of each of its bindings — a run, by its items.
+read_family :: proc(k: ^Kernel, v: Type, fields: Read) -> (Family, bool) {
+	if !fields.fields do return family_of(k, v)
+	s, is_scope := v.(^Scope)
+	if !is_scope do return {}, false
+	family: Family
+	found := false
+	for b in placed(k, s, .Value) {
+		if b.kind != .Push && b.kind != .Expand do continue
+		if fields.name != "" && b.name != fields.name do continue
+		f: Family
+		known: bool
+		if b.kind == .Push {
+			f, known = family_of(k, binding_value(k, b))
+		} else if fields.name == "" {
+			if set, has := values(k, binding_value(k, b)); has {
+				if item, items := item_image(k, set); items do f, known = layout_family(k, item)
+			}
+		}
+		if !known || found && f != family do return {}, false
+		family, found = f, true
+	}
+	return family, found
 }
 
 // as_call_any: t is a recursive call, or reads one: x.a, x.#k (§5.6).

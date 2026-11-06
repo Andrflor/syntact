@@ -46,17 +46,17 @@ gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
 	if _, is_scope := v.(^Scope); is_scope do return true
 	// a carve that stays is of a scope not known yet: a scope (§5.3)
 	if _, is_carve := v.(^Carve); is_carve do return true
-	// a call, or what holds one: proven in the scopes, by induction (§5.6); what is read
-	// of one, by the same induction on what it reads, or by its values
+	// a call whose base cases are scopes is a scope (§5.6); what is read of one, when
+	// what its base cases give there is, or by its values
 	scopes :: proc(k: ^Kernel, t: Type) -> (bool, bool) {
 		c, is_call := as_call(t)
 		if !is_call do return false, false
-		f, known := call_family(k, c)
+		f, known := base_family(k, c)
 		return known && f == .Scope, true
 	}
 	if holds, is_call := scopes(k, v); is_call do return holds
 	if c, read := call_read(v); read {
-		if f, known := call_family(k, c, read_of(v)); known && f == .Scope do return true
+		if f, known := base_family(k, c, read_of(v)); known && f == .Scope do return true
 	}
 	set, ok := values(k, v)
 	if !ok do return false
