@@ -26,13 +26,46 @@ import "core:slice"
 // atom_ring: the ring law over atoms: a term the ring does not read — a fold, a
 // μ, a series, a power, a pattern — is a variable of the polynomial, named while
 // the law applies, then put back as it is.
-atom_ring :: proc(k: ^Kernel, op: Operator, args: []Type, field := false) -> (out: Type, ok: bool) {
+atom_ring :: proc(k: ^Kernel, o: Operator, args: []Type, field := false) -> (out: Type, ok: bool) {
 	back: Rewrite
 	named := make([]Type, len(args))
 	for a, i in args do named[i] = atomized(k, a, &back, field)
 	if len(back) == 0 do return
-	r := ring_law(op, named, field) or_return
+	r := ring_law(o, named, field) or_return
+	if !field do r = euclid(k, r, &back)
 	return unatomized(r, back), true
+}
+
+// euclid: a = (a / b)·b + a % b (§4.5): a multiple of b·(a / b), b > 0 a constant,
+// is that multiple of a - a % b — the quotient read through what it divides.
+euclid :: proc(k: ^Kernel, r: Type, back: ^Rewrite) -> Type {
+	ms, divisor, ring := monomials(r)
+	if !ring || divisor != 1 do return r
+	for m, at in ms {
+		fs := factors(m)
+		if len(fs) != 1 do continue
+		x, atom := rewritten(back^, fs[0])
+		if !atom do continue
+		q, is_op := x.(^Operation)
+		if !is_op || q.op != .Div do continue
+		b, constant := q.args[1].(Int)
+		c := coefficient(m)
+		if !constant || b <= 0 || c % i128(b) != 0 do continue
+		rest := make([dynamic]Type)
+		for y, j in ms do if j != at do append(&rest, y)
+		others, summed := ring_term(rest[:], 1)
+		if !summed do continue
+		a := atomized(k, q.args[0], back)
+		remainder := atomized(k, op(k, .Mod, q.args[0], q.args[1]), back)
+		whole, ok := ring_law(.Sub, {a, remainder})
+		if !ok do continue
+		multiple, scaled := ring_law(.Mul, {Int(c / i128(b)), whole})
+		if !scaled do continue
+		out, added := ring_law(.Add, {others, multiple})
+		if !added do continue
+		return euclid(k, out, back)
+	}
+	return r
 }
 
 // unatomized: the ring term t with its atoms put back as they are, its form kept.

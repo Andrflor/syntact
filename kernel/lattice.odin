@@ -1078,6 +1078,22 @@ int_bounds :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128), ok: bool) {
 		}
 		return lo, hi, true
 	}
+	// a meet: its elements are in each term, from the greatest least to the least
+	// greatest
+	if both, meet := t.(^And); meet && is_constant(t) {
+		found := false
+		for x in both.terms {
+			l, h, bounded := int_bounds(k, x)
+			if !bounded do continue
+			if !found {
+				lo, hi, found = l, h, true
+				continue
+			}
+			if a, has := l.?; has do if b, known := lo.?; !known || a > b do lo = a
+			if a, has := h.?; has do if b, known := hi.?; !known || a < b do hi = a
+		}
+		return lo, hi, found
+	}
 	o, is_op := t.(^Operation)
 	if !is_op || !is_constant(t) || is_text(t) do return
 	bounds := make([][2]Maybe(i128), len(o.args))

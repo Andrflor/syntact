@@ -540,43 +540,19 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return nil, false
 	case ^Collapse:
 		// a call that stays: giving scopes, the scope of its equation, read as a color
-		// (§5.4); giving integers, its type, the least solution of its equation, a range
-		// over its fields read in turn; otherwise the family it is proven in
+		// (§5.4); otherwise the family it is proven in
 		f := family_of(k, v) or_return
-		if f == .Int || f == .Count {
-			if lo, hi, ranged := call_range(k, v); ranged {
-				least, most: Type
-				if lo != nil do if l, _ := image_ends(k, lo); l != nil do least = Int(l.?)
-				if hi != nil do if _, h := image_ends(k, hi); h != nil do most = Int(h.?)
-				if least != nil || most != nil do return range_law(k, least, most, .Int, {}), true
-			}
-		}
 		if f == .Scope do if s, is_scope := v.target.(^Scope); is_scope do if eq, read := equation_of(k, origin(s), call_key(s)); read do return eq.generic, true
 		return family_term(f), true
 	case ^Fold:
 		// a run it builds: a run of what its steps place
 		if image, known := built_image(k, v); known do return image, true
-		// a state that adds g at each of its n steps, from s: s + n·(p..q), g in p..q
-		if lo, hi, counter := counter_range(k, v); counter && is_none(v.effects) {
-			for z, i in v.states {
-				if !same(k, v.value, z) do continue
-				one, g, affine := affine_in(k, v.updates[i], z)
-				if !affine || !is_int(one, 1) do break
-				n := op(k, .Add, op(k, .Sub, hi, lo), Int(1))
-				if image, summed := summed_image(k, v.inits[i], n, g); summed do return image, true
-			}
-		}
 		// its value, over the layouts of its states
 		if image, known := layout_image(k, v.value); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Least:
 		return COUNTS, true
 	case ^Series:
-		// n terms, each in p..q: n·(p..q), n = hi - lo + 1
-		if v.op == .Add {
-			n := op(k, .Add, op(k, .Sub, v.hi, v.lo), Int(1))
-			if image, summed := summed_image(k, Int(0), n, v.term); summed do return image, true
-		}
 		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Recurrent:
 		if f, known := family_of(k, t); known do return family_term(f), true
@@ -633,121 +609,130 @@ image_ends :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128)) {
 	return l, h
 }
 
-// summed_image: the image of s plus n terms, each what g may be, g in p..q: from
-// s + n·p to s + n·q, each end a term over the unknowns of s and n, read in turn.
-summed_image :: proc(k: ^Kernel, s, n, g: Type) -> (image: Type, ok: bool) {
-	each := layout_image(k, g) or_return
-	if !is_constant(each) do return
-	p, q := int_bounds(k, each) or_return
-	least, most: Type
-	if x, has := p.?; has {
-		if end, read := layout_image(k, op(k, .Add, s, op(k, .Mul, n, Int(x)))); read do if l, _, bounded := int_bounds(k, end); bounded do if y, ok := l.?; ok do least = Int(y)
-	}
-	if x, has := q.?; has {
-		if end, read := layout_image(k, op(k, .Add, s, op(k, .Mul, n, Int(x)))); read do if _, h, bounded := int_bounds(k, end); bounded do if y, ok := h.?; ok do most = Int(y)
-	}
-	if least == nil && most == nil do return
-	return range_law(k, least, most, .Int, {}), true
-}
-
 // related_image: the image of an integer term whose unknowns have layouts over other
-// unknowns, read with what relates them (§6): t = a·u + r, u in l..h, lies between
-// a·l + r and a·h + r — a range whose ends are terms over the other unknowns, whose
-// images are read in turn, the least of the one, the greatest of the other, until
-// they are constants. A layout that is a meet: each of its ranges, met. An unknown
-// eliminated is never brought back by an end.
+// unknowns, read with what relates them (§6). The unknown whose layout reads others
+// is eliminated: t = a·u + r, and for each term of its layout, u in l..h puts t
+// between a·l + r and a·h + r, a range whose ends are terms over the other unknowns,
+// read in turn; a constant set S puts it in a·S + r, exactly. The pieces meet: u is
+// in each. When no layout relates, the polynomial is read over the images of its
+// factors, each operator distributing over | (§4.5).
 related_image :: proc(k: ^Kernel, t: Type, eliminated: []int = nil) -> (image: Type, ok: bool) {
 	if is_constant(t) do return t, true
+	// an image being read has none yet: its reading does not come back to it
+	node := node_of(t)
+	if node != nil {
+		if node in k.imaging do return
+		k.imaging[node] = true
+		defer delete_key(&k.imaging, node)
+	}
 	back: Rewrite
 	p := atomized(k, t, &back)
 	ms, divisor, ring := monomials(p)
 	if !ring || divisor != 1 do return
-	// Euclid (§4.5): b·(a / b) = a - a % b, b > 0 — a multiple of a quotient read
-	// through what it divides
-	for m in ms {
+	for m, at in ms {
 		fs := factors(m)
 		if len(fs) != 1 do continue
-		x, atom := rewritten(back, fs[0])
-		if !atom do continue
-		q, is_op := x.(^Operation)
-		if !is_op || q.op != .Div do continue
-		b, constant := q.args[1].(Int)
-		c := coefficient(m)
-		if !constant || b <= 0 || c % i128(b) != 0 do continue
-		rest := make([dynamic]Type)
-		for y in ms do if y != m do append(&rest, y)
-		r := ring_term(rest[:], 1) or_continue
-		a := atomized(k, q.args[0], &back)
-		mod := atomized(k, new_operation(.Mod, q.args[0], q.args[1]), &back)
-		whole := ring_law(.Sub, {a, mod}) or_continue
-		scaled_whole := ring_law(.Mul, {Int(c / i128(b)), whole}) or_continue
-		sum := ring_law(.Add, {r, scaled_whole}) or_continue
-		return related_image(k, unatomized(sum, back), eliminated)
-	}
-	// the unknowns whose layouts read others first: eliminated, they bring what relates
-	// them; each choice gives the term's image, and the images meet
-	order := make([dynamic]int)
-	for pass in 0 ..< 2 do for m, at in ms {
-		fs := factors(m)
-		if len(fs) != 1 do continue
-		relates := !is_constant(layout_of(k, fs[0]))
-		if relates == (pass == 0) do append(&order, at)
-	}
-	images := make([dynamic]Type)
-	for at in order {
-		m := ms[at]
-		fs := factors(m)
 		u := fs[0]
 		if _, atom := rewritten(back, u); atom do continue
 		if slice.contains(eliminated, u.id) do continue
 		layout := layout_of(k, u)
+		if is_constant(layout) do continue
 		alpha := coefficient(m)
-		// r: the other monomials, in the ring — never normalized again here
+		// r: the other monomials, in the ring
 		rest := make([dynamic]Type)
 		for x, j in ms do if j != at do append(&rest, x)
 		r := ring_term(rest[:], 1) or_continue
 		next := make([]int, len(eliminated) + 1)
 		copy(next, eliminated)
 		next[len(eliminated)] = u.id
-		terms := []Type{layout}
-		if both, meet := layout.(^And); meet do terms = both.terms
 		// a·end + r, in the ring, read again with u eliminated
 		at_end :: proc(k: ^Kernel, end: Type, alpha: i128, r: Type, back: ^Rewrite) -> (out: Type, ok: bool) {
 			e := atomized(k, end, back)
 			scaled_end := ring_law(.Mul, {Int(alpha), e}) or_return
 			sum := ring_law(.Add, {scaled_end, r}) or_return
-			return unatomized(sum, back^), true
+			// in the normal form of the ring, Euclid's identity with it (ring.odin)
+			return unatomized(euclid(k, sum, back), back^), true
 		}
+		terms := []Type{layout}
+		if both, meet := layout.(^And); meet do terms = both.terms
 		pieces := make([dynamic]Type)
 		for x in terms {
+			if is_constant(x) {
+				// a·S + r, S a set of constants: the operators distribute over it
+				rest_image := related_image(k, unatomized(r, back), next) or_continue
+				if !is_constant(rest_image) do continue
+				scaled: Type
+				switch alpha {
+				case 1:
+					scaled = x
+				case -1:
+					scaled = exact_law(k, .Neg, {x}, {})
+				case:
+					scaled = exact_law(k, .Mul, {Int(alpha), x}, {})
+				}
+				append(&pieces, is_int(rest_image, 0) ? scaled : exact_law(k, .Add, {scaled, rest_image}, {}))
+				continue
+			}
 			lo, hi := range_ends(k, x)
 			if lo == nil && hi == nil do continue
 			if alpha < 0 do lo, hi = hi, lo
 			least, most: Type
 			if lo != nil && !reads_any(lo, eliminated) {
 				if e, ok := at_end(k, lo, alpha, r, &back); ok {
-					if image, read := related_image(k, e, next); read do if l, _, bounded := int_bounds(k, image); bounded do if x, has := l.?; has do least = Int(x)
+					if image, read := related_image(k, e, next); read do if l, _, bounded := int_bounds(k, image); bounded do if y, has := l.?; has do least = Int(y)
 				}
 			}
 			if hi != nil && !reads_any(hi, eliminated) {
 				if e, ok := at_end(k, hi, alpha, r, &back); ok {
-					if image, read := related_image(k, e, next); read do if _, h, bounded := int_bounds(k, image); bounded do if x, has := h.?; has do most = Int(x)
+					if image, read := related_image(k, e, next); read do if _, h, bounded := int_bounds(k, image); bounded do if y, has := h.?; has do most = Int(y)
 				}
 			}
 			if least == nil && most == nil do continue
 			append(&pieces, range_law(k, least, most, .Int, {}))
 		}
 		if len(pieces) == 0 do continue
-		append(&images, and_law(k, pieces[:]))
+		return and_law(k, pieces[:]), true
 	}
-	if len(images) > 0 do return and_law(k, images[:]), true
-	// no unknown relates: the image of the layouts, each on its own
-	if image, read := layout_image_plain(k, t); read && is_constant(image) do return image, true
-	return
+	// no layout relates: Σ c·Π factors, over the images of the factors
+	total: Type
+	for m in ms {
+		c := coefficient(m)
+		term: Type
+		if len(factors(m)) == 0 do term = Int(c)
+		for f in factors(m) {
+			x, atom := rewritten(back, f)
+			image: Type
+			read: bool
+			switch {
+			case atom:
+				image, read = layout_image(k, x)
+			case is_constant(layout_of(k, f)):
+				image, read = layout_of(k, f), true
+			case !slice.contains(eliminated, f.id):
+				// a layout over others: the same law, the unknown on its own
+				image, read = related_image(k, f, eliminated)
+			}
+			if !read || !is_constant(image) do return
+			term = term == nil ? image : exact_law(k, .Mul, {term, image}, {})
+		}
+		// the coefficient: ±1 the set or its opposite, computed; otherwise its multiple
+		if len(factors(m)) > 0 {
+			switch c {
+			case 1:
+			case -1:
+				term = exact_law(k, .Neg, {term}, {})
+			case:
+				term = exact_law(k, .Mul, {Int(c), term}, {})
+			}
+		}
+		total = total == nil ? term : exact_law(k, .Add, {total, term}, {})
+	}
+	if total == nil do total = Int(0)
+	return total, is_constant(total)
 }
 
-// range_ends: the ends of a range in a layout — ~(..h) is h + 1.., ~(l..) is ..l - 1;
-// a constant set, its least and greatest.
+// range_ends: the ends of a range over unknowns in a layout — ~(..h) is h + 1..,
+// ~(l..) is ..l - 1.
 range_ends :: proc(k: ^Kernel, x: Type) -> (lo, hi: Type) {
 	#partial switch v in x {
 	case ^Range:
@@ -757,10 +742,6 @@ range_ends :: proc(k: ^Kernel, x: Type) -> (lo, hi: Type) {
 			if r.lo != nil do return nil, op(k, .Sub, r.lo, Int(1))
 			return op(k, .Add, r.hi, Int(1)), nil
 		}
-	}
-	if is_constant(x) do if l, h, bounded := int_bounds(k, x); bounded {
-		if a, has := l.?; has do lo = Int(a)
-		if b, has := h.?; has do hi = Int(b)
 	}
 	return
 }
@@ -772,25 +753,6 @@ reads_any :: proc(t: Type, ids: []int) -> bool {
 	read_unknowns(t, &read)
 	for u in read do if slice.contains(ids, u.id) do return true
 	return false
-}
-
-// layout_image_plain: the image of t, each unknown read in its layout on its own.
-layout_image_plain :: proc(k: ^Kernel, t: Type) -> (Type, bool) {
-	o, is_op := t.(^Operation)
-	if !is_op {
-		if u, is_unknown := t.(^Unknown); is_unknown do return held(k, layout_of(k, u))
-		return layout_image(k, t)
-	}
-	args := make([]Type, len(o.args))
-	for a, i in o.args {
-		x: Type
-		read: bool
-		if u, is_unknown := a.(^Unknown); is_unknown do x, read = held(k, layout_of(k, u))
-		else do x, read = layout_image(k, a)
-		if !read || !is_constant(x) do return nil, false
-		args[i] = x
-	}
-	return exact_law(k, o.op, args, o.span), true
 }
 
 // built_image: the run a fold builds, {e₀ … eₙ₋₁}: the shape {...{E:} * 0..},

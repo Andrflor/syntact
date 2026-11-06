@@ -218,9 +218,17 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 		said := false
 		for target in targets {
 			u, set, exact := target.unknown, rewrite(k, target.set, out), target.exact
-			// a set over unknowns whose layouts read u: u is in it all the same, a
-			// relation the linear theory reads as it is
-			if !is_constant(set) && depends(k, set, u) do exact = false
+			// a set over unknowns whose layouts read u: a layout never reads its own
+			// unknown (§6) — u is in what S may hold when the literal holds, its image;
+			// out of what it always holds when it does not, which is not read here
+			if !is_constant(set) && depends(k, set, u) {
+				held: Type
+				read: bool
+				if positive do held, read = layout_image(k, set)
+				else do held, read = always_held(k, target.set)
+				if !read || !is_constant(held) do continue
+				set, exact = held, false
+			}
 			current := layout_of(k, u)
 			if x, found := rewritten(out, u); found {
 				current = x
@@ -368,6 +376,26 @@ holds_invalid :: proc(t: Type) -> bool {
 	}
 	for x in parts(t) do if holds_invalid(x) do return true
 	return false
+}
+
+// always_held: the constants a range over unknowns holds whatever its unknowns: from
+// the greatest its lower end may be to the least its upper end may be, each read on
+// its image (§6).
+always_held :: proc(k: ^Kernel, s: Type) -> (held: Type, ok: bool) {
+	r, is_range := s.(^Range)
+	if !is_range do return nil, false
+	from, to: Type
+	if r.lo != nil {
+		_, h := image_ends(k, r.lo)
+		x := h.? or_return
+		from = Int(x)
+	}
+	if r.hi != nil {
+		l, _ := image_ends(k, r.hi)
+		x := l.? or_return
+		to = Int(x)
+	}
+	return range_law(k, from, to, .Int, {}), true
 }
 
 // Narrowed: an unknown, the set a literal puts it in, and whether that set says
