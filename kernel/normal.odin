@@ -610,7 +610,9 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 			return cell
 		case .Value:
 			if i, ok := cell.(^Is); ok do return i.term
-			return default_of(k, cell, span)
+			if _, scope := cell.(^Scope); scope do return default_of(k, cell, span)
+			// a meet the laws leave: no first element is written
+			return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
 		case .Other:
 			return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
 		}

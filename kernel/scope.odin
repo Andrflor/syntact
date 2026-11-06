@@ -1011,8 +1011,11 @@ layout_pieces :: proc(k: ^Kernel, layout: Type) -> (pieces: Type, m: Type, ok: b
 			pieces, m = o.args[0], o.args[1]
 			continue
 		}
-		rest, is_scope := c.(^Scope)
-		if !is_scope || len(placed(k, rest, .Shape)) != 0 do return
+		rest := c.(^Scope) or_return
+		if len(placed(k, rest, .Shape)) == 0 do continue
+		// a run of a shape is its bindings placed (§5.3): the pieces of that shape
+		if pieces != nil do return
+		pieces, m = layout_pieces(k, rest) or_return
 	}
 	return pieces, m, pieces != nil
 }
@@ -1567,7 +1570,8 @@ suffix :: proc(k: ^Kernel, layout: Type, at: Type) -> (out: Type, ok: bool) {
 		if _, m, repeats := layout_pieces(k, v); repeats && same(k, m, COUNTS) do return v, true
 		// a run of values: its suffix at each place k may be (§4.5: x from k distributes
 		// over the values of k)
-		if xs := run_data(k, v); !is_shape(k, v) {
+		if !is_shape(k, v) {
+			xs := run_data(k, v)
 			for x in xs do if x.kind != .Push do return
 			lo, hi := 0, len(xs)
 			if image, known := layout_image(k, at); known {

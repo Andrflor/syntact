@@ -488,19 +488,20 @@ carved_in :: proc(k: ^Kernel, x: Type, s: ^Scope) -> bool {
 	return holds(k, put.args[0], s)
 }
 
-// run_form: a shape of unnamed places then runs of pieces, read as a run: how many
+// run_form: a shape of unnamed places and runs of pieces, read as a run: how many
 // places it has, the colors its bindings may take, and how many bindings its runs
-// take, each a set or a term — nil when a run takes any number (§5.3).
+// take, each a set or a term — nil when a run takes any number (§5.3). A run
+// `...C:` of a shape C is the bindings of C placed (§5.3: an expansion places the
+// bindings as they are; §5.4: `...C:` admits the runs C admits).
 run_form :: proc(k: ^Kernel, s: ^Scope) -> (fixed: int, colors: []Type, counts: Type, ok: bool) {
 	shape := s
 	if recursive(s) do shape = arden(k, s) or_return
 	if !is_shape(k, shape) do return
-	runs := false
 	found := make([dynamic]Type)
 	counts = Int(0)
 	for p in placed(k, shape, .Shape) {
 		if !is_run(p) {
-			if runs || p.name != "" do return // the bindings of a run are unnamed
+			if p.name != "" do return // the bindings of a run are unnamed
 			fixed += 1
 			// what the place admits: its color, or the value written there
 			c := binding_color(k, p)
@@ -509,23 +510,25 @@ run_form :: proc(k: ^Kernel, s: ^Scope) -> (fixed: int, colors: []Type, counts: 
 			continue
 		}
 		if p.color == nil {
-			runs = true
 			counts = nil
 			continue
 		}
 		color := binding_color(k, p)
-		// a run of the empty shape places nothing
-		if empty, is_scope := color.(^Scope); is_scope && is_shape(k, empty) && len(placed(k, empty, .Shape)) == 0 do continue
-		// a repetition A * n places pieces of A; a scope, the pieces of its runs
-		pieces, m: Type
-		if o, repeats := color.(^Operation); repeats && o.op == .Mul do pieces, m = o.args[0], o.args[1]
-		else do pieces, m = layout_pieces(k, color) or_return
-		piece := pieces.(^Scope) or_return
-		inner := placed(k, piece, .Shape)
-		if len(inner) != 1 || is_run(inner[0]) do return
-		runs = true
-		if counts != nil do counts = exact_law(k, .Add, {counts, m}, p.span)
-		if c := binding_color(k, inner[0]); c != nil do append(&found, c)
+		// a repetition A * n places n pieces of A
+		if o, repeats := color.(^Operation); repeats && o.op == .Mul {
+			piece := o.args[0].(^Scope) or_return
+			inner := placed(k, piece, .Shape)
+			if len(inner) != 1 || is_run(inner[0]) do return
+			if counts != nil do counts = exact_law(k, .Add, {counts, o.args[1]}, p.span)
+			if c := binding_color(k, inner[0]); c != nil do append(&found, c)
+			continue
+		}
+		// a run of a shape: its bindings placed
+		inner := color.(^Scope) or_return
+		n, cs, m := run_form(k, inner) or_return
+		fixed += n
+		append(&found, ..cs)
+		if counts != nil do counts = m == nil ? nil : exact_law(k, .Add, {counts, m}, p.span)
 	}
 	return fixed, found[:], counts, true
 }

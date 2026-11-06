@@ -1,0 +1,6 @@
+{
+  "name": "tc_run_of_shape_is_its_items",
+  "description": "A run `...C:` of a shape C is the bindings of C placed (§5.3, §5.4): {...Bytes8: ...Word:} is 8 bytes then at least one, in {...Bytes8: ...A:}; Bytes8 is in {...A: ...Bytes8:}; 16 bytes then Over8 is in 8 bytes then Word.",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nA -> Array{u8}\nWord -> {u8: ...A:}\nBytes8 -> {u8: u8: u8: u8: u8: u8: u8: u8:}\nOver8 -> {u8: u8: u8: u8: u8: u8: u8: u8: ...Word:}\n{...Bytes8: ...A:}:a -> ??::{...Bytes8: ...Word:}\n{...A: ...Bytes8:}:b -> ??::Bytes8\n{u8: u8: u8: u8: u8: u8: u8: u8: ...Word:}:c -> ??::{u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: u8: ...Over8:}\nA:d -> ??::{u8: ...Word:}",
+  "expect_errors": []
+}
