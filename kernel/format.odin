@@ -102,6 +102,8 @@ operands_format :: proc(k: ^Kernel, op: Operator, args: []Type) -> Real_Format {
 term_format :: proc(k: ^Kernel, t: Type) -> Real_Format {
 	if o, ok := t.(^Operation); ok && o.op == .Round do return rounded_format(o)
 	if is_constant(t) do return reals_format(t, false)
+	// a term of another family than the reals has none: read from its form
+	if f, known := family_of(k, t); known && f != .Real do return .Exact
 	image, ok := layout_image(k, t)
 	return ok ? reals_format(image, false) : .Exact
 }
