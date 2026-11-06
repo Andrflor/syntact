@@ -1147,6 +1147,8 @@ counter_next :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse, u: ^Unknown) -> (next:
 		if same_unknown(x, u) do next = v
 		else do carried[x] = v
 	}
+	// the orbit of k by s(k): a step reading a state the call changes is no orbit
+	for x, v in carried do if !same(k, v, x) && reads(k, next, x) do return
 	return next, carried, next != nil
 }
 

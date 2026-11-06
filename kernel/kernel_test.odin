@@ -309,6 +309,10 @@ SPEC_CASES := []Spec_Case {
 	{"fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\nx -> fact{n -> 5}!", "Π(x: 1..5, x)", {}},
 	// states carried by the call: the fold goes down, each a state of it
 	{"count -> {u32:n -> ??  u64:r -> ??  -> n ? {0 -> r  -> count{n -> n - 1  r -> r ^ n}!}}\nx -> count{n -> 3  r -> 0}!", "⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ y ^ -x + 3; y)", {}},
+	// a step reading a state the call changes is no orbit: Euclid stays a call
+	{"f -> {u32:a -> ??  u32:b -> ??  -> b ? {0 -> a  -> f{a -> b  b -> a % b}!}}\nx -> f{a -> ??::u32  b -> ??::u32}!", "f{a -> ?2  b -> ?3}!", {}},
+	// a place of a run shape written with a value admits that value only
+	{ARRAY + "A -> Array{u8}\nxs -> ??::(A & ~{})\nx -> xs ? {\n  {32  ...A:(t)} -> 1\n  -> 0\n}", "?0 ? {{32  ...A:} -> 1  -> 0}", {}},
 	// a run is the orbit of its positions: a fold on k until |xs|, h = xs.#k
 	{ARRAY + "A -> Array{u8}\ntotal -> {\n  A:xs -> {}\n  u8:acc -> 0\n  -> xs ? {\n    {u8(h) ...A:(t)} -> total{xs -> t  acc -> (acc + h) [&] 255}!\n    -> acc\n  }\n}\nx -> total{xs -> ??::A}!", "⟳(x: 0 ↦ x + 1 until |?0|..; y: 0 ↦ y + ?0.#x [&] 255; y)", {}},
 	{ARRAY + "A -> Array{u8}\ntotal -> {\n  A:xs -> {}\n  u8:acc -> 0\n  -> xs ? {\n    {u8(h) ...A:(t)} -> total{xs -> t  acc -> (acc + h) [&] 255}!\n    -> acc\n  }\n}\nx -> total{xs -> {1 2 3}}!", "⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ y + {1  2  3}.#x [&] 255; y)", {}},

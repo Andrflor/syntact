@@ -502,7 +502,10 @@ run_form :: proc(k: ^Kernel, s: ^Scope) -> (fixed: int, colors: []Type, counts: 
 		if !is_run(p) {
 			if runs || p.name != "" do return // the bindings of a run are unnamed
 			fixed += 1
-			if c := binding_color(k, p); c != nil do append(&found, c)
+			// what the place admits: its color, or the value written there
+			c := binding_color(k, p)
+			if c == nil && p.value != nil do c = place_set(k, p) or_return
+			if c != nil do append(&found, c)
 			continue
 		}
 		if p.color == nil {

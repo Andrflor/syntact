@@ -333,7 +333,7 @@ join_shapes :: proc(k: ^Kernel, cells: []Type) -> []Type {
 		for s, i in g {
 			places := placed(k, s, .Shape)
 			rows[i] = make([]Type, len(places))
-			for p, j in places do rows[i][j] = binding_color(k, p)
+			for p, j in places do rows[i][j], _ = place_set(k, p)
 		}
 		template := placed(k, g[0], .Shape)
 		for row in product_rows(k, rows) do append(&out, product_shape(template, row))
@@ -341,11 +341,20 @@ join_shapes :: proc(k: ^Kernel, cells: []Type) -> []Type {
 	return out[:]
 }
 
-// joinable: a shape whose places are all colored and hold no value.
+// joinable: a shape each of whose places admits a set of its own (place_set).
 joinable :: proc(k: ^Kernel, s: ^Scope) -> bool {
 	if !is_shape(k, s) do return false
-	for p in placed(k, s, .Shape) do if p.color == nil || p.value != nil do return false
+	for p in placed(k, s, .Shape) do if _, admits := place_set(k, p); !admits do return false
 	return true
+}
+
+// place_set: what a place of a shape admits: its color, holding no value; a value
+// written there without color, that value — a value is a set (§5.1).
+place_set :: proc(k: ^Kernel, p: ^Binding) -> (set: Type, ok: bool) {
+	if p.color != nil do return binding_color(k, p), p.value == nil
+	if p.value == nil || p.kind == .Expand do return
+	set = values(k, binding_value(k, p)) or_return
+	return set, is_constant(set)
 }
 
 // same_structure: the same names, kinds and order.
@@ -490,7 +499,7 @@ product_pair :: proc(k: ^Kernel, x, y: Type) -> (a, b: ^Scope, ok: bool) {
 shape_row :: proc(k: ^Kernel, s: ^Scope) -> []Type {
 	places := placed(k, s, .Shape)
 	row := make([]Type, len(places))
-	for p, i in places do row[i] = binding_color(k, p)
+	for p, i in places do row[i], _ = place_set(k, p)
 	return row
 }
 

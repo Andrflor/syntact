@@ -583,7 +583,11 @@ binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
 	case .Add, .Sub, .Mul:
 		if proven(w, x.dst) do return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
 		return fmt.tprintf("%s(%s, %s)", WRAPS[x.op], a, b), ""
-	case .Div, .Mod, .And, .Or, .Xor, .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
+	case .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
+		// one word read as unsigned: both are, as x64 compares them
+		if code.unsigned(w.f.kinds[x.a]) || code.unsigned(w.f.kinds[x.b]) do return fmt.tprintf("(uint64_t)%s %s (uint64_t)%s", a, C_OPS[x.op], b), ""
+		return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
+	case .Div, .Mod, .And, .Or, .Xor:
 		return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
 	case .Shl:
 		return fmt.tprintf("wrap_shl(%s, %s)", a, b), ""
