@@ -83,6 +83,28 @@ Read_Key :: struct {
 // gives it back — only what holds a rewritten unknown is computed again.
 rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	if len(r) == 0 || t == nil do return t
+	// a shared node rewritten once in a rewrite: a term is a graph of shared nodes,
+	// rewritten as a graph, not as the tree it unfolds into
+	node := node_of(t)
+	if node == nil do return rewrite_node(k, t, r)
+	key := Rewrite_Key{node, raw_data(r), len(r)}
+	if x, found := k.rewritten[key]; found do return x
+	k.rewrites += 1
+	out := rewrite_node(k, t, r)
+	k.rewrites -= 1
+	k.rewritten[key] = out
+	if k.rewrites == 0 do clear(&k.rewritten)
+	return out
+}
+
+// Rewrite_Key: a node and the rewrite it is under.
+Rewrite_Key :: struct {
+	node:    rawptr,
+	rewrite: rawptr,
+	len:     int,
+}
+
+rewrite_node :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	for x in r do if x.read != nil && same(k, x.read, t) do return x.term
 	switch v in t {
 	case Char, Int, Real, Bool, None, Invalid:

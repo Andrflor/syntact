@@ -594,6 +594,8 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 			return cell
 		case .Value:
 			if i, ok := cell.(^Is); ok do return i.term
+			// a cell that is the color itself has no default its cells give
+			if same(k, cell, c) do return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
 			return default_of(k, cell, span)
 		case .Other:
 			return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))

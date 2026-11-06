@@ -45,6 +45,8 @@ Kernel :: struct {
 	plain:      map[^Operation]Plain, // what is known of an operation over plain unknowns, once (rewrite.odin)
 	read:       map[Read_Key]bool, // whether a node reads an unknown, once asked (rewrite.odin)
 	valued:     map[rawptr]Type, // what a shared node may hold, once read (size.odin)
+	rewritten:  map[Rewrite_Key]Type, // within one rewrite, each shared node rewritten once (rewrite.odin)
+	rewrites:   int, // the depth of the rewrites under way
 	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file

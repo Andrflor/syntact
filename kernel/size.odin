@@ -200,6 +200,8 @@ values_of :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
 	#partial switch v in t {
 	case ^Unknown:
 		return layout_of(k, v), true
+	case ^Collapse:
+		if v.recursive do return call_values(k, v)
 	case ^Scope:
 		return v, true // a scope is one value
 	case ^Pattern:

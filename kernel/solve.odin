@@ -30,6 +30,8 @@ Recursion :: struct {
 	through:  map[^Binding]^Recursion, // a field given a call of another equation: that equation (§5.6)
 	solution: Type, // the term without calls of root, when the laws give one
 	reading:  bool, // being read: its calls are the hypothesis (§5.6)
+	values:   Type, // the type of its calls, once found (call_values)
+	valued:   bool,
 }
 
 // call_key: the fields a carve of root changes, in their order.
@@ -384,6 +386,51 @@ call_range :: proc(k: ^Kernel, call: ^Collapse, length := false) -> (lo, hi: Typ
 		if q, has_q := qhi.?; has_q do hi = rewrite(k, along(k, p, u, stop, moved, a_hi, b, q), at)
 	}
 	return lo, hi, lo != nil || hi != nil
+}
+
+// call_values: the values of a call that stays that gives runs: the least solution
+// of its definition read on types (§5.6). Its products place bindings and expand
+// runs and its calls: X = B | {P ...X ...Q} lies in the runs of what they place
+// (Arden), proven by induction on the equation.
+call_values :: proc(k: ^Kernel, call: ^Collapse) -> (set: Type, ok: bool) {
+	s := call.target.(^Scope) or_return
+	key, through := call_key(s), through_of(k, s)
+	eq, found := equation_found(k, origin(s), key, through)
+	if !found do eq = equation_of(k, origin(s), key, through) or_return
+	// while it is read, its calls are the hypothesis: nothing is known of them yet
+	if eq.term == nil || eq.reading do return
+	if eq.valued do return eq.values, eq.values != nil
+	eq.valued = true
+	leaves := make([dynamic]Product)
+	products(k, eq.term, &leaves)
+	items := make([dynamic]Type)
+	for leaf in leaves {
+		if is_none(leaf.term) do continue
+		product := given(k, read_in(k, leaf, leaf.term))
+		if c, is_call := called(product); is_call && origin(c.target.(^Scope) or_return) == eq.root do continue
+		v := product.(^Scope) or_return
+		for b in run_data(k, v) {
+			x := binding_value(k, b)
+			if b.kind != .Expand {
+				append(&items, values(k, x) or_return)
+				continue
+			}
+			if c, is_call := called(x); is_call && origin(c.target.(^Scope) or_return) == eq.root do continue
+			placed := values(k, x) or_return
+			if empty, is_scope := placed.(^Scope); is_scope && len(run_data(k, empty)) == 0 do continue
+			append(&items, item_image(k, placed) or_return)
+		}
+	}
+	if len(items) == 0 do return
+	piece := new_scope(nil, call.span)
+	piece.source, piece.complete, piece.reached = piece, true, true
+	b := new_binding(piece, .Push, call.span)
+	b.color = or_law(k, items[:])
+	b.typed_color = b.color
+	set = runs_of(k, piece, Int(0), nil, nil)
+	if !call_in(k, call, set) do return nil, false
+	eq.values = set
+	return set, true
 }
 
 // moves: the fields a call of the equation moves, in their order, each to a term over
