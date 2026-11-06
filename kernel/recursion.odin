@@ -333,9 +333,33 @@ solved_once :: proc(k: ^Kernel, eq: ^Call_Equation) -> (solution: Type, ok: bool
 }
 
 // substituted: a solution at the values r gives (§5.6), its bound unknowns its own —
-// renamed once their layouts have followed the values.
+// renamed once their layouts have followed the values: those whose layouts read
+// what is given, and those a value holds. The others are the same in every copy and
+// none can be captured: the solution at the same values is the same term, read once.
 substituted :: proc(k: ^Kernel, solution: Type, r: Rewrite) -> Type {
-	return renamed(k, rewrite(k, solution, r))
+	out := rewrite(k, solution, r)
+	bound := make([dynamic]^Unknown)
+	bound_unknowns(solution, &bound)
+	if len(bound) == 0 do return out
+	held := make([dynamic]^Unknown)
+	for x in r {
+		if x.term == nil do continue
+		read_unknowns(x.term, &held)
+		bound_unknowns(x.term, &held)
+	}
+	clashing := make([dynamic]^Unknown)
+	next: for u in bound {
+		if u.layout != nil && !is_constant(u.layout) {
+			append(&clashing, u)
+			continue
+		}
+		for h in held do if u.id == h.id {
+			append(&clashing, u)
+			continue next
+		}
+	}
+	if len(clashing) == 0 do return out
+	return renamed(k, out, clashing[:])
 }
 
 // at_values: each unknown of the equation at the value given to its binding, or at

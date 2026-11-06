@@ -319,37 +319,48 @@ bound_as :: proc(k: ^Kernel, r: Rewrite, u: ^Unknown) -> (^Unknown, bool) {
 	return u, false
 }
 
-// renamed: t, each unknown bound in it — the index and the states of a fold, the
-// index of a Σ or a μ — another of the same layout: the same term, its bound
-// unknowns its own.
-renamed :: proc(k: ^Kernel, t: Type) -> Type {
-	bound := make([dynamic]^Unknown)
-	visit :: proc(t: Type, out: ^[dynamic]^Unknown) {
-		#partial switch v in t {
-		case ^Fold:
-			append(out, v.index)
-			append(out, ..v.states)
-			for p in fold_parts(v) do visit(p, out)
-		case ^Series:
-			append(out, v.index)
-			visit(v.lo, out)
-			visit(v.hi, out)
-			visit(v.term, out)
-		case ^Least:
-			append(out, v.index)
-			visit(v.holds, out)
-		case ^Pattern:
-			visit(v.target, out)
-			for b in v.branches do visit(b.product, out)
-		case ^Effect:
-			visit(v.then, out)
-			if v.choice != nil do visit(v.choice, out)
-		case ^Scope, ^Collapse:
-		case:
-			for p in parts(t) do visit(p, out)
-		}
+// bound_unknowns: the unknowns bound in t — the index and the states of a fold, the
+// index of a Σ or a μ.
+bound_unknowns :: proc(t: Type, out: ^[dynamic]^Unknown) {
+	#partial switch v in t {
+	case ^Fold:
+		append(out, v.index)
+		append(out, ..v.states)
+		for p in fold_parts(v) do bound_unknowns(p, out)
+	case ^Series:
+		append(out, v.index)
+		bound_unknowns(v.lo, out)
+		bound_unknowns(v.hi, out)
+		bound_unknowns(v.term, out)
+	case ^Least:
+		append(out, v.index)
+		bound_unknowns(v.holds, out)
+	case ^Pattern:
+		bound_unknowns(v.target, out)
+		for b in v.branches do bound_unknowns(b.product, out)
+	case ^Effect:
+		bound_unknowns(v.then, out)
+		if v.choice != nil do bound_unknowns(v.choice, out)
+	case ^Scope, ^Collapse:
+	case:
+		for p in parts(t) do bound_unknowns(p, out)
 	}
-	visit(t, &bound)
+}
+
+// renamed: t, each unknown bound in it — or only those given — another of the same
+// layout: the same term, its bound unknowns its own.
+renamed :: proc(k: ^Kernel, t: Type, only: []^Unknown = nil) -> Type {
+	all := make([dynamic]^Unknown)
+	bound_unknowns(t, &all)
+	bound := all[:]
+	if only != nil {
+		some := make([dynamic]^Unknown)
+		for u in all do for x in only do if x.id == u.id {
+			append(&some, u)
+			break
+		}
+		bound = some[:]
+	}
 	if len(bound) == 0 do return t
 	r: Rewrite
 	for u in bound {
