@@ -53,10 +53,12 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	// a field, a binding, of what a call gives: in c by induction on it (call_in)
 	if call, read := call_read(x); read && call_in(k, call, c, read_of(x)) do return Bool(true)
 	if f, ok := x.(^Fold); ok && fold_induction(k, f, c) do return Bool(true)
-	// t & A, t one value: t where it is in A (§4.2), in c when t is in ~A | c
+	// t & A, t one value: t where it is in A (§4.2), in c when t is in ~A | c, out of
+	// c when t is in ~A | ~c
 	if meet, ok := x.(^And); ok {
 		if t, sets, one := value_in_meet(k, meet); one {
-			if verdict, decided := in_law(k, t, or_law(k, {not_law(k, sets), c})).(Bool); decided do return verdict
+			if is_bool(in_law(k, t, or_law(k, {not_law(k, sets), c})), true) do return Bool(true)
+			if is_bool(in_law(k, t, or_law(k, {not_law(k, sets), not_law(k, c)})), true) do return Bool(false)
 		}
 	}
 	// an operation on values is in the family its signature gives (§4.5)

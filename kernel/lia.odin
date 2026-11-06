@@ -9,6 +9,7 @@ package kernel
 //   ring does not read — a product of unknowns, x % m, x / c, a fold, a Σ —, named;
 //   an unknown lies in its layout; x % m, m > 0, in 0..m − 1 when x ≥ 0 (Euclid);
 //   x / c, c > 0, x ≥ 0: c·q ≤ x ≤ c·q + c − 1; x [&] m, m ≥ 0: in 0..m;
+//   a pattern, one of its products: between the least and the greatest of them;
 //   a Σ of n terms g, or a fold adding g at each of its n steps, from s:
 //   s + n·p ≤ S ≤ s + n·q, p ≤ g ≤ q what the theory gives of g (induction on the
 //   steps);
@@ -152,6 +153,23 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 				if lo, hi, bounded := int_bounds(k, image); bounded do within(s, a, lo, hi)
 			}
 		}
+	case ^Pattern:
+		// a pattern gives one of its products, each read in its branch (§6): a
+		// disjunction, split; the atom lies between the least and the greatest any
+		// of them takes — none gives no value
+		lo, hi: Maybe(i128)
+		leaves := make([dynamic]Product)
+		products(k, v, &leaves)
+		for leaf in leaves {
+			if is_none(leaf.term) do continue
+			p, q := extremes(k, read_in(k, leaf, leaf.term))
+			l, has_l := p.?
+			h, has_h := q.?
+			if !has_l || !has_h do return true
+			if x, has := lo.?; !has || l < x do lo = l
+			if x, has := hi.?; !has || h > x do hi = h
+		}
+		within(s, a, lo, hi)
 	case ^Series:
 		if v.op != .Add do return true
 		// n terms g: n·p ≤ S ≤ n·q, p ≤ g ≤ q
