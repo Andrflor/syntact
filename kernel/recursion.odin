@@ -797,7 +797,8 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		for &z, j in states {
 			z = new_unknown(k, nil)
 			z.layout = family_term(family)
-			inits[j] = rewrite(k, c, rewriting(nil, u, at(k, ki, i, op(k, .Add, n, Int(j)))))
+			// the base at kₙ, the point in B where the orbit stops
+			inits[j] = rewrite(k, c, rewriting(nil, u, j == 0 ? ending : at(k, ki, i, op(k, .Add, n, Int(j)))))
 		}
 		for y, j in ys do inside = rewriting(inside, y, states[ahead[j] - 1])
 		updates := make([]Type, d)
