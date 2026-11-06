@@ -696,15 +696,19 @@ euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 		return bounded && low >= 0
 	}
 	for d in quotients {
+		// t reads d alone: its image is read on the image of d, which reads d itself
+		// a reading of n / c rewrites n where t reads it, not in the layouts that do
+		_, by_constant := d.args[1].(Int)
+		if Type(d) != t && !relates(k, t, d, !(d.op == .Div && by_constant)) do continue
 		if d.op == .Bit_And {
 			if Type(d) == t || !natural(k, d.args[0]) || !natural(k, d.args[1]) do continue
-			w := new_unknown(k, nil)
+			layout: Type
 			for m in d.args do if !is_constant(m) {
 				within := range_law(k, Int(0), m, .Int, {})
-				w.layout = w.layout == nil ? within : and_law(k, {w.layout, within})
+				layout = layout == nil ? within : and_law(k, {layout, within})
 			}
-			if w.layout == nil do continue
-			return related(k, t, out, append_read(nil, d, w))
+			if layout == nil do continue
+			return related(k, t, out, append_read(nil, d, read_by(k, d, 0, layout)))
 		}
 		n, b := d.args[0], d.args[1]
 		c, constant := b.(Int)
@@ -717,19 +721,19 @@ euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 			divisor, _ := term_bound(k, b, true)
 			if one, known := divisor.(Int); !known || one < 1 do continue
 			if d.op == .Mod {
-				r := new_unknown(k, nil)
 				top := op(k, .Sub, b, Int(1))
-				r.layout = range_law(k, natural ? Int(0) : op(k, .Neg, top), top, .Int, {})
+				r := read_by(k, d, 0, range_law(k, natural ? Int(0) : op(k, .Neg, top), top, .Int, {}))
 				return related(k, t, out, append_read(nil, d, r))
 			} else if whole, divided := divided_by(k, n, b, natural); divided {
 				return related(k, t, out, append_read(nil, d, whole))
+			} else if q, bounded := bounded_quotient(k, d, natural); bounded {
+				return related(k, t, out, append_read(nil, d, q))
 			}
 			continue
 		}
 		if d.op != .Div || c <= 0 || !natural do continue
-		q, r := new_unknown(k, nil), new_unknown(k, nil)
-		q.layout = layout_image(k, d) or_continue
-		r.layout = range_law(k, Int(0), Int(c - 1), .Int, {})
+		image := layout_image(k, d) or_continue
+		q, r := read_by(k, d, 0, image), read_by(k, d, 1, range_law(k, Int(0), Int(c - 1), .Int, {}))
 		whole := op(k, .Add, op(k, .Mul, c, q), r)
 		reading := append_read(nil, d, q)
 		if u, is_unknown := n.(^Unknown); is_unknown {
@@ -745,17 +749,110 @@ euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 	return out
 }
 
+// Reading_Key: a term read by an unknown where its image relates it (euclid_image), in
+// a state of what is being given; part tells the quotient from the remainder of n / c.
+Reading_Key :: struct {
+	node:  rawptr,
+	state: u64,
+	part:  int,
+}
+
+// reading_key: the key of d: a plain term (plain_of) is read alike in every state.
+reading_key :: proc(k: ^Kernel, d: ^Operation, part: int) -> Reading_Key {
+	_, plain := plain_of(k, d)
+	return {d, plain ? 0 : k.state, part}
+}
+
+// read_by: the unknown that reads the term d, of that layout: one for each node, as
+// the term is one node (intern.odin), so that what reads it is shared too.
+read_by :: proc(k: ^Kernel, d: ^Operation, part: int, layout: Type) -> ^Unknown {
+	key := reading_key(k, d, part)
+	if u, found := k.readings[key]; found do return u
+	u := new_unknown(k, nil)
+	u.layout = layout
+	k.readings[key] = u
+	return u
+}
+
+// unknowns_beside: the unknowns t reads elsewhere than in the term d.
+unknowns_beside :: proc(t: Type, d: Type, out: ^[dynamic]^Unknown) {
+	if t == nil || t == d do return
+	#partial switch v in t {
+	case ^Unknown:
+		for u in out do if u.id == v.id do return
+		append(out, v)
+		return
+	case ^Fold:
+		for p in fold_parts(v) do unknowns_beside(p, d, out)
+		return
+	case ^Series:
+		for p in ([]Type{v.lo, v.hi, v.term}) do unknowns_beside(p, d, out)
+		return
+	case ^Least:
+		unknowns_beside(v.holds, d, out)
+		return
+	case ^Recurrent:
+		for p in v.initial do unknowns_beside(p, d, out)
+		unknowns_beside(v.at, d, out)
+		return
+	case ^Pattern:
+		unknowns_beside(v.target, d, out)
+		for b in v.branches do unknowns_beside(b.product, d, out)
+		return
+	case ^Effect:
+		unknowns_beside(v.then, d, out)
+		return
+	}
+	for p in parts(t) do unknowns_beside(p, d, out)
+}
+
+// relates: t reads, elsewhere than in d, an unknown d reads, or — through layouts —
+// one whose layout reads it: what a reading of d keeps beside d. Otherwise t reads d
+// alone, through its image (§7).
+relates :: proc(k: ^Kernel, t: Type, d: Type, through_layouts: bool) -> bool {
+	inside, beside := make([dynamic]^Unknown), make([dynamic]^Unknown)
+	read_unknowns(d, &inside)
+	unknowns_beside(t, d, &beside)
+	for w in beside {
+		for u in inside do if u.id == w.id do return true
+		if !through_layouts do continue
+		layout := layout_of(k, w)
+		if is_constant(layout) do continue
+		over := make([dynamic]^Unknown)
+		read_unknowns(layout, &over)
+		for x in over do for u in inside do if u.id == x.id do return true
+	}
+	return false
+}
+
 // divided_by: n = b·Q + R as polynomials over b and the other atoms, R ≥ 0 not
 // reading b, b ≥ 1: n / b rounded down is Q + R / b, and / rounds toward 0: n / b is
-// Q + R / b when n ≥ 0, one more at most otherwise.
+// Q + R / b when n ≥ 0, one more at most otherwise. b = x + c, x one atom: n is read
+// over b by x = b - c.
 divided_by :: proc(k: ^Kernel, n, b: Type, natural: bool) -> (whole: Type, ok: bool) {
+	q, r := polynomial_division(k, n, b) or_return
+	whole = op(k, .Add, q, op(k, .Div, r, b))
+	if !natural {
+		e := new_unknown(k, nil)
+		e.layout = range_law(k, Int(0), Int(1), .Int, {})
+		whole = op(k, .Add, whole, e)
+	}
+	return whole, true
+}
+
+// polynomial_division: n = b·Q + R, R ≥ 0 not reading b (divided_by).
+polynomial_division :: proc(k: ^Kernel, n, b: Type) -> (q, r: Type, ok: bool) {
+	back: Rewrite
+	return ring_division(k, atomized(k, n, &back), b, &back)
+}
+
+// ring_division: the polynomial p over the atoms back names, divided by b = x + c,
+// x one atom: p read over b by x = b - c, in the ring.
+ring_division :: proc(k: ^Kernel, n, b: Type, back: ^Rewrite) -> (q, r: Type, ok: bool) {
 	z := new_unknown(k, nil)
 	z.layout = family_term(.Int)
-	over: Rewrite
-	if u, is_unknown := b.(^Unknown); is_unknown do over = rewriting(nil, u, z)
-	else do over = append_read(nil, b, z)
-	back: Rewrite
-	p := atomized(k, rewrite(k, n, over), &back)
+	x, c := atom_plus(atomized(k, b, back)) or_return
+	p := ring_at(n, x, ring_law(.Sub, {z, Int(c)}) or_return) or_return
 	ms, divisor := monomials(p) or_return
 	if divisor != 1 do return
 	quotient, rest := make([dynamic]Type), make([dynamic]Type)
@@ -772,20 +869,56 @@ divided_by :: proc(k: ^Kernel, n, b: Type, natural: bool) -> (whole: Type, ok: b
 		append(&quotient, monomial(coefficient(m), others[:]))
 	}
 	if len(quotient) == 0 do return
-	q := ring_term(quotient[:], 1) or_return
-	r := ring_term(rest[:], 1) or_return
+	q = ring_term(quotient[:], 1) or_return
+	r = ring_term(rest[:], 1) or_return
 	if reads(k, r, z) do return
-	back = rewriting(back, z, b)
-	q, r = rewrite(k, q, back), rewrite(k, r, back)
+	named := rewriting(back^, z, b)
+	q, r = rewrite(k, q, named), rewrite(k, r, named)
 	least, _ := term_bound(k, r, true)
 	if low, known := least.(Int); !known || low < 0 do return
-	whole = op(k, .Add, q, op(k, .Div, r, b))
-	if !natural {
-		e := new_unknown(k, nil)
-		e.layout = range_law(k, Int(0), Int(1), .Int, {})
-		whole = op(k, .Add, whole, e)
+	return q, r, true
+}
+
+// bounded_quotient: n / b, n ≥ 0 growing with an unknown u that lies up to h, a term
+// over other unknowns: n / b lies in 0..n(h) / b, / keeping the order (§4.5); n(h) =
+// b·Q + R as polynomials, R ≥ 0, and n(h) / b ≤ Q + R. An unknown of that range.
+bounded_quotient :: proc(k: ^Kernel, d: ^Operation, natural: bool) -> (q: Type, ok: bool) {
+	if !natural do return
+	n, b := d.args[0], d.args[1]
+	if u, found := k.readings[reading_key(k, d, 0)]; found do return u, true
+	read := make([dynamic]^Unknown)
+	read_unknowns(n, &read)
+	back: Rewrite
+	p := atomized(k, n, &back)
+	atoms := back
+	next: for u in read {
+		r, is_range := layout_of(k, u).(^Range)
+		if !is_range || r.hi == nil || is_constant(r.hi) do continue
+		// n(h) in the ring: u read by the ring only, not inside an atom
+		for x in atoms do if x.unknown != nil && reads(k, x.term, u) do continue next
+		if monotone_in(k, n, u) != 1 do continue
+		quotient, rest := ring_division(k, ring_at(p, u, atomized(k, r.hi, &back)) or_continue, b, &back) or_continue
+		return read_by(k, d, 0, range_law(k, Int(0), op(k, .Add, quotient, rest), .Int, {})), true
 	}
-	return whole, true
+	return
+}
+
+// atom_plus: p = x + c, x one atom, c an integer.
+atom_plus :: proc(p: Type) -> (x: ^Unknown, c: i128, ok: bool) {
+	ms, divisor := monomials(p) or_return
+	if divisor != 1 do return
+	for m in ms {
+		fs := factors(m)
+		switch {
+		case len(fs) == 0:
+			c += coefficient(m)
+		case len(fs) == 1 && coefficient(m) == 1 && x == nil:
+			x = fs[0]
+		case:
+			return nil, 0, false
+		}
+	}
+	return x, c, x != nil
 }
 
 // related_image: the image of a term of degree 1 in an unknown narrowed between

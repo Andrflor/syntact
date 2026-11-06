@@ -61,6 +61,7 @@ Kernel :: struct {
 	// of it (given_toggled)
 	state:      u64,
 	images_in:  map[Image_Key]Image_Known, // the image of a term holding calls, in a state (rewrite.odin)
+	readings:   map[Reading_Key]^Unknown, // the unknown that reads a quotient, a remainder, x [&] m, one for each node (rewrite.odin)
 	rewrites:   map[Rewrite_Key]Type, // the operations rewritten within the rewrite under way (rewrite.odin)
 	rewriting:  int, // the rewrites of operations under way
 }

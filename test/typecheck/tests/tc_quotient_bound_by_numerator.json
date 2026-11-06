@@ -1,0 +1,6 @@
+{
+  "name": "tc_quotient_bound_by_numerator",
+  "description": "n / b, n ≥ 0 growing with an unknown up to h, lies in 0..Q + R where n(h) = b·Q + R (§4.5); b = x + c is read over x = b - c: (a * a) / vocab is in 0..vocab - 1 for a = s % vocab.",
+  "source": "u32:n -> ??\nu64:s -> ??\nvocab -> n / 10 + 16\na -> s % vocab\n(0..(vocab - 1)):k -> (a * a) / vocab",
+  "expect_errors": []
+}
