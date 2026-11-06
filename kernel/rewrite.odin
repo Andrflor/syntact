@@ -391,9 +391,11 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if v.op == .In do return family_term(.Bool), true
 		// a binding of a run: what its layout says it holds
 		if reads_run(v.op) do return held(k, run_image(k, v) or_return)
-		// computed once
+		// computed once; holding calls, once for what is being given
 		known, plain := plain_of(k, v)
 		if plain && known.imaged do return known.image, known.image != nil
+		key := Image_Key{v, k.state}
+		if !plain do if x, found := k.images_in[key]; found do return x.image, x.ok
 		args := make([]Type, len(v.args))
 		image: Type
 		computed := true
@@ -412,6 +414,8 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 			known, _ = plain_of(k, v)
 			known.imaged, known.image = true, image
 			remember_plain(k, v, known)
+		} else if key.state == k.state {
+			k.images_in[key] = {image, image != nil}
 		}
 		return image, image != nil
 	case ^Or:
