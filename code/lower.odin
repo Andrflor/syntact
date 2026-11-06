@@ -660,7 +660,11 @@ together :: proc(l: ^Lowering, t: kernel.Type) {
 
 // before_loop: what a loop over the unknowns bound computes in terms, the same at
 // every turn — reading none of them —, computed once, before its first turn: a term
-// of a binder that does not read it is a value given to it.
+// of a binder that does not read it is a value given to it. It runs even when the
+// loop takes no turn: a term the kernel types is total for every value its unknowns
+// may take (a divisor proven not 0, a place proven in its run), and these read only
+// unknowns bound outside the loop, whose layouts hold where the loop stands — in the
+// branches around it.
 before_loop :: proc(l: ^Lowering, bound: []^kernel.Unknown, terms: []kernel.Type) {
 	invariants := make([dynamic]kernel.Type)
 	for t in terms do invariant_terms(l, t, bound, &invariants)

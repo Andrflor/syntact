@@ -114,6 +114,10 @@ CASES := []Binary_Case {
 	// a scope of fields is the values of its fields; a function gives back two in
 	// registers, the others in the frame of its caller
 	{"field of a scope", "p -> {a -> ??::u8  b -> 3}\n-> p.a + p.b", {{args = {"4"}, exit = 7}}},
+	// a term a loop's turns do not read, computed before it: a kernel term is total
+	// for the values its unknowns may take — 1000 / d where d is 1..100, the loop in
+	// the branch that narrows d —, so with no turn, or not reached, it does not trap
+	{"loop invariant before zero turns", "f -> {u32:n -> ??  (1..100):d -> ??  u32:i -> 0  acc -> 0\n  -> i ? {>=n -> acc  -> f{n -> n  d -> d  i -> i + 1  acc -> (acc + 1000 / d) % 1000}!}}\n-> {\n  n -> ??::u32\n  d -> ??::(0..100)\n  -> d ? {0 -> 0  -> f{n -> n  d -> d}!}\n}!", {{args = {"0", "5"}, exit = 0}, {args = {"3", "0"}, exit = 0}, {args = {"3", "7"}, exit = 75}}},
 	{"function that gives a scope", PAIR + "-> f{n -> ??::u32}!.a", {{args = {"10"}, exit = 54}, {args = {"100"}, exit = 49}}},
 	{"function that gives a scope, its other field", PAIR + "-> f{n -> ??::u32}!.b", {{args = {"0"}, exit = 1}, {args = {"10"}, exit = 2}}},
 	{"values beyond the registers", FOUR + "-> f{n -> ??::u32}!.d", {{args = {"0"}, exit = 0}, {args = {"5"}, exit = 7}}},
