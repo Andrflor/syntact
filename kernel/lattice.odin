@@ -1287,6 +1287,11 @@ div_extended :: proc(x, y: Extended) -> (Extended, bool) {
 
 // included: a & ~b = none: every element of a is in b.
 included :: proc(k: ^Kernel, a, b: Type) -> bool {
+	// =t ⊆ C is t in C (§4.1): over unknowns, the theories decide it
+	if one, is_value := a.(^Is); is_value && !is_constant(a) {
+		verdict, _ := prove(k, in_law(k, one.term, b))
+		return verdict == .Proven
+	}
 	return is_none(and_law(k, {a, not_law(k, b)}))
 }
 

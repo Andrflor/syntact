@@ -1247,14 +1247,9 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span, checked :
 	}
 	if (o == .Item || o == .Put) && !checked && !single && !is_pending_call(k, x) {
 		{
-			// by the length of x as a term, or by the least length its values have
+			// by the length of x, k - |x| < 0, which the linear theory decides
 			past := op(k, .Sub, i, run_law(k, .Length, {x}, span))
 			verdict, _ := prove(k, in_law(k, past, range_law(k, nil, Int(-1), .Int, span)))
-			if verdict != .Proven {
-				if set, known := values(k, x); known do if n, read := length_image(k, set); read {
-					if least, bounded := term_bound(k, n, true); bounded do verdict, _ = prove(k, in_law(k, i, range_law(k, nil, op(k, .Sub, least, Int(1)), .Int, span)))
-				}
-			}
 			// or by what follows k: x from k is not {}
 			if verdict != .Proven do verdict, _ = prove(k, in_law(k, run_law(k, .From, {x, i}, span, true), not_law(k, run_scope(k, {}))))
 			if verdict != .Proven {

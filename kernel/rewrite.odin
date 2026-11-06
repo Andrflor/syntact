@@ -497,13 +497,23 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if len(terms) == 0 do return nil, false
 		return and_law(k, terms[:]), true
 	case ^Not:
+		// the complement of what a set over unknowns may hold is not what its complement
+		// may hold: only a constant set is complemented
+		if !is_constant(v.term) do return nil, false
 		return not_law(k, layout_image(k, v.term) or_return), true
 	case ^Is:
-		return is_law(layout_image(k, v.term) or_return), true
+		// =t holds the values t takes
+		return layout_image(k, v.term)
 	case ^Range:
+		// a range over unknowns: its family, the linear theory reads its ends
 		if is_constant(t) do return t, true
-		// what it may hold: from the least of its lower bound to the greatest of its upper
-		return outer_set(k, t)
+		#partial switch v.family {
+		case .Int:
+			return family_term(.Int), true
+		case .Real, .F16, .F32, .F64:
+			return family_term(.Real), true
+		}
+		return nil, false
 	case ^Collapse:
 		// a call that stays: giving scopes, the scope of its equation, read as a color
 		// (§5.4); otherwise the family it is proven in
@@ -572,8 +582,14 @@ plain_of :: proc(k: ^Kernel, o: ^Operation) -> (Plain, bool) {
 built_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 	_, es, builds := built(k, f)
 	if !builds do return
+	// what a step places: over the index alone, exactly the values it takes, =e, the
+	// index in its layout; over the states, what its values may be
 	values_of := make([]Type, len(es))
-	for e, i in es do values_of[i] = values(k, given(k, e)) or_return
+	for e, i in es {
+		over_states := false
+		for z in f.states do over_states ||= reads(k, e, z)
+		values_of[i] = over_states ? values(k, given(k, e)) or_return : is_law(e)
+	}
 	piece := new_scope(nil, f.span)
 	piece.source, piece.complete, piece.reached = piece, true, true
 	place := new_binding(piece, .Push, f.span)

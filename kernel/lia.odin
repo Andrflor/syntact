@@ -128,29 +128,8 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 	}
 	#partial switch v in t {
 	case ^Unknown:
-		// its layout: a set of constants, the range from its least to its greatest; a
-		// range over other unknowns, each end a linear constraint; a meet, each of its
-		// terms
-		layout := layout_of(k, v)
-		terms := []Type{layout}
-		if both, meet := layout.(^And); meet do terms = both.terms
-		for t in terms {
-			if r, is_range := t.(^Range); is_range && !is_constant(t) {
-				if r.lo != nil {
-					x := linear_of(k, s, r.lo) or_return
-					x.coefs[a] -= 1
-					append(&s.rows, x)
-				}
-				if r.hi != nil {
-					x := linear_of(k, s, r.hi) or_return
-					x = scaled(x, -1)
-					x.coefs[a] += 1
-					append(&s.rows, x)
-				}
-				continue
-			}
-			if lo, hi, bounded := int_bounds(k, t); bounded do within(s, a, lo, hi)
-		}
+		// in its layout
+		return within_set(k, s, a, layout_of(k, v))
 	case ^Operation:
 		#partial switch v.op {
 		case .Mod:
@@ -175,7 +154,7 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 			// a length: a count, the lengths the layout of the run admits
 			within(s, a, 0, nil)
 			if u, is_unknown := v.args[0].(^Unknown); is_unknown {
-				if n, read := length_image(k, layout_of(k, u)); read do if lo, hi, bounded := int_bounds(k, n); bounded do within(s, a, lo, hi)
+				if n, read := length_image(k, layout_of(k, u)); read do return within_set(k, s, a, n)
 				return true
 			}
 			// the length of a run a fold builds, z: I ↦ {...z  Q}: |I| + Σ |Q|, |·| a
@@ -263,9 +242,8 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 		case .Bit_And:
 			for arg in v.args do if m, constant := arg.(Int); constant && m >= 0 do within(s, a, 0, i128(m))
 		case:
-			if image, known := layout_image(k, t); known && is_constant(image) {
-				if lo, hi, bounded := int_bounds(k, image); bounded do within(s, a, lo, hi)
-			}
+			// in the set of its values: a binding read in the layout of the run
+			if set, known := values(k, t); known do return within_set(k, s, a, set)
 		}
 	case ^Collapse:
 		// a call that stays: its type, the least solution of its definition
@@ -337,10 +315,8 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 			return summed(k, s, a, g, v.index, range_law(k, lo, hi, .Int, v.span), n, v.inits[i])
 		}
 	case:
-		// a binding read, any other term: in the image of the layouts it reads
-		if image, known := layout_image(k, t); known && is_constant(image) {
-			if lo, hi, bounded := int_bounds(k, image); bounded do within(s, a, lo, hi)
-		}
+		// a binding read, any other term: in the set of its values
+		if set, known := values(k, t); known do return within_set(k, s, a, set)
 	}
 	return true
 }
@@ -507,4 +483,65 @@ over_bindings :: proc(k: ^Kernel, v: ^Series) -> (c: ^Collapse, g: Type, item: ^
 	g = rewrite(k, v.term, r)
 	if reads(k, g, v.index) do return
 	return c, g, item, true
+}
+
+// within_set: the rows that say the atom a is in the set c: a constant set, from its
+// least to its greatest; a range over unknowns, each end a linear constraint; a value
+// over unknowns, =t, a = t; out of a half-line, in the other; a meet, each term.
+within_set :: proc(k: ^Kernel, s: ^Lia, a: int, c: Type) -> bool {
+	at :: proc(a: int, coef: i128, x: Linear) -> Linear {
+		out := x
+		out.coefs = clone_coefs(x.coefs)
+		out.coefs[a] += coef
+		return out
+	}
+	terms := []Type{c}
+	if both, meet := c.(^And); meet do terms = both.terms
+	for t in terms {
+		t := t
+		if is_constant(t) {
+			if lo, hi, bounded := int_bounds(k, t); bounded {
+				if l, has := lo.?; has {
+					r: Linear
+					r.coefs = make(map[int]i128)
+					r.coefs[a], r.constant = -1, l
+					append(&s.rows, r)
+				}
+				if h, has := hi.?; has {
+					r: Linear
+					r.coefs = make(map[int]i128)
+					r.coefs[a], r.constant = 1, -h
+					append(&s.rows, r)
+				}
+			}
+			continue
+		}
+		// ~(l..) = ..l - 1, ~(..h) = h + 1..
+		if out, negated := t.(^Not); negated {
+			if r, is_range := out.term.(^Range); is_range && (r.lo == nil) != (r.hi == nil) {
+				t = r.lo != nil ? new_range(nil, op(k, .Sub, r.lo, Int(1)), .Int) : new_range(op(k, .Add, r.hi, Int(1)), nil, .Int)
+			}
+		}
+		lo, hi: Type
+		#partial switch v in t {
+		case ^Range:
+			lo, hi = v.lo, v.hi
+		case ^Is:
+			lo, hi = v.term, v.term
+		case:
+			// a value over unknowns: =t
+			if is_value(k, t) do lo, hi = t, t
+		}
+		if lo != nil {
+			// lo - a ≤ 0
+			x := linear_of(k, s, lo) or_return
+			append(&s.rows, at(a, -1, x))
+		}
+		if hi != nil {
+			// a - hi ≤ 0
+			x := linear_of(k, s, hi) or_return
+			append(&s.rows, at(a, 1, scaled(x, -1)))
+		}
+	}
+	return true
 }

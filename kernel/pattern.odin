@@ -213,22 +213,14 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 		if u, is_unknown := o.args[0].(^Unknown); is_unknown {
 			targets = []Narrowed{{u, o.args[1], true}}
 		} else {
-			targets = bounded_preimage(k, o.args[0], o.args[1], positive)
+			targets = preimages(k, o.args[0], o.args[1])
 		}
 		said := false
 		for target in targets {
 			u, set, exact := target.unknown, rewrite(k, target.set, out), target.exact
-			if !is_constant(set) && depends(k, set, u) {
-				// a set over unknowns whose layouts read u: by its bounds — u is in
-				// what it may hold, out of what it always holds
-				exact = false
-				bound: Type
-				known: bool
-				if positive do bound, known = outer_set(k, set)
-				else do bound, known = inner_set(k, set)
-				if !known do continue
-				set = bound
-			}
+			// a set over unknowns whose layouts read u: u is in it all the same, a
+			// relation the linear theory reads as it is
+			if !is_constant(set) && depends(k, set, u) do exact = false
 			current := layout_of(k, u)
 			if x, found := rewritten(out, u); found {
 				current = x
@@ -378,70 +370,6 @@ holds_invalid :: proc(t: Type) -> bool {
 	return false
 }
 
-// outer_set: a constant set that holds every value s may hold, whatever its
-// unknowns: a range from the least of its lower bound to the greatest of its upper.
-outer_set :: proc(k: ^Kernel, s: Type) -> (out: Type, ok: bool) {
-	if is_constant(s) do return s, true
-	#partial switch v in s {
-	case ^Range:
-		// a bound without extremity leaves the range open on that side
-		lo, hi: Type
-		if v.lo != nil do lo, _ = term_bound(k, v.lo, true)
-		if v.hi != nil do hi, _ = term_bound(k, v.hi, false)
-		return range_law(k, lo, hi, .Int, v.span), true
-	case ^And:
-		terms := make([]Type, len(v.terms))
-		for t, i in v.terms do terms[i] = outer_set(k, t) or_return
-		return and_law(k, terms), true
-	case ^Or:
-		terms := make([]Type, len(v.terms))
-		for t, i in v.terms do terms[i] = outer_set(k, t) or_return
-		return or_law(k, terms), true
-	case ^Not:
-		inner := inner_set(k, v.term) or_return
-		return not_law(k, inner), true
-	case ^Is:
-		// =t: one of the values t may be
-		return layout_image(k, v.term)
-	}
-	// a value over unknowns: what it may be
-	return layout_image(k, s)
-}
-
-// inner_set: a constant set of values s holds whatever its unknowns: a range from
-// the greatest of its lower bound to the least of its upper.
-inner_set :: proc(k: ^Kernel, s: Type) -> (out: Type, ok: bool) {
-	if is_constant(s) do return s, true
-	#partial switch v in s {
-	case ^Range:
-		lo, hi: Type
-		if v.lo != nil do lo = term_bound(k, v.lo, false) or_return
-		if v.hi != nil do hi = term_bound(k, v.hi, true) or_return
-		return range_law(k, lo, hi, .Int, v.span), true
-	case ^And:
-		terms := make([]Type, len(v.terms))
-		for t, i in v.terms do terms[i] = inner_set(k, t) or_return
-		return and_law(k, terms), true
-	case ^Or:
-		terms := make([]Type, len(v.terms))
-		for t, i in v.terms do terms[i] = inner_set(k, t) or_return
-		return or_law(k, terms), true
-	case ^Not:
-		outer := outer_set(k, v.term) or_return
-		return not_law(k, outer), true
-	}
-	// =t, or a value over unknowns: none of its values is it whatever the unknowns
-	return None{}, true
-}
-
-// term_bound: the least (or greatest) integer the term t may be.
-term_bound :: proc(k: ^Kernel, t: Type, least: bool) -> (out: Type, ok: bool) {
-	image := layout_image(k, t) or_return
-	lo, hi := int_bounds(k, image) or_return
-	b := (least ? lo : hi).? or_return
-	return Int(b), true
-}
-
 // Narrowed: an unknown, the set a literal puts it in, and whether that set says
 // the literal exactly.
 Narrowed :: struct {
@@ -461,12 +389,9 @@ depends :: proc(k: ^Kernel, set: Type, u: ^Unknown) -> bool {
 	return false
 }
 
-// bounded_preimage: e = a·u + t, t a term not reading u, in the constant set s,
-// for each unknown u of degree 1 in e: u is in the preimage of s by a·u + t. With
-// a = ±1 it is the set s - t, or t - s, exactly; otherwise it is bounded at the
-// bounds of t: u is in the preimage for some b t may be (positive: the hull of the
-// preimages at the bounds of t), or for every one (negated: their meet).
-bounded_preimage :: proc(k: ^Kernel, e, s: Type, positive: bool) -> []Narrowed {
+// preimages: e = a·u + t, t a term not reading u, in the constant set s, for each
+// unknown u of degree 1 in e with a = ±1: u is in the set s - t, or t - s, exactly.
+preimages :: proc(k: ^Kernel, e, s: Type) -> []Narrowed {
 	out := make([dynamic]Narrowed)
 	if !is_constant(s) do return nil
 	ms, d, ring := monomials(e)
@@ -480,30 +405,8 @@ bounded_preimage :: proc(k: ^Kernel, e, s: Type, positive: bool) -> []Narrowed {
 		x := fs[0]
 		alpha, t, affine := affine_in(k, e, x)
 		a, constant := alpha.(Int)
-		if !affine || !constant || a == 0 do continue
-		if a == 1 || a == -1 {
-			if set, exact := shifted(k, cells, i128(a), t); exact {
-				append(&out, Narrowed{x, set, true})
-				continue
-			}
-		}
-		image := layout_image(k, t) or_continue
-		tl, th := int_bounds(k, image) or_continue
-		low := tl.? or_continue
-		high := th.? or_continue
-		at_low := preimage(k, cells, i128(a), low) or_continue
-		at_high := preimage(k, cells, i128(a), high) or_continue
-		if !positive {
-			append(&out, Narrowed{x, and_law(k, {at_low, at_high}), false})
-			continue
-		}
-		lo1, hi1 := int_bounds(k, at_low) or_continue
-		lo2, hi2 := int_bounds(k, at_high) or_continue
-		// the hull: a missing bound is unbounded
-		lo, hi: Maybe(i128)
-		if l1, has1 := lo1.?; has1 do if l2, has2 := lo2.?; has2 do lo = min(l1, l2)
-		if h1, has1 := hi1.?; has1 do if h2, has2 := hi2.?; has2 do hi = max(h1, h2)
-		append(&out, Narrowed{x, discrete_cell(.Int, lo, hi), false})
+		if !affine || !constant || a != 1 && a != -1 do continue
+		if set, exact := shifted(k, cells, i128(a), t); exact do append(&out, Narrowed{x, set, true})
 	}
 	return out[:]
 }

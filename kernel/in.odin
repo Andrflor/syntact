@@ -33,10 +33,29 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
+	// (t::L) in C when L ⊆ C (§4.1), t any term whose values are read — a binding of a
+	// run in the layout of its items
+	if _, read := x.(^Operation); read && !is_constant(c) {
+		if set, known := values(k, x); known && included(k, set, c) do return Bool(true)
+	}
+	// a term in a range over unknowns, lo..hi: t - lo ≥ 0 and hi - t ≥ 0, by the
+	// theory of linear arithmetic
+	if r, is_range := c.(^Range); is_range && !is_constant(c) && r.family == .Int {
+		if f, known := family_of(k, x); known && (f == .Int || f == .Count) {
+			holds := (r.lo == nil || lia_in(k, op(k, .Sub, x, r.lo), 0, nil)) && (r.hi == nil || lia_in(k, op(k, .Sub, r.hi, x), 0, nil))
+			if holds do return Bool(true)
+		}
+	}
 	// an integer term in a range: the negation and the axioms of its terms
 	// unsatisfiable, by the theory of linear arithmetic (lia.odin)
 	if !is_constant(x) && is_constant(c) {
-		#partial switch _ in x {
+		#partial switch v in x {
+		case ^Unknown:
+			// a layout over other unknowns: its ends, read by the theory
+			if is_constant(layout_of(k, v)) do break
+			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) {
+				if f, known := family_of(k, x); known && (f == .Int || f == .Count) && lia_in(k, x, lo, hi) do return Bool(true)
+			}
 		case ^Operation, ^Fold, ^Series, ^Collapse:
 			if lo, hi, bounded := int_bounds(k, c); bounded && same(k, c, range_law(k, maybe_int(lo), maybe_int(hi), .Int, {})) {
 				if f, known := family_of(k, x); known && (f == .Int || f == .Count) && lia_in(k, x, lo, hi) do return Bool(true)

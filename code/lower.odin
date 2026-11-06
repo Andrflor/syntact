@@ -1392,9 +1392,11 @@ in_run :: proc(l: ^Lowering, x: kernel.Type, c: kernel.Type) -> Value {
 			if p.color != nil do append(&tests, kernel.normal(l.k, kernel.in_law(l.k, at, kernel.binding_color(l.k, p))))
 			continue
 		}
-		// the items of a run: each what x may hold there, proven to be of its pieces
+		// the items of a run: what x may hold as items, included in its pieces — the
+		// sets, never one place read out of the length that makes it one
 		items, has := kernel.item_image(l.k, kernel.binding_color(l.k, p))
-		if !has || !kernel_proves(l, kernel.in_law(l.k, at, items)) do return fail(l, "a cover %s that tests the items of a run is not code yet", kernel.print_type(c))
+		held_items, held := kernel.item_image(l.k, kernel.values(l.k, x) or_else nil)
+		if !has || !held || !kernel.included(l.k, held_items, items) do return fail(l, "a cover %s that tests the items of a run is not code yet", kernel.print_type(c))
 		break
 	}
 	held := make([dynamic]kernel.Type)

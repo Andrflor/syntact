@@ -56,7 +56,15 @@ layout_of_set :: proc(l: ^Lowering, written: kernel.Type) -> (lay: ^Layout, ok: 
 	if set == nil do return nil, false
 	// a set over unknowns: laid out as what it may hold, a set of constants
 	if !kernel.is_constant(set) {
-		if image, read := kernel.layout_image(l.k, set); read && kernel.is_constant(image) do set = image
+		// =e over unknowns: the integers between its least and greatest, which the
+		// linear theory finds; otherwise the image of the layouts
+		if one, is_value := set.(^kernel.Is); is_value {
+			lo, hi := kernel.extremes(l.k, one.term)
+			_, has_lo := lo.?
+			_, has_hi := hi.?
+			if has_lo && has_hi do set = kernel.range_law(l.k, kernel.maybe_int(lo), kernel.maybe_int(hi), .Int, {})
+		}
+		if !kernel.is_constant(set) do if image, read := kernel.layout_image(l.k, set); read && kernel.is_constant(image) do set = image
 	}
 	if m := machine_of_layout(l.k, set); m != .None {
 		bits, signed := 64, m == .Int
