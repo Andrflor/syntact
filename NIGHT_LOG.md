@@ -170,3 +170,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
   n / b with n growing in an unknown up to h lies in 0..Q + R, n(h) = b·Q + R), but on
   words the reading explodes in memory (> 10 GB): kept out, w/euclid3_quotient_bound.patch.
 - sexp 18: needs the proposed law above.
+
+## Step: kernel round 5 (d254989, b3e80ed) — 03:20 UTC
+- Format values lie within their extremes (§4.10): f32 − 0.0625 rounds into f32. euclid_image reads one quotient at a time: words 5.6 s / 4.8 GB → ~1 s / 0.8 GB.
+- particles 5, sexp 18, words 32 errors. The "proposed law" above for sexp is §5.6's field law applied to runs (a field carved to its own suffix holds the suffixes of what the call gives); assigned to the field-bounds agent with scopes (lru, particles) and runs (sexp, zip).
+- Round 6 launched: words (inclusion through expansions, narrower-rest cover, dict fold bound, distinct, (a*a)/vocab).
