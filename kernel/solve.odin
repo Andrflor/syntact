@@ -31,6 +31,7 @@ Recursion :: struct {
 	solution: Type, // the term without calls of root, when the laws give one
 	reading:  bool, // being read: its calls are the hypothesis (§5.6)
 	values:   Type, // the type of its calls, once found (call_values)
+	ranges:   [2]Range_Found, // its range, and that of its length, over its fields (call_range)
 	valued:   bool,
 }
 
@@ -162,16 +163,6 @@ values_of_call :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope, r: Rewrite = nil) 
 		r = values_of_call(k, other, t, r)
 	}
 	return r
-}
-
-// equation_at: the equation at the values a carve of root gives its fields.
-equation_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
-	if eq.term == nil do return nil
-	r := values_of_call(k, eq, s)
-	// its calls are the hypothesis meanwhile: read as calls, never at their values
-	eq.reading = true
-	defer eq.reading = false
-	return rewrite(k, eq.term, r)
 }
 
 // solve: the normal form of the equation by the laws of the recursion; nil when they
@@ -306,7 +297,28 @@ call_range :: proc(k: ^Kernel, call: ^Collapse, length := false) -> (lo, hi: Typ
 	key, through := call_key(s), through_of(k, s)
 	eq, found := equation_found(k, origin(s), key, through)
 	if !found do eq = equation_of(k, origin(s), key, through) or_return
-	if eq.term == nil do return
+	if eq.term == nil || eq.reading do return
+	// the range of the equation, over its fields, found once; read at the call
+	known := &eq.ranges[1 if length else 0]
+	if !known.found {
+		known.found = true
+		known.lo, known.hi, _ = equation_range(k, eq, length)
+	}
+	at := values_of_call(k, eq, s)
+	if known.lo != nil do lo = rewrite(k, known.lo, at)
+	if known.hi != nil do hi = rewrite(k, known.hi, at)
+	return lo, hi, lo != nil || hi != nil
+}
+
+// Range_Found: the range of an equation, over its fields, once found.
+Range_Found :: struct {
+	lo, hi: Type,
+	found:  bool,
+}
+
+// equation_range: lo and hi of the equation over its fields (call_range); of its
+// length when length.
+equation_range :: proc(k: ^Kernel, eq: ^Recursion, length: bool) -> (lo, hi: Type, ok: bool) {
 	root := eq.root
 	p := eq.term.(^Pattern) or_return
 	p = calls_joined(k, p, root)
@@ -317,7 +329,6 @@ call_range :: proc(k: ^Kernel, call: ^Collapse, length := false) -> (lo, hi: Typ
 	if len(calls) == 0 do return
 	// the length of what it gives: the definition read through |·|, the morphism of
 	// the runs into the integers (§5.3)
-	if length do base, step = op(k, .Length, base), op(k, .Length, step)
 	y := new_unknown(k, nil)
 	y.layout = family_term(.Int)
 	r: Rewrite
@@ -331,17 +342,21 @@ call_range :: proc(k: ^Kernel, call: ^Collapse, length := false) -> (lo, hi: Typ
 		if moved != nil && !same(k, moved, m) do return
 		moved = m
 		r = length ? append_read(r, op(k, .Length, c), y) : rewriting_call(r, c, y)
+		// the length of the call, |c|, taken as y too where |·| meets it
 	}
 	// the step gives one of its products (§6), each α·y + β, α ≥ 0 a constant: the
 	// type of the call is in the union of their images
+	// each product read alone: |·| of a product, not of the pattern
 	leaves := make([dynamic]Product)
-	products(k, rewrite(k, step, r), &leaves)
+	products(k, step, &leaves)
 	a_lo, a_hi: i128 = max(i128), 0
 	qlo, qhi: Maybe(i128)
 	q_nonnegative, p_nonnegative := true, true
 	for leaf in leaves {
 		if is_none(leaf.term) do continue
-		alpha, beta := affine_in(k, read_in(k, leaf, leaf.term), y) or_return
+		term := read_in(k, leaf, leaf.term)
+		if length do term = op(k, .Length, term)
+		alpha, beta := affine_in(k, rewrite(k, term, r), y) or_return
 		a := i128(alpha.(Int) or_return)
 		if a < 0 || !solved(beta, root) do return
 		a_lo, a_hi = min(a_lo, a), max(a_hi, a)
@@ -360,7 +375,6 @@ call_range :: proc(k: ^Kernel, call: ^Collapse, length := false) -> (lo, hi: Typ
 		}
 	}
 	if a_hi < 0 && a_lo < 0 do return
-	at := values_of_call(k, eq, s)
 	// the fold of the maps h ↦ q + α·h along the orbit of u, from where the call is,
 	// until the bases take it: Aₙ·b + Bₙ, A: 1 ↦ α·A, B: 0 ↦ B + q·A
 	along :: proc(k: ^Kernel, p: ^Pattern, u: ^Unknown, stop, moved: Type, a, b, q: i128) -> Type {
@@ -378,12 +392,30 @@ call_range :: proc(k: ^Kernel, call: ^Collapse, length := false) -> (lo, hi: Typ
 	}
 	// the maps of different α bound by one: α·h ≤ α_max·h where h ≥ 0 — the bases and
 	// every β nonnegative, h is —; likewise α_min from below
-	blo, bhi := extremes(k, base)
+	blo, bhi: Maybe(i128)
+	bases := make([dynamic]Product)
+	products(k, base, &bases)
+	// the least and greatest any base gives: none bounded when one is not
+	low_bounded, high_bounded := true, true
+	for leaf in bases {
+		if is_none(leaf.term) do continue
+		term := read_in(k, leaf, leaf.term)
+		if length do term = op(k, .Length, term)
+		l, h := extremes(k, term)
+		if x, has := l.?; has && low_bounded {
+			if b, known := blo.?; !known || x < b do blo = x
+		} else do low_bounded = false
+		if y, has := h.?; has && high_bounded {
+			if b, known := bhi.?; !known || y > b do bhi = y
+		} else do high_bounded = false
+	}
+	if !low_bounded do blo = nil
+	if !high_bounded do bhi = nil
 	if b, has := blo.?; has && a_lo >= 0 && (a_lo == a_hi || b >= 0 && p_nonnegative) {
-		if q, has_q := qlo.?; has_q do lo = rewrite(k, along(k, p, u, stop, moved, a_lo, b, q), at)
+		if q, has_q := qlo.?; has_q do lo = along(k, p, u, stop, moved, a_lo, b, q)
 	}
 	if b, has := bhi.?; has && a_hi >= 0 && (a_lo == a_hi || b >= 0 && q_nonnegative) {
-		if q, has_q := qhi.?; has_q do hi = rewrite(k, along(k, p, u, stop, moved, a_hi, b, q), at)
+		if q, has_q := qhi.?; has_q do hi = along(k, p, u, stop, moved, a_hi, b, q)
 	}
 	return lo, hi, lo != nil || hi != nil
 }

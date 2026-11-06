@@ -77,10 +77,10 @@ origin :: proc(s: ^Scope) -> ^Scope {
 	return s.carved != nil ? s.carved : s
 }
 
-// recursive_call: s! where s is a recursive scope, or a carve of one. A carve of it
 // recursive_call: s! where s is a recursive scope, or a carve of one: the solution of
 // its equation at the values s gives (§5.6); without one, the call, which the program
-// computes. A carve of it was checked where it is written (scope.odin).
+// computes — never its definition read at the values: that is unfolding. A carve of
+// it was checked where it is written (scope.odin).
 recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	root := origin(s)
 	// a definition solved is an equality for every value of its fields: substituted,
@@ -94,9 +94,7 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	if eq, read := equation_of(k, root, call_key(s), through_of(k, s)); read {
 		run: Rewrite
 		if eq.solution != nil do return renewed(k, solution_at(k, eq, s), &run)
-		// the definition is an equality: at the values the call gives, an equation
-		// that calls nothing is the value (§7); one that still calls stays the call
-		if v := equation_at(k, eq, s); v != nil && solved(v, root) && !holds_invalid(v) do return renewed(k, v, &run)
+		if v, based := reached_base(k, eq, s); based do return renewed(k, v, &run)
 	}
 	out := new(Collapse)
 	out.target, out.recursive, out.span = s, true, span
@@ -268,4 +266,19 @@ is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
 	if p, found := first_production(k, root); found && p.state == .In_Progress do return true
 	for x in k.equations do if x.root == root && x.reading do return true
 	return false
+}
+
+// reached_base: the values the carve s gives the fields reach one branch of the
+// equation (§6), a base that calls nothing: its product there is the call (§7). Only
+// the covers are read; no other branch, and no call, is.
+reached_base :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> (v: Type, ok: bool) {
+	p := eq.term.(^Pattern) or_return
+	at := values_of_call(k, eq, s)
+	target := rewrite(k, p.target, at)
+	reached, _, invalid := reaches(k, target, p.branches)
+	if invalid != nil || len(reached) != 1 || !reached[0].all do return
+	b := p.branches[reached[0].branch]
+	if !solved(b.product, eq.root) do return
+	v = rewrite(k, branch_product(k, b, reached[0].rewrite, target), at)
+	return v, solved(v, eq.root) && !holds_invalid(v)
 }

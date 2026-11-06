@@ -111,23 +111,28 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 	#partial switch v in t {
 	case ^Unknown:
 		// its layout: a set of constants, the range from its least to its greatest; a
-		// range over other unknowns, each end a linear constraint
+		// range over other unknowns, each end a linear constraint; a meet, each of its
+		// terms
 		layout := layout_of(k, v)
-		if r, is_range := layout.(^Range); is_range && !is_constant(layout) {
-			if r.lo != nil {
-				x := linear_of(k, s, r.lo) or_return
-				x.coefs[a] -= 1
-				append(&s.rows, x)
+		terms := []Type{layout}
+		if both, meet := layout.(^And); meet do terms = both.terms
+		for t in terms {
+			if r, is_range := t.(^Range); is_range && !is_constant(t) {
+				if r.lo != nil {
+					x := linear_of(k, s, r.lo) or_return
+					x.coefs[a] -= 1
+					append(&s.rows, x)
+				}
+				if r.hi != nil {
+					x := linear_of(k, s, r.hi) or_return
+					x = scaled(x, -1)
+					x.coefs[a] += 1
+					append(&s.rows, x)
+				}
+				continue
 			}
-			if r.hi != nil {
-				x := linear_of(k, s, r.hi) or_return
-				x = scaled(x, -1)
-				x.coefs[a] += 1
-				append(&s.rows, x)
-			}
-			return true
+			if lo, hi, bounded := int_bounds(k, t); bounded do within(s, a, lo, hi)
 		}
-		if lo, hi, bounded := int_bounds(k, layout); bounded do within(s, a, lo, hi)
 	case ^Operation:
 		#partial switch v.op {
 		case .Mod:
@@ -189,10 +194,38 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 				x.coefs[a] += 1
 				append(&s.rows, x)
 			}
-		case .Pow:
-			// b ** e, b ≥ 1 a constant, e ≥ 0: from b ** least to b ** greatest of e
+		case .Mul:
+			// b ** x · b ** y = b ** (x + y), 1 << e being 2 ** e: one power, its
+			// exponent the sum
+			base: i128 = 0
+			exponent: Type = Int(0)
+			for f in v.args {
+				o, is_op := f.(^Operation)
+				if !is_op do return true
+				b: i128
+				#partial switch o.op {
+				case .Pow:
+					x, constant := o.args[0].(Int)
+					if !constant do return true
+					b = i128(x)
+				case .Shl:
+					if !is_int(o.args[0], 1) do return true
+					b = 2
+				case:
+					return true
+				}
+				if base != 0 && b != base do return true
+				base = b
+				exponent = op(k, .Add, exponent, o.args[1])
+			}
+			return axioms(k, s, a, op(k, .Pow, Int(base), exponent))
+		case .Pow, .Shl:
+			// b ** e, b ≥ 1 a constant, e ≥ 0: from b ** least to b ** greatest of e;
+			// c << e = c·2 ** e, c ≥ 0
 			b, constant := v.args[0].(Int)
-			if !constant || b < 1 do return true
+			if !constant || b < (v.op == .Pow ? 1 : 0) do return true
+			factor: i128 = 1
+			if v.op == .Shl do b, factor = 2, i128(b)
 			p, q := extremes(k, v.args[1])
 			least, has_least := p.?
 			if !has_least || least < 0 do return true
@@ -205,8 +238,9 @@ axioms :: proc(k: ^Kernel, s: ^Lia, a: int, t: Type) -> bool {
 				return out, true
 			}
 			low, _ := power(i128(b), least)
+			low *= factor
 			high: Maybe(i128)
-			if greatest, has := q.?; has do if x, fits := power(i128(b), greatest); fits do high = x
+			if greatest, has := q.?; has do if x, fits := power(i128(b), greatest); fits && (factor == 0 || x <= (i128(1) << 100) / factor) do high = x * factor
 			within(s, a, low, high)
 		case .Bit_And:
 			for arg in v.args do if m, constant := arg.(Int); constant && m >= 0 do within(s, a, 0, i128(m))
