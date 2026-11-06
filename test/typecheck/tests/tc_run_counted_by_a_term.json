@@ -1,0 +1,6 @@
+{
+  "name": "tc_run_counted_by_a_term",
+  "description": "A run counted by a term over unknowns meets a run of its items: (P & Q) * (m & N) is (P & Q) * m where m is in N (§4.2, §4.6); a call whose equation has no type is in no set: f stays a call, typed at its values, in u8.",
+  "source": "u32:n -> ??\nnslots -> n * 4 + 16\nmask -> nslots - 1\nIdx -> 0..mask\nSlots -> {...({u8:} * nslots):}\nf -> {\n  Slots:slots -> ??\n  Idx:idx -> 0\n  -> slots.#idx ? {\n    0 -> 1\n    -> f{slots -> slots  idx -> (idx + 1) [&] mask}!\n  }\n}\nSlots:s -> ??\np -> f{slots -> s  idx -> 3 [&] mask}!\nu8:q -> p",
+  "expect_errors": []
+}

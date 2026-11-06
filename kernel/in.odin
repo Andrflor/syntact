@@ -359,6 +359,8 @@ induced :: proc(k: ^Kernel, root: ^Scope, e: Type, c: Type, fields: Read) -> boo
 // its patterns, which give one of their products (§6); a product that is a call of
 // root, the hypothesis, adds nothing: X = X | P.
 holds_in :: proc(k: ^Kernel, v: Type, c: Type, fields: Read, root: ^Scope = nil) -> bool {
+	// a term of no type is in no set
+	if is_invalid(v) do return false
 	if !fields.fields {
 		verdict, _ := prove(k, in_law(k, given(k, v), c))
 		return verdict == .Proven
