@@ -49,6 +49,16 @@ rewriting_call :: proc(r: Rewrite, c: ^Collapse, t: Type) -> Rewrite {
 	return out[:]
 }
 
+// node_of: the node a term is, nil for a value held in place (a constant).
+node_of :: proc(t: Type) -> rawptr {
+	#partial switch _ in t {
+	case nil, Char, Int, Real, Bool, None, Invalid:
+		return nil
+	}
+	node := t
+	return (^rawptr)(&node)^
+}
+
 // reads: t holds the unknown u: rewriting u changes it.
 reads :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
 	#partial switch _ in t {
@@ -56,8 +66,7 @@ reads :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
 		return false
 	}
 	// a node is never changed once built: what it reads, asked once
-	node := t
-	key := Read_Key{node = (^rawptr)(&node)^, unknown = u.id}
+	key := Read_Key{node = node_of(t), unknown = u.id}
 	if known, found := k.read[key]; found do return known
 	read := !same(k, rewrite(k, t, rewriting(nil, u, new_unknown(k, nil))), t)
 	k.read[key] = read
@@ -302,32 +311,39 @@ bound_as :: proc(k: ^Kernel, r: Rewrite, u: ^Unknown) -> (^Unknown, bool) {
 // unknowns its own.
 renamed :: proc(k: ^Kernel, t: Type) -> Type {
 	bound := make([dynamic]^Unknown)
-	visit :: proc(t: Type, out: ^[dynamic]^Unknown) {
+	seen := make(map[rawptr]bool)
+	defer delete(seen)
+	// each node once: a term shares its parts
+	visit :: proc(t: Type, out: ^[dynamic]^Unknown, seen: ^map[rawptr]bool) {
+		if node := node_of(t); node != nil {
+			if node in seen do return
+			seen[node] = true
+		}
 		#partial switch v in t {
 		case ^Fold:
 			append(out, v.index)
 			append(out, ..v.states)
-			for p in fold_parts(v) do visit(p, out)
+			for p in fold_parts(v) do visit(p, out, seen)
 		case ^Series:
 			append(out, v.index)
-			visit(v.lo, out)
-			visit(v.hi, out)
-			visit(v.term, out)
+			visit(v.lo, out, seen)
+			visit(v.hi, out, seen)
+			visit(v.term, out, seen)
 		case ^Least:
 			append(out, v.index)
-			visit(v.holds, out)
+			visit(v.holds, out, seen)
 		case ^Pattern:
-			visit(v.target, out)
-			for b in v.branches do visit(b.product, out)
+			visit(v.target, out, seen)
+			for b in v.branches do visit(b.product, out, seen)
 		case ^Effect:
-			visit(v.then, out)
-			if v.choice != nil do visit(v.choice, out)
+			visit(v.then, out, seen)
+			if v.choice != nil do visit(v.choice, out, seen)
 		case ^Scope, ^Collapse:
 		case:
-			for p in parts(t) do visit(p, out)
+			for p in parts(t) do visit(p, out, seen)
 		}
 	}
-	visit(t, &bound)
+	visit(t, &bound, &seen)
 	if len(bound) == 0 do return t
 	r: Rewrite
 	for u in bound {
