@@ -360,7 +360,7 @@ equation_range :: proc(k: ^Kernel, eq: ^Recursion, length: bool) -> (lo, hi: Typ
 		a := i128(alpha.(Int) or_return)
 		if a < 0 || !solved(beta, root) do return
 		a_lo, a_hi = min(a_lo, a), max(a_hi, a)
-		l, h := extremes(k, beta)
+		l, h := image_ends(k, beta)
 		if x, has := h.?; has {
 			if q, known := qhi.?; !known || x > q do qhi = x
 			q_nonnegative &&= x >= 0
@@ -401,7 +401,7 @@ equation_range :: proc(k: ^Kernel, eq: ^Recursion, length: bool) -> (lo, hi: Typ
 		if is_none(leaf.term) do continue
 		term := read_in(k, leaf, leaf.term)
 		if length do term = op(k, .Length, term)
-		l, h := extremes(k, term)
+		l, h := image_ends(k, term)
 		if x, has := l.?; has && low_bounded {
 			if b, known := blo.?; !known || x < b do blo = x
 		} else do low_bounded = false

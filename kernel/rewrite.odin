@@ -522,8 +522,15 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// =t holds the values t takes
 		return layout_image(k, v.term)
 	case ^Range:
-		// a range over unknowns: its family, the linear theory reads its ends
+		// a range over unknowns: from the least of its lower end to the greatest of its
+		// upper, each read on its image; an end without one, open
 		if is_constant(t) do return t, true
+		if v.family == .Int || v.family == .Any {
+			least, most: Type
+			if v.lo != nil do if l, _ := image_ends(k, v.lo); l != nil do least = Int(l.?)
+			if v.hi != nil do if _, h := image_ends(k, v.hi); h != nil do most = Int(h.?)
+			return range_law(k, least, most, .Int, {}), true
+		}
 		#partial switch v.family {
 		case .Int:
 			return family_term(.Int), true
@@ -533,8 +540,17 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return nil, false
 	case ^Collapse:
 		// a call that stays: giving scopes, the scope of its equation, read as a color
-		// (§5.4); otherwise the family it is proven in
+		// (§5.4); giving integers, its type, the least solution of its equation, a range
+		// over its fields read in turn; otherwise the family it is proven in
 		f := family_of(k, v) or_return
+		if f == .Int || f == .Count {
+			if lo, hi, ranged := call_range(k, v); ranged {
+				least, most: Type
+				if lo != nil do if l, _ := image_ends(k, lo); l != nil do least = Int(l.?)
+				if hi != nil do if _, h := image_ends(k, hi); h != nil do most = Int(h.?)
+				if least != nil || most != nil do return range_law(k, least, most, .Int, {}), true
+			}
+		}
 		if f == .Scope do if s, is_scope := v.target.(^Scope); is_scope do if eq, read := equation_of(k, origin(s), call_key(s)); read do return eq.generic, true
 		return family_term(f), true
 	case ^Fold:
@@ -608,6 +624,15 @@ plain_of :: proc(k: ^Kernel, o: ^Operation) -> (Plain, bool) {
 	return entry, entry.plain
 }
 
+// image_ends: the least and greatest t may be, read on its image (a Type).
+image_ends :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128)) {
+	image, read := layout_image(k, t)
+	if !read || !is_constant(image) do return
+	l, h, bounded := int_bounds(k, image)
+	if !bounded do return
+	return l, h
+}
+
 // summed_image: the image of s plus n terms, each what g may be, g in p..q: from
 // s + n·p to s + n·q, each end a term over the unknowns of s and n, read in turn.
 summed_image :: proc(k: ^Kernel, s, n, g: Type) -> (image: Type, ok: bool) {
@@ -637,6 +662,28 @@ related_image :: proc(k: ^Kernel, t: Type, eliminated: []int = nil) -> (image: T
 	p := atomized(k, t, &back)
 	ms, divisor, ring := monomials(p)
 	if !ring || divisor != 1 do return
+	// Euclid (§4.5): b·(a / b) = a - a % b, b > 0 — a multiple of a quotient read
+	// through what it divides
+	for m in ms {
+		fs := factors(m)
+		if len(fs) != 1 do continue
+		x, atom := rewritten(back, fs[0])
+		if !atom do continue
+		q, is_op := x.(^Operation)
+		if !is_op || q.op != .Div do continue
+		b, constant := q.args[1].(Int)
+		c := coefficient(m)
+		if !constant || b <= 0 || c % i128(b) != 0 do continue
+		rest := make([dynamic]Type)
+		for y in ms do if y != m do append(&rest, y)
+		r := ring_term(rest[:], 1) or_continue
+		a := atomized(k, q.args[0], &back)
+		mod := atomized(k, new_operation(.Mod, q.args[0], q.args[1]), &back)
+		whole := ring_law(.Sub, {a, mod}) or_continue
+		scaled_whole := ring_law(.Mul, {Int(c / i128(b)), whole}) or_continue
+		sum := ring_law(.Add, {r, scaled_whole}) or_continue
+		return related_image(k, unatomized(sum, back), eliminated)
+	}
 	// the unknowns whose layouts read others first: eliminated, they bring what relates
 	// them; each choice gives the term's image, and the images meet
 	order := make([dynamic]int)
