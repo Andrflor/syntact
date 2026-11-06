@@ -643,28 +643,51 @@ one_affine :: proc(k: ^Kernel, t: Type) -> (u: ^Unknown, a: i128, b: Type, ok: b
 	return read[0], i128(one), beta, true
 }
 
-// euclid_image: n = c·(n / c) + n % c, for n ≥ 0 and c > 0 constant: a term that reads
-// n / c is read on q = n / c and r = n % c, unknowns of their own, n being c·q + r —
-// the image keeps what relates n and n / c. image is the image of the term as it is.
+// euclid_image: a = (a / b)·b + a % b (§4.5), read where a term reads a quotient or a
+// remainder — the image keeps what relates them. image is the image of the term as
+// it is. For b ≥ 1, and n ≥ 0 for the first two:
+//   n / c, c constant: n is c·q + r, q = n / c, r in 0..c - 1, unknowns of their own;
+//   n % b: an unknown in 0..b - 1 (in -(b - 1)..b - 1 when n may be negative);
+//   (b·Q + R) / b = Q + R / b (+ 1 when n < 0), R ≥ 0: the polynomial n divided by b.
 euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 	if !is_constant(image) do return image
 	quotients := make([dynamic]^Operation)
 	visit :: proc(t: Type, out: ^[dynamic]^Operation) {
 		o, is_op := t.(^Operation)
 		if !is_op do return
-		if o.op == .Div && len(o.args) == 2 {
-			if c, constant := o.args[1].(Int); constant && c > 0 do append(out, o)
-		}
+		if (o.op == .Div || o.op == .Mod) && len(o.args) == 2 do append(out, o)
 		for a in o.args do visit(a, out)
 	}
 	visit(t, &quotients)
 	out := image
+	// what t reads once d is read as whole
+	related :: proc(k: ^Kernel, t: Type, out: Type, reading: Rewrite) -> Type {
+		read, known := layout_image(k, rewrite(k, t, reading))
+		if !known || !is_constant(read) do return out
+		return and_law(k, {int_hull(k, out), int_hull(k, read)})
+	}
 	for d in quotients {
-		if Type(d) == t do continue // n / c itself: nothing beside it to relate
-		n := d.args[0]
-		c := d.args[1].(Int)
+		n, b := d.args[0], d.args[1]
+		c, constant := b.(Int)
+		// n / c, n % b themselves: nothing beside them to relate
+		if Type(d) == t && (constant || d.op == .Mod) do continue
 		at_least, _ := term_bound(k, n, true)
-		if low, known := at_least.(Int); !known || low < 0 do continue
+		low, bounded := at_least.(Int)
+		natural := bounded && low >= 0
+		if !constant {
+			divisor, _ := term_bound(k, b, true)
+			if one, known := divisor.(Int); !known || one < 1 do continue
+			if d.op == .Mod {
+				r := new_unknown(k, nil)
+				top := op(k, .Sub, b, Int(1))
+				r.layout = range_law(k, natural ? Int(0) : op(k, .Neg, top), top, .Int, {})
+				out = related(k, t, out, append_read(nil, d, r))
+			} else if whole, divided := divided_by(k, n, b, natural); divided {
+				out = related(k, t, out, append_read(nil, d, whole))
+			}
+			continue
+		}
+		if d.op != .Div || c <= 0 || !natural do continue
 		q, r := new_unknown(k, nil), new_unknown(k, nil)
 		q.layout = layout_image(k, d) or_continue
 		r.layout = range_law(k, Int(0), Int(c - 1), .Int, {})
@@ -678,10 +701,52 @@ euclid_image :: proc(k: ^Kernel, t: Type, image: Type) -> Type {
 		} else if o, is_op := n.(^Operation); is_op {
 			reading = append_read(reading, o, whole)
 		} else do continue
-		read := layout_image(k, rewrite(k, t, reading)) or_continue
-		if is_constant(read) do out = and_law(k, {int_hull(k, out), int_hull(k, read)})
+		out = related(k, t, out, reading)
 	}
 	return out
+}
+
+// divided_by: n = b·Q + R as polynomials over b and the other atoms, R ≥ 0 not
+// reading b, b ≥ 1: n / b rounded down is Q + R / b, and / rounds toward 0: n / b is
+// Q + R / b when n ≥ 0, one more at most otherwise.
+divided_by :: proc(k: ^Kernel, n, b: Type, natural: bool) -> (whole: Type, ok: bool) {
+	z := new_unknown(k, nil)
+	z.layout = family_term(.Int)
+	over: Rewrite
+	if u, is_unknown := b.(^Unknown); is_unknown do over = rewriting(nil, u, z)
+	else do over = append_read(nil, b, z)
+	back: Rewrite
+	p := atomized(k, rewrite(k, n, over), &back)
+	ms, divisor := monomials(p) or_return
+	if divisor != 1 do return
+	quotient, rest := make([dynamic]Type), make([dynamic]Type)
+	for m in ms {
+		fs := factors(m)
+		at := -1
+		for f, i in fs do if same_unknown(f, z) do at = i
+		if at < 0 {
+			append(&rest, m)
+			continue
+		}
+		others := make([dynamic]^Unknown)
+		for f, i in fs do if i != at do append(&others, f)
+		append(&quotient, monomial(coefficient(m), others[:]))
+	}
+	if len(quotient) == 0 do return
+	q := ring_term(quotient[:], 1) or_return
+	r := ring_term(rest[:], 1) or_return
+	if reads(k, r, z) do return
+	back = rewriting(back, z, b)
+	q, r = rewrite(k, q, back), rewrite(k, r, back)
+	least, _ := term_bound(k, r, true)
+	if low, known := least.(Int); !known || low < 0 do return
+	whole = op(k, .Add, q, op(k, .Div, r, b))
+	if !natural {
+		e := new_unknown(k, nil)
+		e.layout = range_law(k, Int(0), Int(1), .Int, {})
+		whole = op(k, .Add, whole, e)
+	}
+	return whole, true
 }
 
 // related_image: the image of a term of degree 1 in an unknown narrowed between
@@ -699,7 +764,11 @@ related_image :: proc(k: ^Kernel, term: Type, image: Type) -> Type {
 		if is_constant(layout) do continue
 		alpha, r, affine := affine_in(k, t, u)
 		a, constant := alpha.(Int)
-		if !affine || !constant || a == 0 do continue
+		if !affine || !constant || a == 0 {
+			// a term monotone in u lies between its values at the bounds of u
+			if direction := monotone_in(k, t, u); direction != 0 do out = monotone_image(k, t, u, layout, direction, out)
+			continue
+		}
 		terms := []Type{layout}
 		if both, narrowed := layout.(^And); narrowed do terms = both.terms
 		for x in terms {
@@ -714,6 +783,71 @@ related_image :: proc(k: ^Kernel, term: Type, image: Type) -> Type {
 			if least == nil && most == nil do continue
 			out = and_law(k, {int_hull(k, out), range_law(k, least, most, .Int, {})})
 		}
+	}
+	return out
+}
+
+// monotone_in: t grows with u (1), or decreases (-1), u ≥ 0 among its bounds; 0 when
+// not known. A polynomial grows with u when each monomial reading u has a coefficient
+// of one sign and its other atoms ≥ 0; n / d, d ≥ 1 not reading u, as n does: / rounds
+// toward 0, an order preserved.
+monotone_in :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> int {
+	if o, is_op := t.(^Operation); is_op && o.op == .Div && len(o.args) == 2 && !reads(k, o.args[1], u) {
+		least, _ := term_bound(k, o.args[1], true)
+		if one, known := least.(Int); !known || one < 1 do return 0
+		return monotone_in(k, o.args[0], u)
+	}
+	// a polynomial: its atoms are terms inside it
+	o, is_op := t.(^Operation)
+	if !is_op do return 0
+	#partial switch o.op {
+	case .Add, .Sub, .Mul, .Neg:
+	case:
+		return 0
+	}
+	at_least, _ := term_bound(k, u, true)
+	if low, known := at_least.(Int); !known || low < 0 do return 0
+	back: Rewrite
+	p := atomized(k, t, &back)
+	ms, divisor, ring := monomials(p)
+	if !ring || divisor < 1 do return 0
+	direction := 0
+	for m in ms {
+		fs := factors(m)
+		reading := false
+		for f in fs {
+			if same_unknown(f, u) {
+				reading = true
+				continue
+			}
+			atom := rewrite(k, f, back)
+			least, _ := term_bound(k, atom, true)
+			if low, known := least.(Int); !known || low < 0 do return 0
+		}
+		if !reading do continue
+		sign := coefficient(m) > 0 ? 1 : -1
+		if direction != 0 && sign != direction do return 0
+		direction = sign
+	}
+	return direction
+}
+
+// monotone_image: t, monotone in u between bounds over other unknowns, lies between its
+// values at those bounds — each a term over the others, read by its own image.
+monotone_image :: proc(k: ^Kernel, t: Type, u: ^Unknown, layout: Type, direction: int, out: Type) -> Type {
+	out := out
+	terms := []Type{layout}
+	if both, narrowed := layout.(^And); narrowed do terms = both.terms
+	for x in terms {
+		bounds, is_range := x.(^Range)
+		if !is_range || is_constant(x) do continue
+		lo, hi := bounds.lo, bounds.hi
+		if direction < 0 do lo, hi = hi, lo
+		least, most: Type
+		if lo != nil do least, _ = term_bound(k, rewrite(k, t, rewriting(nil, u, lo)), true)
+		if hi != nil do most, _ = term_bound(k, rewrite(k, t, rewriting(nil, u, hi)), false)
+		if least == nil && most == nil do continue
+		out = and_law(k, {int_hull(k, out), range_law(k, least, most, .Int, {})})
 	}
 	return out
 }
