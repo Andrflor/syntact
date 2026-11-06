@@ -224,6 +224,20 @@ rewritten_term :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	case ^Pattern:
 		// a new target: the pattern on it, each product rewritten in its branch (§6)
 		if target := rewrite(k, v.target, r); target != v.target do return as_normal(pattern_on(k, target, v, r))
+		// a cover over the unknowns rewritten: the pattern on its new covers
+		covers: ^Pattern
+		for b, i in v.branches {
+			if b.cover == nil do continue
+			cover := rewrite(k, b.cover, r)
+			if cover == b.cover do continue
+			if covers == nil {
+				covers = new(Pattern)
+				covers^ = v^
+				covers.branches = slice.clone(v.branches)
+			}
+			covers.branches[i].cover = cover
+		}
+		if covers != nil do return as_normal(pattern_on(k, v.target, covers, r))
 		p := new(Pattern)
 		p.target, p.span = v.target, v.span
 		p.branches = make([]Branch, len(v.branches))
