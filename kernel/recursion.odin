@@ -2164,8 +2164,11 @@ linear_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, m: Measure) -> (b
 		measure: Type,
 		z:       ^Unknown,
 	}
+	// the fields in the order they are written: the aⱼ least in that order
 	fields := make([dynamic]Field)
-	for b, u in eq.params {
+	for b in eq.root.bindings {
+		u, carved := eq.params[b]
+		if !carved do continue
 		x := u.(^Unknown) or_continue
 		measure: Type
 		if proven_in(k, x, family_term(.Int)) do measure = x
@@ -2230,7 +2233,11 @@ linear_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, m: Measure) -> (b
 					arg := changes[f.binding] or_else Type(f.unknown)
 					at := f.measure == Type(f.unknown) ? arg : run_law(k, .Length, {arg}, eq.root.span)
 					q, p := split_z(k, rewrite(k, at, as_z), zs) or_return
-					constant := p.(Int) or_return
+					// what the carve adds to the measures, at its own image: aⱼ ≥ 0, so the
+					// bound holds for every value when it holds at the greatest above, at
+					// the least below
+					least, top := int_bounds(k, layout_image(k, read_in(k, leaf, p)) or_return) or_return
+					constant := (upper ? top : least).? or_return
 					for qi, i in q do ks[i + 1].coefs[j] -= sign * a * qi
 					ks[0].coefs[j] -= sign * a * i128(constant)
 				}
@@ -2261,6 +2268,9 @@ linear_bounds :: proc(k: ^Kernel, eq: ^Call_Equation, e: Type, m: Measure) -> (b
 					case l != nil && h != nil:
 						append(&added, linear_add(c, kj, l.?) or_return)
 						append(&added, linear_add(c, kj, h.?) or_return)
+					case:
+						// unbounded both ways: Kⱼ = 0, the rest as it is
+						append(&added, c)
 					}
 				}
 				switch {
