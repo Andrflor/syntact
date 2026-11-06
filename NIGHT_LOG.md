@@ -196,3 +196,55 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
 - words 37 → 4 errors: expansions are their bindings placed; runs of one piece meet by their lengths (also a soundness fix: a suffix at an unknown place has 0..M pieces); x [&] m in 0..m; n / b ≤ Q + R.
 - respond: out of memory → 2 errors, 4.3 s / 2.9 GB (folds compared by what they bind, not by rewriting; |items.#x.sku| = 6; induction does not rewrite what it needs no hypothesis for). calc 8.7 GB → 2.2 GB, 29 errors.
 - sexp now 4 errors; blur 7.
+
+## Step: §5.6's field law for every kind of field (cea3cc3, f6e3790, 3dbc25f, 236bde0, 6fc34a9) — 05:45 UTC
+- f6e3790 a run field every call keeps or carves to its own suffix `t from c` holds
+  Suff(T): a run of the items of what the call gives it ({...{I:} * 0..} & its color).
+  The written steps read a cover's pieces (`(t)` of `{u32(h) ...(t)}` on `a` is
+  `a from 1`). zip types: "runs built at run time" and "run carved by place" pass on
+  x86 and C (acc + h*g with h, g in 0..999: hi = acc + 998001·|b|).
+- cea3cc3 lattice: (a & b) & a = a & b for meets kept written (was a growing chain of
+  equations); {} is the run of no piece (Word & ~{} within Word); the default of a meet
+  is the default of a term it holds (was an infinite recursion); a known place of a run
+  lies within its items too; a run of a set kept written by its range.
+- 3dbc25f a record field (Stats) holds, field by field, what each call's step gives
+  it: the written steps read a binding by its value, a pattern as its products, a
+  carve of a shape by name or place, `s.hits` as a part unknown. An integer field or
+  part a call moves by y + g, g in gmin..gmax, along a field every call moves by u + δ
+  (|δ| = 1), lies in y - δ·gmax·u ≤ max(y₀ - δ·gmax·u₀) (and the lower side): the
+  linear bound over two measures, kept by every step, so the call the equation makes
+  reads the same equation (no chain). A field read of a scope not known yet proves
+  `run{…}!.hits in i64` by induction. lru 90–93 and 67:19 gone; scene 111:10 and
+  131:65 (`build{…}!.nodes` expanded) gone; sexp 18 → 4.
+- 236bde0 the colors of a shape over unknowns are rewritten with them (generic_equation
+  read them over the written-step unknowns, never narrowed by a branch); a read a branch
+  narrows, t & S, keeps its relation (runs_read). lru 70:16 size + 1 and 74:10 gone.
+- 6fc34a9 runs of one piece meet whatever their lengths (f27a72e only met decided ones):
+  Adj & runs of its items keeps |adj| = v; graph's `.#` place errors gone.
+- Errors (kernel time): lru 8 (0.6 s), particles 8 (0.6 s), graph 22 (0.5 s), scene 13
+  (0.2 s), words 4 (3.5 s), blur 7 (1.7 s), calc 29 (3.6 s), sexp 4 (1.9 s), strlist 0,
+  respond 2 (4.2 s). Duplicates: one error per reading of an equation (particles 7 → 8
+  and graph are the same kinds read once more).
+- Open, each the law it needs:
+  - lru 63:19 `?s.size - 1 in u32` (f.hit true): size = |recent| is a linear bound of
+    a part over the length of another part, and `take{xs -> r}!.hit` true only when r
+    is not {}: the call's value read per branch of its base. 67:26 `node.val + 1 in
+    i32`: val ≤ 999 + n with n up to 2^32 - 1 can overflow i32 — a true error of the
+    port's input range (Goose has N = 8000000); the items of `recent` would also need
+    the field law on the items of a run field.
+  - particles 109:33 `round32(?.#0.pos.x + ?.#0.vel.x) in f32`: the items of a run
+    carried by a call of another equation (`ps -> step{ps -> ps}!`), each moved by
+    move{} — the field law on items through a map, with real steps (α = -1 for the
+    reflection, not covered by the orbit bound, which takes α = 1 and integer g).
+  - graph 89:12 `total + dist.#u in i64`: the items of a run field moved by Put
+    (`dist{#w -> d + 1}`); 107:12 and 127:8 the bfs total and the pool sum.
+  - blur 72:10 `row{…}! in Img` and six `.#` places (`i - w - 1` with y, x ≥ 1):
+    products of unknowns in the place proof.
+  - sexp 279:8 |text| in i64 (a fold of gen texts), then 280–282 `.roots`/`.err` of
+    parse_all (cascade).
+- Wording for §5.6 (the law is there; this is its text for records and runs, for the
+  user to confirm): "A field every call keeps, or carves to its own suffix m from c,
+  holds what the call gives it, or one of its suffixes: a run of its bindings. A field
+  holding a record holds, binding by binding, what the steps give each. A counter
+  every call moves by y + g along a field every call moves by u + δ lies within
+  y - δ·max(g)·u ≤ max(y₀ - δ·max(g)·u₀): the steps made so far."
