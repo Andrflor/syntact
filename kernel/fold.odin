@@ -152,6 +152,8 @@ continues :: proc(k: ^Kernel, stop: Type, ki: Type, i: ^Unknown) -> bool {
 // value read what the effects give back, and the effects do not read the states,
 // the states cross them (§4.8): the effects fold alone, then the rest.
 folded :: proc(k: ^Kernel, fold: ^Fold) -> Type {
+	fold := fold
+	if g, along := along_orbit(k, fold); along do fold = g
 	f := simplified(k, fold)
 	if !has_effect(f.effects) do return fold_law(k, f)
 	crosses := !has_effect(f.value)

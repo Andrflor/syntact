@@ -283,7 +283,7 @@ read_of :: proc(t: Type) -> Read {
 // production at the values its carve gives (§5.3), its calls the hypothesis meanwhile.
 call_in :: proc(k: ^Kernel, call: ^Collapse, c: Type, fields := Read{}) -> bool {
 	s := call.target.(^Scope) or_return
-	eq := equation_of(k, origin(s)) or_return
+	eq := equation_of(k, origin(s), call_key(s)) or_return
 	for x in k.induced do if x.equation == eq.generic && x.fields == fields && same(k, x.set, c) do return x.proven
 	at := len(k.induced)
 	append(&k.induced, Induced{eq.generic, c, fields, false})

@@ -1,6 +1,7 @@
 package kernel
 
 import syn "../syntax"
+import "core:slice"
 
 // THE EQUATION OF A RECURSION, AND ITS SOLUTION (specs/types.md §5.6)
 //
@@ -22,6 +23,7 @@ import syn "../syntax"
 
 Recursion :: struct {
 	root:     ^Scope,
+	given:    []^Binding, // the fields the call that reads it carves, sorted by address
 	generic:  ^Scope, // root where each field its calls carve is an unknown of its color
 	term:     Type, // its first production there
 	params:   map[^Binding]^Unknown,
@@ -29,29 +31,60 @@ Recursion :: struct {
 	reading:  bool, // being read: its calls are the hypothesis (§5.6)
 }
 
-// equation_of: the equation of the recursive scope root, read once; false while it
-// is read.
-equation_of :: proc(k: ^Kernel, root: ^Scope) -> (eq: ^Recursion, ok: bool) {
-	if x, found := k.equations[root]; found do return x, !x.reading
-	eq = new(Recursion)
-	eq.root, eq.reading = root, true
-	k.equations[root] = eq
+// call_key: the fields a carve of root changes, sorted by address.
+call_key :: proc(s: ^Scope) -> []^Binding {
+	key := make([dynamic]^Binding)
+	for b in s.changes do append(&key, b)
+	slice.sort_by(key[:], proc(a, b: ^Binding) -> bool {return uintptr(a) < uintptr(b)})
+	return key[:]
+}
+
+// equation_of: the equation a call of root carving the fields given reads (§5.6): its
+// production where those fields, and those its calls carve, are unknowns of their
+// colors; one for each root and fields given, read once; false while it is read, its
+// calls then the hypothesis, and while the production of root is typed.
+equation_of :: proc(k: ^Kernel, root: ^Scope, given: []^Binding) -> (eq: ^Recursion, ok: bool) {
+	for x in k.equations do if x.root == root && x.reading do return nil, false
+	for x in k.equations do if x.root == root && slice.equal(x.given, given) do return x, true
+	if p, found := first_production(k, root); found && p.state == .In_Progress do return nil, false
+	return equation_built(k, root, given), true
+}
+
+// equation_built: the equation of root for the fields given, built.
+equation_built :: proc(k: ^Kernel, root: ^Scope, given: []^Binding) -> ^Recursion {
+	eq := new(Recursion)
+	eq.root, eq.given, eq.reading = root, slice.clone(given), true
+	append(&k.equations, eq)
 	defer eq.reading = false
-	// its fields: the bindings it declares with a color (§5.5), each an unknown of it
-	params := make(map[^Binding]^Unknown)
-	changes := make(map[^Binding]Type)
-	for b in root.bindings {
-		if b.kind != .Push && b.kind != .Pull || b.color == nil do continue
-		u := new_unknown(k, nil)
-		u.layout = binding_color(k, b)
-		params[b], changes[b] = u, u
+	carved := make(map[^Binding]bool)
+	for b in given do carved[b] = true
+	for {
+		params := make(map[^Binding]^Unknown)
+		changes := make(map[^Binding]Type)
+		for b in carved {
+			u := new_unknown(k, nil)
+			u.layout = binding_color(k, b)
+			if u.layout == nil {
+				f, known := family_of(k, binding_type(k, b))
+				u.layout = known ? family_term(f) : everything()
+			}
+			params[b], changes[b] = u, u
+		}
+		generic, derived := derive(k, root, changes, root.span).(^Scope)
+		if !derived do return eq
+		p, found := first_production(k, generic)
+		if !found do return eq
+		term := binding_type(k, p)
+		more := false
+		for c in calls_in(k, term, root) do for b in c.target.(^Scope).changes do if b not_in carved {
+			carved[b] = true
+			more = true
+		}
+		if more do continue
+		eq.generic, eq.term, eq.params = generic, term, params
+		eq.solution = solve(k, eq)
+		return eq
 	}
-	generic := derive(k, root, changes, root.span).(^Scope) or_return
-	p := first_production(k, generic) or_return
-	eq.generic, eq.params = generic, params
-	eq.term = binding_type(k, p)
-	eq.solution = solve(k, eq)
-	return eq, true
 }
 
 // solution_at: the solution of the equation at the values a carve of root gives its
@@ -62,12 +95,21 @@ solution_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
 	return renamed(k, rewrite(k, eq.solution, r))
 }
 
+// equation_at: the equation at the values a carve of root gives its fields.
+equation_at :: proc(k: ^Kernel, eq: ^Recursion, s: ^Scope) -> Type {
+	r: Rewrite
+	for b, u in eq.params do r = rewriting(r, u, b in s.changes ? s.changes[b] : binding_type(k, holding(s, b)))
+	// its calls are the hypothesis meanwhile: read as calls, never at their values
+	eq.reading = true
+	defer eq.reading = false
+	return rewrite(k, eq.term, r)
+}
+
 // solve: the normal form of the equation by the laws of the recursion; nil when they
 // leave a call of it.
 solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	root := eq.root
 	if solved(eq.term, root) do return eq.term
-	if has_effect(eq.term) do return nil
 	calls := calls_in(k, eq.term, root)
 	if len(calls) != 1 do return nil
 	call := calls[0]
@@ -82,12 +124,31 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	if !known do return nil
 	y := new_unknown(k, nil)
 	y.layout = family_term(family)
+	// the effects of a step before its call run at each step of the fold, in the order
+	// the equation runs them (§4.8); what follows them is the step, over what the call
+	// gives back
+	pre, post := make([dynamic]^Effect), make([dynamic]^Effect)
+	answered := false
+	for e, is_effect := step.(^Effect); is_effect; e, is_effect = step.(^Effect) {
+		step = e.then
+		if e.call != nil && e.call.recursive {
+			// the call, an effect: what it gives back is y
+			if answered do return nil
+			answered = true
+			if e.answer != nil do step = rewrite(k, step, rewriting(nil, e.answer, y))
+			continue
+		}
+		append(answered ? &post : &pre, e)
+	}
 	step = rewrite(k, step, rewriting_call(nil, call, y))
-	if !solved(step, root) do return nil
+	if !solved(step, root) || has_effect(step) do return nil
 	// the fields the call moves, each to a term over the fields
 	next := make(map[^Unknown]Type)
 	for b, v in call.target.(^Scope).changes do next[eq.params[b] or_else nil] = v
 	if nil in next || u not_in next do return nil
+	// effects after the call run coming back up, from the base: the fold of the
+	// definition along its orbit, from its end
+	if len(post) > 0 do return from_base(k, p, u, stop, base, pre[:], post[:], step, y, next)
 	// the fold: its index the target, its states the other fields the call moves
 	f := new(Fold)
 	f.span = p.span
@@ -106,19 +167,29 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 	for w in inits do append(&updates, rewrite(k, next[w.(^Unknown)], along))
 	at_end := rewriting(along, u, narrowing(x, and_law(k, {layout_of(k, u), stop})))
 	f.index, f.start, f.next, f.stop = x, u, rewrite(k, next[u], along), stop
-	f.effects, f.value = None{}, rewrite(k, base, at_end)
+	effects: Type = None{}
+	#reverse for e in pre do effects = wrapped(e, e.answer, effects)
+	f.effects, f.value = rewrite(k, effects, along), rewrite(k, base, at_end)
 	switch {
 	case same(k, step, y):
 		// the call itself: the value is the base where the fold stops
 	case:
-		if alpha, beta, affine := affine_in(k, step, y); affine {
-			// α·y + β: the maps compose, A·base + B where it stops
+		modulus: Type
+		if o, is_mod := step.(^Operation); is_mod && o.op == .Mod {
+			if m, constant := o.args[1].(Int); constant && m > 0 do modulus, step = o.args[1], o.args[0]
+		}
+		modded :: proc(k: ^Kernel, t, m: Type) -> Type {return m == nil ? t : op(k, .Mod, t, m)}
+		if alpha, beta, affine := affine_in(k, step, y); affine && (modulus == nil || proven_in(k, alpha, COUNTS) && proven_in(k, beta, COUNTS) && proven_in(k, base, COUNTS)) {
+			// α·y + β, modulo m when it is: the maps compose, (A·base + B) % m where it stops
 			a, b := new_unknown(k, nil), new_unknown(k, nil)
 			a.layout, b.layout = y.layout, y.layout
+			if modulus != nil do a.layout, b.layout = COUNTS, COUNTS
 			append(&states, a, b)
 			append(&inits, Int(1), Int(0))
-			append(&updates, op(k, .Mul, a, rewrite(k, alpha, along)), op(k, .Add, b, op(k, .Mul, a, rewrite(k, beta, along))))
-			f.value = op(k, .Add, op(k, .Mul, a, f.value), b)
+			append(&updates, modded(k, op(k, .Mul, a, rewrite(k, alpha, along)), modulus), modded(k, op(k, .Add, b, op(k, .Mul, a, rewrite(k, beta, along))), modulus))
+			f.value = modded(k, op(k, .Add, op(k, .Mul, a, f.value), b), modulus)
+		} else if modulus != nil {
+			return nil
 		} else if prefix, suffix, runs := run_affine(k, step, y); runs {
 			// {...P ...y ...Q}: the runs compose, {...A ...base ...B} where it stops
 			a, b := new_unknown(k, nil), new_unknown(k, nil)
@@ -132,7 +203,7 @@ solve :: proc(k: ^Kernel, eq: ^Recursion) -> Type {
 		}
 	}
 	f.states, f.inits, f.updates = states[:], inits[:], updates[:]
-	return fold_law(k, f)
+	return folded(k, f)
 }
 
 // bases_and_steps: a pattern takes its first branch (§6), so its branches are two
@@ -192,3 +263,42 @@ run_affine :: proc(k: ^Kernel, v: Type, y: ^Unknown) -> (prefix, suffix: []^Bind
 }
 
 _ :: syn
+
+// from_base: f(m) = pre(m) · f(s(m)) · post(m, y) with v(m, y) its value, the orbit
+// of m by s in closed form, kᵢ = sⁱ(m), n = μ(i: kᵢ in stop): the effects pre run going
+// down, i from 0 to n − 1; then the fold comes back up from the base b(kₙ), i from
+// n − 1 to 0, each step post(kᵢ, y) and y ↦ v(kᵢ, y) (§5.6). Only u moves.
+from_base :: proc(k: ^Kernel, p: ^Pattern, u: ^Unknown, stop, base: Type, pre, post: []^Effect, v: Type, y: ^Unknown, next: map[^Unknown]Type) -> Type {
+	if len(next) != 1 do return nil
+	i := new_unknown(k, nil)
+	i.layout = COUNTS
+	ki, closed := orbit(k, next[u], u, u, i)
+	if !closed do return nil
+	j := new_unknown(k, nil)
+	j.layout = COUNTS
+	n := least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), stop), p.span)
+	at :: proc(k: ^Kernel, ki: Type, i: ^Unknown, t: Type) -> Type {return rewrite(k, ki, rewriting(nil, i, t))}
+	up := new(Fold)
+	up.span = p.span
+	up.index = new_unknown(k, nil)
+	up.index.layout = COUNTS
+	up.start, up.next, up.stop = op(k, .Sub, n, Int(1)), op(k, .Sub, up.index, Int(1)), new_range(nil, Int(-1), .Int)
+	z := new_unknown(k, nil)
+	z.layout = y.layout
+	inside := rewriting(rewriting(nil, u, at(k, ki, i, up.index)), y, z)
+	effects: Type = None{}
+	#reverse for e in post do effects = wrapped(e, e.answer, effects)
+	up.states, up.inits, up.updates = {z}, {rewrite(k, base, rewriting(nil, u, at(k, ki, i, n)))}, {rewrite(k, v, inside)}
+	up.effects, up.value = rewrite(k, effects, inside), z
+	value := folded(k, up)
+	if len(pre) == 0 do return value
+	down := new(Fold)
+	down.span = p.span
+	down.index = new_unknown(k, nil)
+	down.index.layout = COUNTS
+	down.start, down.next, down.stop = Int(0), op(k, .Add, down.index, Int(1)), new_range(n, nil, .Int)
+	before: Type = None{}
+	#reverse for e in pre do before = wrapped(e, e.answer, before)
+	down.effects, down.value = rewrite(k, before, rewriting(nil, u, at(k, ki, i, down.index))), None{}
+	return wrapped(folded(k, down).(^Effect), nil, value)
+}

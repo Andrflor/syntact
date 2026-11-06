@@ -475,7 +475,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		// a call that stays: giving scopes, the scope of its equation, read as a color
 		// (§5.4); otherwise the family it is proven in
 		f := family_of(k, v) or_return
-		if f == .Scope do if s, is_scope := v.target.(^Scope); is_scope do if eq, read := equation_of(k, origin(s)); read do return eq.generic, true
+		if f == .Scope do if s, is_scope := v.target.(^Scope); is_scope do if eq, read := equation_of(k, origin(s), call_key(s)); read do return eq.generic, true
 		return family_term(f), true
 	case ^Fold:
 		// a run it builds: a run of what its steps place

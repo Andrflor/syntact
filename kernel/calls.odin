@@ -83,9 +83,12 @@ origin :: proc(s: ^Scope) -> ^Scope {
 // computes. A carve of it was checked where it is written (scope.odin).
 recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	root := origin(s)
-	if eq, read := equation_of(k, root); read && eq.solution != nil {
+	if eq, read := equation_of(k, root, call_key(s)); read {
 		run: Rewrite
-		return renewed(k, solution_at(k, eq, s), &run)
+		if eq.solution != nil do return renewed(k, solution_at(k, eq, s), &run)
+		// the definition is an equality: at the values the call gives, an equation
+		// that calls nothing is the value (§7); one that still calls stays the call
+		if v := equation_at(k, eq, s); solved(v, root) && !holds_invalid(v) do return renewed(k, v, &run)
 	}
 	out := new(Collapse)
 	out.target, out.recursive, out.span = s, true, span
@@ -191,15 +194,25 @@ production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if !recursive(root) do return normal(k, b.value)
 	first, found := first_production(k, root)
 	if found && first != b && first.state == .Not_Asked do binding_type(k, first)
+	if first != b do return normal(k, b.value)
 	value := normal(k, b.value)
-	if first != b do return value
 	if !root.effectful && has_effect(with_effects(k, root, b, value)) {
 		root.effectful = true
 		m: Copier
 		m.scopes[b.scope] = b.scope // the scopes written in the production are copied
 		value = normal(k, copy_term(k, &m, b.value, b.scope))
 	}
-	if eq, read := equation_of(k, root); read && eq.solution != nil do return solution_at(k, eq, b.scope)
+	// the equation of the fields its calls carve, solved: at the values the scope holds
+	carved := make(map[^Binding]bool)
+	for c in calls_in(k, value, root) do for x in c.target.(^Scope).changes do carved[x] = true
+	if len(carved) == 0 do return value
+	key := make([dynamic]^Binding)
+	for x in carved do append(&key, x)
+	slice.sort_by(key[:], proc(a, b: ^Binding) -> bool {return uintptr(a) < uintptr(b)})
+	eq: ^Recursion
+	for x in k.equations do if x.root == root && slice.equal(x.given, key[:]) do eq = x
+	if eq == nil do eq = equation_built(k, root, key[:])
+	if eq.solution != nil do return solution_at(k, eq, b.scope)
 	return value
 }
 
@@ -246,6 +259,6 @@ is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
 	if !is_scope do return false
 	root := origin(s)
 	if p, found := first_production(k, root); found && p.state == .In_Progress do return true
-	eq, known := k.equations[root]
-	return known && eq.reading
+	for x in k.equations do if x.root == root && x.reading do return true
+	return false
 }
