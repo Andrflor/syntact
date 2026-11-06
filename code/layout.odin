@@ -38,6 +38,7 @@ Layout :: struct {
 	nodes:   []^Layout, // a tree: the fields of each shape
 	size:    int, // the bytes it takes in memory
 	align:   int,
+	after:   []Value, // a run: built where the run these values hold ends, in its memory (§4.13)
 }
 
 Field_Layout :: struct {
@@ -357,6 +358,7 @@ build :: proc(l: ^Lowering, t: kernel.Type, lay: ^Layout, tail := false) -> []Va
 		if lay.kind == .Run do return fold(l, v, lay)
 	case ^kernel.Scope:
 		if lay.kind == .Tree do return node_of(l, v, lay)
+		if lay.after != nil do return run_after(l, v, lay)
 		return run_of(l, v, lay)
 	case ^kernel.Pattern:
 		return pattern(l, v, tail, lay)
@@ -417,29 +419,67 @@ placed :: proc(l: ^Lowering, a, at: Value, data: []^kernel.Binding, parts: [][]V
 	return at
 }
 
-// grows: the update of the state i of a fold is {...x e…}, x the state, read
-// nowhere else: x is read for the last time, and what follows it is built in its
-// place (§4.13).
+// grows: the state i of a fold is a run that grows in a memory of its own (§4.13):
+// each product of its update is a run written as its bindings — the state first,
+// {...x e…}, what follows it placed after it, in its place; or a run of its own,
+// placed where the state ends. Nothing is placed where a value the state took
+// holds its bindings: those stay what they are, wherever they are read. Its memory
+// is reserved whole before the first step (grown), so its size is known.
 grows :: proc(l: ^Lowering, f: ^kernel.Fold, i: int) -> bool {
-	s, is_scope := f.updates[i].(^kernel.Scope)
+	_, known := region_length(l, f, i)
+	return known
+}
+
+// region_length: the bindings the memory of a state that grows holds (grows): an
+// update that extends it, its final length, the closed form of |fold|; one that may
+// start a run of its own, what its steps may place, c bindings at most a step, n
+// steps: |init| + c·n (§4.13, §5.6).
+region_length :: proc(l: ^Lowering, f: ^kernel.Fold, i: int) -> (n: kernel.Type, ok: bool) {
+	// c: the bindings a product places at most, where the state ends
+	most :: proc(l: ^Lowering, t: kernel.Type, x: ^kernel.Unknown) -> (c: int, ok: bool) {
+		#partial switch v in t {
+		case ^kernel.Pattern:
+			if kernel.has_effect(v) do return
+			for b in v.branches do c = max(c, most(l, b.product, x) or_return)
+			return c, true
+		case ^kernel.Scope:
+			data := kernel.run_data(l.k, v)
+			if extends(l, t, x) do data = data[1:]
+			for b in data {
+				if b.kind == .Expand do return
+				c += 1
+			}
+			return c, true
+		}
+		return
+	}
+	if extends(l, f.updates[i], f.states[i]) {
+		ending := new_clone(f^)
+		ending.value = f.states[i]
+		n = kernel.op(l.k, .Length, ending)
+		if o, stays := n.(^kernel.Operation); stays && o.op == .Length do return
+		return n, true
+	}
+	c := most(l, f.updates[i], f.states[i]) or_return
+	steps := kernel.fold_steps(l.k, f) or_return
+	return kernel.op(l.k, .Add, kernel.op(l.k, .Length, f.inits[i]), kernel.op(l.k, .Mul, kernel.Int(i128(c)), steps)), true
+}
+
+// extends: t is {...x e…}, x the state: what it places goes after x, in its place.
+extends :: proc(l: ^Lowering, t: kernel.Type, x: ^kernel.Unknown) -> bool {
+	s, is_scope := t.(^kernel.Scope)
 	if !is_scope do return false
 	data := kernel.run_data(l.k, s)
 	if len(data) == 0 || data[0].kind != .Expand do return false
-	x, is_state := kernel.binding_value(l.k, data[0]).(^kernel.Unknown)
-	if !is_state || !kernel.same_unknown(x, f.states[i]) do return false
-	for b in data[1:] do if kernel.reads(l.k, kernel.binding_value(l.k, b), f.states[i]) do return false
-	for t, j in f.updates do if j != i && kernel.reads(l.k, t, f.states[i]) do return false
-	return true
+	first, is_state := kernel.binding_value(l.k, data[0]).(^kernel.Unknown)
+	return is_state && kernel.same_unknown(first, x)
 }
 
-// grown: a state that grows along the fold, reserved whole before the first step
-// at its final length, the closed form of |fold| (§4.13, §5.6); its init stored
-// first.
+// grown: a state that grows along the fold, its memory reserved whole before the
+// first step (§4.13), its init stored first.
 grown :: proc(l: ^Lowering, f: ^kernel.Fold, i: int, run: ^Layout) -> []Value {
-	ending := new_clone(f^)
-	ending.value = f.states[i]
-	length := kernel.op(l.k, .Length, ending)
-	if o, stays := length.(^kernel.Operation); stays && o.op == .Length do return fail_values(l, "the length of %s has no closed form", kernel.print_type(ending))
+	length, known := region_length(l, f, i)
+	if !known do return fail_values(l, "the memory of %s has no closed form", kernel.print_type(f.states[i]))
 	init := build(l, f.inits[i], run)
 	n := lower(l, length)
 	if l.error != "" do return nil
@@ -450,17 +490,39 @@ grown :: proc(l: ^Lowering, f: ^kernel.Fold, i: int, run: ^Layout) -> []Value {
 	return out
 }
 
-// appended: the update {...x e…} of a state that grows: e… stored after the
-// bindings of x, in its place.
-appended :: proc(l: ^Lowering, x: []Value, update: kernel.Type, run: ^Layout) -> []Value {
-	data := kernel.run_data(l.k, update.(^kernel.Scope))[1:]
+// after: the layout of a run built where the run x ends, in its memory.
+after :: proc(run: ^Layout, x: []Value) -> ^Layout {
+	out := new_clone(run^)
+	out.after = x
+	return out
+}
+
+// run_after: a run written as its bindings, built where the run x ends (after):
+// {...x e…} places e… there, in the place of x; another run places its bindings
+// there, a run of its own.
+run_after :: proc(l: ^Lowering, s: ^kernel.Scope, lay: ^Layout) -> []Value {
+	x := lay.after
+	run := new_clone(lay^)
+	run.after = nil
+	data := kernel.run_data(l.k, s)
+	extended := false
+	if len(data) > 0 && data[0].kind == .Expand {
+		first := lower_values(l, kernel.binding_value(l.k, data[0]))
+		extended = len(first) == 2 && first[0] == x[0] && first[1] == x[1]
+	}
+	if extended do data = data[1:]
 	parts := make([][]Value, len(data))
 	for b, i in data {
 		parts[i] = build(l, kernel.binding_value(l.k, b), b.kind == .Expand ? run : run.item)
 		if l.error != "" do return nil
 	}
 	out := make([]Value, 2)
-	out[0], out[1] = x[0], placed(l, x[0], x[1], data, parts, run)
+	if extended {
+		out[0], out[1] = x[0], placed(l, x[0], x[1], data, parts, run)
+	} else {
+		out[0] = element(l, x[0], x[1], run)
+		out[1] = placed(l, out[0], constant(l, 0), data, parts, run)
+	}
 	hold(l, run, out)
 	return out
 }

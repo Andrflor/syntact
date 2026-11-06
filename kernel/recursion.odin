@@ -2324,6 +2324,17 @@ orbit_length :: proc(k: ^Kernel, u: ^Unknown, step, stop: Type, span: syn.Span) 
 	return least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), stop), span), true
 }
 
+// fold_steps: the count of steps of a fold, in closed form: the length of the orbit
+// of its start (§5.6), its points from what the start may be — any integer, when
+// it is one: a single value is that value, and the orbit would not move.
+fold_steps :: proc(k: ^Kernel, f: ^Fold) -> (n: Type, ok: bool) {
+	start := new_unknown(k, nil)
+	start.layout = layout_image(k, f.start) or_return
+	if is_value(k, start.layout) do start.layout = family_term(family_of(k, start.layout) or_return)
+	steps := orbit_length(k, start, rewrite(k, f.next, rewriting(nil, f.index, start)), f.stop, f.span) or_return
+	return rewrite(k, steps, rewriting(nil, start, f.start)), true
+}
+
 // Bound_Product: a product of the equation, its calls taken at one bound y: g,
 // reading none (a = 0), α·y + g, α ≥ 0 — g between lo and hi —; or x % m, m > 0
 // constant, which lies in -(m - 1)..m - 1 whatever x, and in 0..m - 1 when x ≥ 0.

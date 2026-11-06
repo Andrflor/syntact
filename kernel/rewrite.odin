@@ -956,11 +956,7 @@ sum_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 		steps = op(k, .Add, op(k, .Sub, hi, lo), Int(1))
 		along = rewriting(nil, f.index, narrowing(f.index, range_law(k, lo, hi, .Int, f.span)))
 	} else {
-		// the orbit of the start: its points from what the start may be
-		start := new_unknown(k, nil)
-		start.layout = layout_image(k, f.start) or_return
-		n := orbit_length(k, start, rewrite(k, f.next, rewriting(nil, f.index, start)), f.stop, f.span) or_return
-		steps = rewrite(k, n, rewriting(nil, start, f.start))
+		steps = fold_steps(k, f) or_return
 	}
 	for z, i in f.states {
 		if !reads(k, f.value, z) do continue
