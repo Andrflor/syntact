@@ -114,3 +114,8 @@ benchmarks: each one's status and, where it runs, its times against Goose and C+
   (digit runs are unbounded), its <invalid> step keeps the call and cascades;
   words: (a * a) / vocab in 0..vocab - 1 (a = s % vocab), count-down run length,
   captured-unknown fold bound, inclusion through expansions, narrower-rest cover.
+
+## Step: kernel round 4b (7ed6368, b1d188b, 4800611, 2ab6976) — 02:45 UTC
+- Reals are a field in the ring (§4.5); affine fold states bounded by their bound folds; parser fix for `{{} -> a -> b}`; orbit points before μ out of the base.
+- particles 8 → 5, sexp 22 → 18, words 50.
+- Round 5 launched: sexp's digit run bounded by the language of the text gen builds (Arden); f32 rounding bounds at format extremes (particles); words gaps and compile time.
