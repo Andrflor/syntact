@@ -581,7 +581,8 @@ ring_at :: proc(t: Type, u: ^Unknown, v: Type) -> (out: Type, ok: bool) {
 
 // atomized: t as a polynomial (ring.odin) over atoms: each term the ring does not
 // read — a μ, a pattern — is named by an unknown of its own, which back rewrites to
-// it. In the field (ring.odin), over the reals.
+// it. In the field (ring.odin), over the reals. A sum, a product keep their form,
+// their operands atomized: the ring reads it whole, once (monomials, ring_law).
 atomized :: proc(k: ^Kernel, t: Type, back: ^Rewrite, field := false) -> Type {
 	#partial switch v in t {
 	case ^Unknown:
@@ -592,16 +593,11 @@ atomized :: proc(k: ^Kernel, t: Type, back: ^Rewrite, field := false) -> Type {
 		if field do return t
 	case ^Operation:
 		#partial switch v.op {
-		case .Add, .Sub, .Mul:
-			out := atomized(k, v.args[0], back, field)
-			for a in v.args[1:] {
-				next, ok := ring_law(v.op, {out, atomized(k, a, back, field)}, field)
-				if !ok do break
-				out = next
-			}
-			if _, _, ring := monomials(out, field); ring do return out
-		case .Neg:
-			if out, ok := ring_law(.Neg, {atomized(k, v.args[0], back, field)}, field); ok do return out
+		case .Add, .Sub, .Mul, .Neg:
+			if is_string_value(t) do break
+			args := make([]Type, len(v.args))
+			for a, i in v.args do args[i] = atomized(k, a, back, field)
+			return new_operation(v.op, ..args)
 		}
 	}
 	for x in back do if x.unknown != nil && same(k, x.term, t) do return x.unknown
