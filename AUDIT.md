@@ -53,3 +53,34 @@ algebra. Verdicts:
 
 - the bounds of a call (`call_image`, `least_bounds`, `counter_bounds`, `linear_bounds`, caps 16 and 512): a solver beside the equations (f1c03a2).
 - the night's second reader of recursions (`written_steps`, `field_bounds`) (76a026f, then the revert 90c505f).
+
+## kernel/rewrite.odin (981 lines)
+
+The image of a term is the term with each unknown replaced by its layout, each
+operator distributing over `|` (§7); §8: "Operators distribute over `|`: there is no
+interval arithmetic". We compose in the types; we never unfold, never bound.
+
+### Laws (kept)
+
+| Procedure | Law |
+|---|---|
+| `rewrite`, `rewritten_term`, `rewrite_carve`, `rewrite_fold`, `bound_as`, `renamed`, `reads`, `node_of` | substitution; a fold binds its index and states |
+| `layout_of`, `held` | §7 the layout of an unknown |
+| `layout_image` for constants, unknowns, operations over constant images, `|`, `&`, `~`, `is`, a pattern (the images of its products, §6), a call giving scopes (the scope of its equation, §5.4) | §7 an operator distributes over `|` |
+| `related_image` (a·u + r, u between l and h, between a·l + r and a·h + r) | §6, stated in the spec as the one reading of a layout that relates unknowns |
+| `euclid_image` (n % b in 0..b − 1; n / c with n = c·q + r) | §4.5 Euclid |
+| `field_color`, `produced_field`, `shape_field` | §5.4 a field of a shape has its color |
+
+### Problems: interval arithmetic (§8 forbids it)
+
+| Where | Verdict | What |
+|---|---|---|
+| `int_hull` (used by `layout_image` on `&`, `euclid_image`, `related_image`, `built_image`, `scope.odin`, `normal.odin`) | NOT ALGEBRA | replaces a set by the range from its least to its greatest: a type replaced by its hull |
+| `hull_times`, `sum_image` | NOT ALGEBRA | the image of a fold or of a Σ as n·lo..n·hi: bounds of the steps multiplied by bounds of the count |
+| `least_image` | NOT ALGEBRA | μ bounded by counting digits in a loop |
+| `monotone_in`, `monotone_image` | NOT ALGEBRA | a term read at the bounds of an unknown; not in the spec (re-added today with the Euclid commit — my mistake) |
+| `divided_by` with `term_bound` on R | NOT ALGEBRA | the rest bounded below to apply the quotient law |
+| `term_bound` (pattern.odin), `outer_set` (pattern.odin) | NOT ALGEBRA | the least or greatest of a term over unknowns: bounds |
+| `layout_image` on a Fold: `sum_image`, then `built_image`, then the value over its states | to rewrite | a fold is its law: solved, its closed form; not solved, a computation whose values are the type of its value, proven by induction (§5.6) |
+| `layout_image` on a Series: split Σ(a + b), then `hull_times` | NOT ALGEBRA | the Σ law gives the closed form; otherwise the family |
+| `Plain` / `plain_of` cache of images | to check | an image depends only on the node when the node holds no call: the law itself, not a context |
