@@ -25,8 +25,8 @@ import "core:slice"
 // called: the call a carve gives, also where a branch narrows it: t & S is t where it
 // is in S (§4.2).
 called :: proc(v: Type) -> (^Collapse, bool) {
-	if c, is_call := v.(^Collapse); is_call && c.recursive do return c, true
-	if meet, narrowed := v.(^And); narrowed do for t in meet.terms do if c, is_call := t.(^Collapse); is_call && c.recursive do return c, true
+	if c, is_call := v.(^Collapse); is_call && stayed(c) do return c, true
+	if meet, narrowed := v.(^And); narrowed do for t in meet.terms do if c, is_call := t.(^Collapse); is_call && stayed(c) do return c, true
 	return nil, false
 }
 
@@ -81,7 +81,7 @@ solve :: proc(k: ^Kernel, g: ^Scope, term: Type) -> Type {
 	answered := false
 	for e, is_effect := step.(^Effect); is_effect; e, is_effect = step.(^Effect) {
 		step = e.then
-		if e.call != nil && e.call.recursive {
+		if e.call != nil && stayed(e.call) {
 			// the call, an effect: what it gives back is y
 			if answered do return nil
 			answered = true
@@ -357,7 +357,7 @@ calls_joined :: proc(k: ^Kernel, p: ^Pattern, root: ^Scope) -> ^Pattern {
 	carves := make([]^Scope, n - 1)
 	for b, i in p.branches[:n - 1] {
 		c, is_call := b.product.(^Collapse)
-		if !is_call || !c.recursive do return p
+		if !is_call || !stayed(c) do return p
 		carve, is_scope := c.target.(^Scope)
 		if !is_scope || origin(carve) != root || i > 0 && len(carve.changes) != len(carves[0].changes) do return p
 		for x in carve.changes do if i > 0 && x not_in carves[0].changes do return p
@@ -376,7 +376,7 @@ calls_joined :: proc(k: ^Kernel, p: ^Pattern, root: ^Scope) -> ^Pattern {
 		changes[x] = normal(k, q)
 	}
 	call := new(Collapse)
-	call.target, call.recursive, call.span = carved_copy(k, root, changes), true, p.span
+	call.target, call.span = carved_copy(k, root, changes), p.span
 	covers := make([]Type, n - 1)
 	for b, i in p.branches[:n - 1] do covers[i] = b.cover
 	out := new(Pattern)

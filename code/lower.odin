@@ -314,7 +314,7 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> []Value {
 	case ^kernel.Effect:
 		return effect(l, v, tail)
 	case ^kernel.Collapse:
-		if !v.recursive do break
+		if !kernel.stayed(v) do break
 		if tail && is_self(l, v) do return again(l, v)
 		return call(l, v)
 	case ^kernel.Fold:
@@ -397,7 +397,7 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> []Value {
 	if e.write != nil do return lower_values(l, e.then, tail)
 	if e.emission != nil do return fail_values(l, "the emission of %s is answered by no handler", kernel.print_type(e.emission.sent))
 	if e.call == nil do return fail_values(l, "the effect ε%d is served by no boundary", e.id)
-	if e.call.recursive {
+	if kernel.stayed(e.call) {
 		// a call of an equation with effects: the call, then what it wraps — in tail
 		// position when what it wraps is what the call gives back
 		if tail && is_self(l, e.call) && gives_answer(e) do return again(l, e.call)
@@ -1598,7 +1598,7 @@ string_of :: proc(o: ^kernel.Operation) -> string {
 // called: t is a call of a recursive equation, the carve it calls.
 called :: proc(t: kernel.Type) -> (^kernel.Scope, bool) {
 	c, is_call := t.(^kernel.Collapse)
-	if !is_call || !c.recursive do return nil, false
+	if !is_call || !kernel.stayed(c) do return nil, false
 	return c.target.(^kernel.Scope)
 }
 

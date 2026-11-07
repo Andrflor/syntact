@@ -9,7 +9,7 @@ import "core:strings"
 //
 // Each node becomes the term it writes (type.odin). Each name is resolved once, to
 // the last occurrence visible above it (§5.2). A scope names itself only from its
-// productions (§5.6): that name is marked, and its collapse is a recursive call.
+// productions (§5.6): its collapse there is a recursive call (scope.odin).
 // The file is a scope, inside the prelude of the aliases (§3).
 
 build_program :: proc(k: ^Kernel) -> ^Scope {
@@ -300,7 +300,6 @@ build_term :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		if len(syn.node_execute_wrappers(ast, idx)) > 0 do return unsupported(k, idx, "execution patterns")
 		c := new(Collapse)
 		c.target = build_term(k, s, data.execute.target)
-		c.recursive = names_itself(s, c.target)
 		c.site, c.span = holder(s), span
 		return c
 	case .Carve:
@@ -656,28 +655,6 @@ build_name :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	n.binding, found = lookup(s, name, ordinal)
 	if !found do return report(k, .Undefined_Identifier, n.span, fmt.tprintf("`%s` is not defined above", name))
 	return n
-}
-
-// names_itself: t, written at s, names the scope being defined — or a carve of it —
-// from one of its productions.
-names_itself :: proc(s: ^Scope, t: Type) -> bool {
-	#partial switch v in t {
-	case ^Name:
-		return defines(s, v.binding)
-	case ^Carve:
-		return names_itself(s, v.target)
-	}
-	return false
-}
-
-// defines: b is being defined around s, and s is in one of its productions.
-defines :: proc(s: ^Scope, b: ^Binding) -> bool {
-	child: ^Scope
-	for sc := s; sc != nil; child, sc = sc, sc.parent {
-		// a branch is a scope without bindings: it defines nothing
-		if child != nil && child.producing && !sc.complete && len(sc.bindings) > 0 && sc.bindings[len(sc.bindings) - 1] == b do return true
-	}
-	return false
 }
 
 // lookup: in each scope from s up, the bindings above the one being built. From a

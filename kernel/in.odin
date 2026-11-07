@@ -60,12 +60,12 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		}
 	}
 	// a recursive call, by induction on its equation: in c, or in ~c — then not in c (§4.1)
-	if call, ok := x.(^Collapse); ok && call.recursive {
+	if call, ok := x.(^Collapse); ok && stayed(call) {
 		if call_in(k, call, c) do return Bool(true)
 		if call_in(k, call, not_law(k, c)) do return Bool(false)
 	}
 	// what a call with effects gives back: in c by the same induction (§5.6, §4.8)
-	if u, ok := x.(^Unknown); ok && u.call != nil && u.call.recursive && call_in(k, u.call, c) do return Bool(true)
+	if u, ok := x.(^Unknown); ok && u.call != nil && stayed(u.call) && call_in(k, u.call, c) do return Bool(true)
 	// a field, a binding, of what a call gives: in c by induction on it (call_in)
 	if call, read := call_read(x); read && call_in(k, call, c, read_of(x)) do return Bool(true)
 	if f, ok := x.(^Fold); ok && fold_induction(k, f, c) do return Bool(true)

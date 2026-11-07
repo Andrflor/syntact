@@ -138,7 +138,7 @@ answer_in :: proc(k: ^Kernel, t: Type, s: ^Scope, bound: ^[]Type = nil) -> Type 
 			run := folded(k, f)
 			if v.answer != nil do then = rewrite(k, then, rewriting(nil, v.answer, given(k, run)))
 			return sequence(k, nil, {run, then}, last_part)
-		case v.call != nil && v.call.recursive && s != nil:
+		case v.call != nil && stayed(v.call) && s != nil:
 			c := v.call
 			if target, is_scope := c.target.(^Scope); is_scope && !written_in(origin(target), s) {
 				call := new(Collapse)

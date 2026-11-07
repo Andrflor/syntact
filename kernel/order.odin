@@ -81,7 +81,6 @@ term_order :: proc(a, b: Type) -> int {
 		return compare_ints(i128(x.ordinal), i128(y.ordinal))
 	case ^Collapse:
 		y := b.(^Collapse)
-		if c := compare_ints(i128(x.recursive), i128(y.recursive)); c != 0 do return c
 		return term_order(x.target, y.target)
 	case ^Carve:
 		y := b.(^Carve)

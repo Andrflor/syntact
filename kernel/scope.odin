@@ -168,10 +168,11 @@ collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 // above it (§4.8); none without one. A recursive call is never unfolded
 // (recursion.odin).
 product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
-	// a recursive call, or a carve of a recursive scope: the solution of its equation
-	// at the values the carve gives, or the call stays — never its production typed
-	// at those values: that is unfolding (§5.6)
-	if c.recursive || s != origin(s) && recursive(s) do return recursive_call(k, s, c.span, c.site)
+	// a carve of a recursive scope, or the scope collapsed in a production of its own:
+	// the solution of its equation at the values the carve gives, or the call stays —
+	// never its production typed at those values: that is unfolding (§5.6)
+	root := origin(s)
+	if s != root && recursive(root) || s == root && written_within(c.site, root) do return recursive_call(k, s, c.span, c.site)
 	if p, found := first_production(k, s); found do return product(k, p)
 	return None{}
 }
@@ -1171,7 +1172,7 @@ same_bound :: proc(k: ^Kernel, a, b: Type, bound: []Bound_Pair) -> bool {
 		return ok && x.name == y.name && x.ordinal == y.ordinal && same_bound(k, x.target, y.target, bound)
 	case ^Collapse:
 		y, ok := b.(^Collapse)
-		return ok && x.recursive == y.recursive && slice.equal(x.answered, y.answered) && same_bound(k, x.target, y.target, bound)
+		return ok && slice.equal(x.answered, y.answered) && same_bound(k, x.target, y.target, bound)
 	case ^Carve:
 		y, ok := b.(^Carve)
 		if !ok || len(x.args) != len(y.args) || !same_bound(k, x.target, y.target, bound) do return false

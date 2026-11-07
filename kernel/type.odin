@@ -213,11 +213,10 @@ Access :: struct {
 	span:    syn.Span,
 }
 
-// Collapse: `s!`. `recursive`: written in a production of the scope s names: a
-// recursive call, never unfolded (§5.6).
+// Collapse: `s!`. In normal form, a collapse of a scope that stays is a recursive call,
+// never unfolded (§5.6).
 Collapse :: struct {
 	target:    Type,
-	recursive: bool,
 	site:      ^Scope, // the scope it is written in: its handlers answer what it emits (§4.9)
 	answered:  []^Scope, // a recursive call whose equation emits: the scopes whose handlers answer it, the nearest first
 	span:      syn.Span,

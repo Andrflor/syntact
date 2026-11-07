@@ -195,7 +195,7 @@ build_node :: proc(key: Key) -> Type {
 		return o
 	case .Call:
 		c := new(Collapse)
-		c.target, c.recursive = key.children[0], true
+		c.target = key.children[0]
 		return c
 	}
 	return nil

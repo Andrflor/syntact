@@ -577,7 +577,7 @@ written_first :: proc(k: ^Kernel, t: Type) -> (Type, bool) {
 // the defaults, a pattern on a known value is gone, not its guard.
 places_itself :: proc(k: ^Kernel, s: ^Scope, p: ^Binding) -> bool {
 	if typing(p) do return false
-	if calls_itself(p.value) do return true
+	if calls_itself(p.value, origin(s)) do return true
 	shape, is_scope := binding_type(k, p).(^Scope)
 	if !is_scope do return false
 	if !is_shape(k, shape) do return false
@@ -585,31 +585,44 @@ places_itself :: proc(k: ^Kernel, s: ^Scope, p: ^Binding) -> bool {
 	return false
 }
 
-// calls_itself: t makes a recursive call whatever the values: outside the branches
-// of a pattern, and outside a scope, whose values are only read when asked.
-calls_itself :: proc(t: Type) -> bool {
+// calls_itself: t, written in a production of s, calls s whatever the values: outside
+// the branches of a pattern, and outside a scope, whose values are only read when
+// asked.
+calls_itself :: proc(t: Type, s: ^Scope) -> bool {
 	#partial switch v in t {
 	case ^Collapse:
-		return v.recursive || calls_itself(v.target)
+		return names_as_target(v.target, s) || calls_itself(v.target, s)
 	case ^Operation:
-		for a in v.args do if calls_itself(a) do return true
+		for a in v.args do if calls_itself(a, s) do return true
 	case ^Or:
-		for a in v.terms do if calls_itself(a) do return true
+		for a in v.terms do if calls_itself(a, s) do return true
 	case ^And:
-		for a in v.terms do if calls_itself(a) do return true
+		for a in v.terms do if calls_itself(a, s) do return true
 	case ^Not:
-		return calls_itself(v.term)
+		return calls_itself(v.term, s)
 	case ^Is:
-		return calls_itself(v.term)
+		return calls_itself(v.term, s)
 	case ^Range:
-		return calls_itself(v.lo) || calls_itself(v.hi)
+		return calls_itself(v.lo, s) || calls_itself(v.hi, s)
 	case ^Access:
-		return calls_itself(v.target)
+		return calls_itself(v.target, s)
 	case ^Carve:
-		if calls_itself(v.target) do return true
-		for a in v.args do if calls_itself(a.value) do return true
+		if calls_itself(v.target, s) do return true
+		for a in v.args do if calls_itself(a.value, s) do return true
 	case ^Pattern:
-		return calls_itself(v.target)
+		return calls_itself(v.target, s)
+	}
+	return false
+}
+
+// names_as_target: t, the target of a collapse as written, names s, or a carve of it.
+names_as_target :: proc(t: Type, s: ^Scope) -> bool {
+	#partial switch v in t {
+	case ^Name:
+		value, ok := v.binding.value.(^Scope)
+		return ok && value == s
+	case ^Carve:
+		return names_as_target(v.target, s)
 	}
 	return false
 }

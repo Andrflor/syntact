@@ -117,7 +117,7 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		}
 		return f, has
 	case ^Collapse:
-		if v.recursive do return base_family(k, v)
+		if stayed(v) do return base_family(k, v)
 	case ^Access:
 		// the family of the color of the field; of a field of a call, that of the field
 		// in its base cases

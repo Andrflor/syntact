@@ -217,9 +217,16 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span, site: ^Scope = nil
 // (§4.8).
 stays :: proc(k: ^Kernel, s: ^Scope, span: syn.Span, site: ^Scope) -> Type {
 	out := new(Collapse)
-	out.target, out.recursive, out.span, out.site = s, true, span, site
+	out.target, out.span, out.site = s, span, site
 	if origin(s).effectful do return call_effect(k, out)
 	return out
+}
+
+// written_within: site is in root, or in a carve of it: what is written there is
+// written in its productions, where alone it names itself (§5.6).
+written_within :: proc(site, root: ^Scope) -> bool {
+	for x := site; x != nil; x = x.parent do if origin(x) == root do return true
+	return false
 }
 
 // asked_again: a call of root written at site is asked again from a production of
@@ -237,18 +244,28 @@ asked_again :: proc(k: ^Kernel, site, root: ^Scope) -> bool {
 as_call :: proc(t: Type) -> (^Collapse, bool) {
 	#partial switch v in t {
 	case ^Collapse:
-		if v.recursive do return v, true
+		if stayed(v) do return v, true
 	case ^Unknown:
 		if v.call != nil do return v.call, true
 	}
 	return nil, false
 }
 
+// stayed: c, in normal form, is a recursive call that stays: the collapse of a scope
+// is its production, but for a call (stays); one behind a boundary is the call of a
+// symbol (§4.8).
+stayed :: proc(c: ^Collapse) -> bool {
+	s, is_scope := c.target.(^Scope)
+	if !is_scope do return false
+	_, behind := symbol_of(s)
+	return !behind
+}
+
 // solved: t holds no recursive call of the scope, nor does a scope in it.
 solved :: proc(t: Type, root: ^Scope) -> bool {
 	#partial switch v in t {
 	case ^Collapse:
-		if s, ok := v.target.(^Scope); ok && v.recursive && origin(s) == root do return false
+		if s, ok := v.target.(^Scope); ok && stayed(v) && origin(s) == root do return false
 	case ^Scope:
 		seen := make(map[^Scope]bool)
 		return !names_scope(v, root, &seen)
@@ -368,7 +385,7 @@ equation_law :: proc(k: ^Kernel, g: ^Scope, t: Type) -> Type {
 // base_cases: the products of e that do not call root, through the effects that wrap
 // them (§4.8) and every branch of its patterns: the bases of the equation.
 base_cases :: proc(e: Type, root: ^Scope, out: ^[dynamic]Type) {
-	if a, is_effect := e.(^Effect); is_effect && (a.call == nil || !a.call.recursive) {
+	if a, is_effect := e.(^Effect); is_effect && (a.call == nil || !stayed(a.call)) {
 		base_cases(a.then, root, out)
 		return
 	}

@@ -44,7 +44,7 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern, outer: Rewrite = nil) 
 	// universally quantified: the pattern is read on its production (§6), the
 	// definitions compose, its calls the hypothesis meanwhile. A call that gives a field
 	// a term is never read there: that would unfold it
-	if c, is_call := target.(^Collapse); is_call && c.recursive {
+	if c, is_call := target.(^Collapse); is_call && stayed(c) {
 		if s, is_scope := c.target.(^Scope); is_scope && at_unknowns(k, s) {
 			g := generalized(k, s)
 			if t, read := equation(k, g); read {
